@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use prometheus_client::registry::Registry;
 
-use crate::controller::metrics::ControllerMetrics;
+use crate::agent::metrics::ControllerMetrics;
 
 #[derive(Clone)]
 pub struct Metrics {

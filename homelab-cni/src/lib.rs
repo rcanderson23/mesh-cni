@@ -1,5 +1,5 @@
+pub mod agent;
 pub mod config;
-pub mod controller;
 pub mod http;
 pub mod kubernetes;
 pub mod metrics;

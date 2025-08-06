@@ -17,6 +17,14 @@ pub struct State {
     metrics: Arc<Metrics>,
 }
 
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            metrics: Arc::new(Metrics::default()),
+        }
+    }
+}
+
 impl State {
     pub fn metrics(&self) -> String {
         let mut buffer = String::new();

@@ -1,3 +1,4 @@
+# when changing image be aware of GLIB version matching in build and running images
 FROM rust:1.88-bookworm AS builder
 
 RUN apt-get update && \

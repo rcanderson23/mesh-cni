@@ -1,8 +1,9 @@
 #![no_std]
 #![no_main]
 
-use aya_ebpf::{bindings::TC_ACT_PIPE, macros::classifier, programs::TcContext};
-use aya_log_ebpf::info;
+use aya_ebpf::{macros::classifier, programs::TcContext};
+use homelab_cni_ebpf::egress::try_homelab_cni_egress;
+use homelab_cni_ebpf::ingress::try_homelab_cni_ingress;
 
 #[classifier]
 pub fn homelab_cni_ingress(ctx: TcContext) -> i32 {
@@ -12,22 +13,12 @@ pub fn homelab_cni_ingress(ctx: TcContext) -> i32 {
     }
 }
 
-fn try_homelab_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
-    info!(&ctx, "received a packet");
-    Ok(TC_ACT_PIPE)
-}
-
 #[classifier]
 pub fn homelab_cni_egress(ctx: TcContext) -> i32 {
     match try_homelab_cni_egress(ctx) {
         Ok(ret) => ret,
         Err(ret) => ret,
     }
-}
-
-fn try_homelab_cni_egress(ctx: TcContext) -> Result<i32, i32> {
-    info!(&ctx, "sending a packet");
-    Ok(TC_ACT_PIPE)
 }
 
 #[cfg(not(test))]

@@ -20,11 +20,15 @@ pub struct ControllerArgs {
     #[arg(long, default_value = "0.0.0.0:9090")]
     pub metrics_address: SocketAddr,
 
-    /// Metrics listener for agent
-    #[arg(long, default_value = "0.0.0.0:9090")]
+    /// OpenTelemetry endpoint
+    #[arg(long, default_value = "127.0.0.1:4317")]
     pub opentelemetry_address: Option<String>,
 
     /// Interface to bind bpf program to
     #[arg(long, default_value = "eth0")]
     pub iface: String,
+
+    /// Name of the node the program is running on
+    #[arg(long, env = "NODE_NAME")]
+    pub node_name: String,
 }

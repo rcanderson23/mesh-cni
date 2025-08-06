@@ -1,3 +1,4 @@
+pub mod ingress;
 pub mod metrics;
 
 use aya::Ebpf;
@@ -5,13 +6,18 @@ use aya::programs::tc::SchedClassifierLinkId;
 use aya::programs::{SchedClassifier, TcAttachType, tc};
 use tokio::signal;
 use tokio::task::JoinError;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::config::ControllerArgs;
 use crate::kubernetes::KubeState;
 use crate::{Error, Result};
 
-pub async fn start(args: ControllerArgs, _kube_state: KubeState) -> Result<()> {
+pub async fn start(
+    args: ControllerArgs,
+    _kube_state: KubeState,
+    cancel: CancellationToken,
+) -> Result<()> {
     let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("OUT_DIR"),
         "/homelab-cni"
@@ -33,10 +39,9 @@ pub async fn start(args: ControllerArgs, _kube_state: KubeState) -> Result<()> {
     let _egress_id =
         attach_tc_bpf_program(&mut ebpf, iface, "homelab_cni_egress", TcAttachType::Egress)?;
 
-    let ctrl_c = signal::ctrl_c();
-    println!("Waiting for Ctrl-C...");
-    ctrl_c.await?;
-    println!("Exiting...");
+    tokio::select! {
+        _ = cancel.cancelled() => {}
+    }
     Ok(())
 }
 
