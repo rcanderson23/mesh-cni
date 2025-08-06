@@ -1,4 +1,4 @@
-FROM rust:1.88-trixie AS builder
+FROM rust:1.88-bookworm AS builder
 
 RUN apt-get update && \
   apt-get -y install ca-certificates \
@@ -11,7 +11,11 @@ RUN rustup install stable && \
 WORKDIR /app
 
 COPY Cargo.toml Cargo.toml
-COPY . .
+COPY Cargo.lock Cargo.lock
+COPY homelab-cni homelab-cni
+COPY homelab-cni-common homelab-cni-common
+COPY homelab-cni-ebpf homelab-cni-ebpf
+COPY justfile justfile
 
 RUN just build
 
