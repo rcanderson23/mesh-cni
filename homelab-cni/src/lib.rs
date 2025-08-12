@@ -33,6 +33,18 @@ pub enum Error {
 
     #[error("kube error: {0}")]
     KubeError(#[from] kube::Error),
+
+    #[error("addr parse error: {0}")]
+    AddrParseError(#[from] std::net::AddrParseError),
+
+    #[error("kube stream failed")]
+    KubeStreamFailed,
+
+    #[error("unable to send event due to channel error")]
+    ChannelError,
+
+    #[error("map error: {0}")]
+    MapError(#[from] aya::maps::MapError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

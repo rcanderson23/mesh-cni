@@ -2,6 +2,8 @@ use std::net::SocketAddr;
 
 use clap::{Parser, Subcommand};
 
+use crate::kubernetes::ClusterId;
+
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
@@ -31,4 +33,8 @@ pub struct ControllerArgs {
     /// Name of the node the program is running on
     #[arg(long, env = "NODE_NAME")]
     pub node_name: String,
+
+    /// Unique ID for the cluster among the clustermesh
+    #[arg(long, env = "CLUSTER_ID")]
+    pub cluster_id: ClusterId,
 }

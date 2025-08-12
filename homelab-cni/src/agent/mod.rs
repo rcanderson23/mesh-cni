@@ -1,23 +1,26 @@
-pub mod ingress;
+pub mod ip;
 pub mod metrics;
 
+use core::net::IpAddr;
+
 use aya::Ebpf;
+use aya::maps::HashMap;
 use aya::programs::tc::SchedClassifierLinkId;
 use aya::programs::{SchedClassifier, TcAttachType, tc};
-use tokio::signal;
+use homelab_cni_common::{Ip, IpStateId};
 use tokio::task::JoinError;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+use crate::agent::ip::IpState;
 use crate::config::ControllerArgs;
-use crate::kubernetes::KubeState;
+use crate::kubernetes::NamespacePodState;
 use crate::{Error, Result};
 
-pub async fn start(
-    args: ControllerArgs,
-    _kube_state: KubeState,
-    cancel: CancellationToken,
-) -> Result<()> {
+// TODO: make this configurable?
+const POD_IDENTITY_CAPACITY: usize = 1000;
+
+pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()> {
     let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("OUT_DIR"),
         "/homelab-cni"
@@ -39,8 +42,22 @@ pub async fn start(
     let _egress_id =
         attach_tc_bpf_program(&mut ebpf, iface, "homelab_cni_egress", TcAttachType::Egress)?;
 
+    let (pod_id_tx, pod_id_rx) = tokio::sync::mpsc::channel(POD_IDENTITY_CAPACITY);
+
+    // TODO: configure this dynamically for all clusters configured in mesh
+    let kube_client = kube::Client::try_default().await?;
+    let ns_pod_state = NamespacePodState::try_new(kube_client, args.cluster_id, pod_id_tx).await?;
+    let ns_pod_handle = ns_pod_state.start();
+
+    let mut ip_to_id: HashMap<_, Ip, IpStateId> =
+        HashMap::try_from(ebpf.map_mut("IP_IDENTITY").unwrap()).unwrap();
+    let mut ip_state = IpState::new(pod_id_rx, ip_to_id);
+    let ip_handle = ip_state.start();
+
     tokio::select! {
-        _ = cancel.cancelled() => {}
+        _ = cancel.cancelled() => {},
+        _ = ip_handle => {},
+        _ = ns_pod_handle => {},
     }
     Ok(())
 }
@@ -68,29 +85,5 @@ fn _exit(task: &str, out: Result<Result<()>, JoinError>) {
             error!("{task} failed with error: {e}")
         }
         _ => {}
-    }
-}
-
-async fn _shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    tokio::select! {
-        _ = ctrl_c => {
-          info!("captured ctrl_c signal");
-        },
-        _ = terminate => {
-          info!("captured SIGTERM signal");
-        },
     }
 }

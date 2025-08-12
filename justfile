@@ -15,20 +15,18 @@ build:
   cargo build --release
 
 kind-up:
-  #!/usr/bin/which bash
-  kind get clusters --name={{name}} | grep {{name}}
-  status=$?
-  if [ $status -ne 0];
-  then
-    kind create cluster --name={{name}} --config={{kind_path}}
-  fi
-    
+  -kind create cluster --name={{name}} --config={{kind_path}}
 
 kind-down:
   kind delete cluster --name={{name}}
 
-run-local: container kind-up load-image
+install: 
   helm upgrade --install {{name}} ./charts/homelab-cni -n kube-system --set=agent.image.tag=latest
+
+restart:
+  kubectl rollout restart daemonset -n kube-system {{name}}-agent
 
 load-image:
     kind load docker-image {{container_image}}:latest --name={{name}}
+
+run-local: container kind-up load-image install restart

@@ -8,11 +8,13 @@ license.workspace = true
 [dependencies]
 homelab-cni-common = { path = "../homelab-cni-common", features = ["user"] }
 
+async-stream = { workspace = true }
 axum = { workspace = true }
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
 aya-log = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
+dashmap = { workspace = true }
 futures = { workspace = true }
 libc = { workspace = true }
 k8s-openapi = { workspace = true }

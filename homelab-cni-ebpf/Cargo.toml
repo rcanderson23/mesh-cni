@@ -8,6 +8,7 @@ homelab-cni-common = { path = "../homelab-cni-common" }
 
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
+network-types = { workspace = true }
 
 [build-dependencies]
 which = { workspace = true }
