@@ -1,4 +1,4 @@
-name := "homelab-cni"
+name := "mesh-cni"
 container_image := "ghcr.io/rcanderson23/" + name
 kind_path := "./kind/multi-node.yaml"
 
@@ -21,7 +21,7 @@ kind-down:
   kind delete cluster --name={{name}}
 
 install: 
-  helm upgrade --install {{name}} ./charts/homelab-cni -n kube-system --set=agent.image.tag=latest
+  helm upgrade --install {{name}} ./charts/mesh-cni -n kube-system --set=agent.image.tag=latest
 
 restart:
   kubectl rollout restart daemonset -n kube-system {{name}}-agent

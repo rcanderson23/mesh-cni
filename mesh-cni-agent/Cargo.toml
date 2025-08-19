@@ -1,0 +1,65 @@
+[package]
+name = "mesh-cni-agent"
+version = "0.1.0"
+edition.workspace = true
+
+license.workspace = true
+
+[dependencies]
+mesh-cni-common = { path = "../mesh-cni-common", features = ["user"] }
+mesh-cni= { path = "../mesh-cni"}
+
+async-stream = { workspace = true }
+axum = { workspace = true }
+anyhow = { workspace = true, default-features = true }
+aya = { workspace = true }
+aya-log = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+dashmap = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true}
+prometheus-client = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+tokio = { workspace = true, features = [
+    "macros",
+    "rt",
+    "rt-multi-thread",
+    "net",
+    "signal",
+] }
+tokio-util = { workspace = true }
+tokio-rustls = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
+aya-build = { workspace = true }
+# TODO(https://github.com/rust-lang/cargo/issues/12375): this should be an artifact dependency, but
+# it's not possible to tell cargo to use `-Z build-std` to build it. We cargo-in-cargo in the build
+# script to build this, but we want to teach cargo about the dependecy so that cache invalidation
+# works properly.
+#
+# Note also that https://github.com/rust-lang/cargo/issues/10593 occurs when `target = ...` is added
+# to an artifact dependency; it seems possible to work around that by setting `resolver = "1"` in
+# Cargo.toml in the workspace root.
+#
+# Finally note that *any* usage of `artifact = ...` in *any* Cargo.toml in the workspace breaks
+# workflows with stable cargo; stable cargo outright refuses to load manifests that use unstable
+# features.
+mesh-cni-ebpf = { path = "../mesh-cni-ebpf" }
+
+[[bin]]
+name = "mesh-cni-agent"
+path = "src/main.rs"
+
+[lib]
+name = "mesh_cni_agent"
+path = "src/lib.rs"

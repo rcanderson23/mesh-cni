@@ -1,11 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "homelab-cni",
-    "homelab-cni-common",
-    "homelab-cni-ebpf",
+    "mesh-cni",
+    "mesh-cni-agent",
+    "mesh-cni-common",
+    "mesh-cni-ebpf",
 ]
-default-members = ["homelab-cni", "homelab-cni-common"]
+default-members = ["mesh-cni", "mesh-cni-agent", "mesh-cni-common"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
@@ -24,6 +25,7 @@ anyhow = { version = "1", default-features = false }
 clap = { version = "4.5", features = ["derive", "env"] }
 dashmap = { version = "6.1"}
 futures = { version = "0.3" }
+ipnetwork = { version = "0.21" }
 libc = { version = "0.2.159", default-features = false }
 k8s-openapi = { version = "0.25", features = ["v1_32"] }
 kube = { version = "1.1", default-features = false, features = [
@@ -39,15 +41,19 @@ prometheus-client = { version = "0.23.1" }
 opentelemetry = { version = "0.30", features = ["trace"] }
 opentelemetry-otlp = { version = "0.30" }
 opentelemetry_sdk = { version = "0.30", features = ["rt-tokio"] }
+semver = { version = "1" }
+serde = { version = "1.0.219", features = ["derive"]}
+serde_json = { version = "1" }
 tokio = { version = "1.47", default-features = false }
 tokio-util = { version = "0.7"}
 tokio-rustls = { version = "0.26" }
 thiserror = { version = "2" }
 tracing = "0.1"
 tracing-opentelemetry = "0.31"
+tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 which = { version = "8.0.0"}
 
-[profile.release.package.homelab-cni-ebpf]
+[profile.release.package.mesh-cni-ebpf]
 debug = 2
 codegen-units = 1

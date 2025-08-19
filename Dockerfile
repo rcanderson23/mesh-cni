@@ -13,9 +13,10 @@ WORKDIR /app
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
-COPY homelab-cni homelab-cni
-COPY homelab-cni-common homelab-cni-common
-COPY homelab-cni-ebpf homelab-cni-ebpf
+COPY mesh-cni mesh-cni
+COPY mesh-cni-agent mesh-cni-agent
+COPY mesh-cni-common mesh-cni-common
+COPY mesh-cni-ebpf mesh-cni-ebpf
 COPY justfile justfile
 
 RUN just build
@@ -24,7 +25,7 @@ FROM gcr.io/distroless/cc-debian12
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/homelab-cni /app/homelab-cni
+COPY --from=builder /app/target/release/mesh-cni /app/target/release/mesh-cni-agent /app/
 
-ENTRYPOINT [ "/app/homelab-cni" ]
+ENTRYPOINT [ "/app/mesh-cni-agent" ]
 

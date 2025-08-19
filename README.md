@@ -1,4 +1,4 @@
-# homelab-cni
+# mesh-cni
 
 ## Prerequisites
 
@@ -25,16 +25,16 @@ program.
 Cross compilation should work on both Intel and Apple Silicon Macs.
 
 ```shell
-CC=${ARCH}-linux-musl-gcc cargo build --package homelab-cni --release \
+CC=${ARCH}-linux-musl-gcc cargo build --package mesh-cni --release \
   --target=${ARCH}-unknown-linux-musl \
   --config=target.${ARCH}-unknown-linux-musl.linker=\"${ARCH}-linux-musl-gcc\"
 ```
-The cross-compiled program `target/${ARCH}-unknown-linux-musl/release/homelab-cni` can be
+The cross-compiled program `target/${ARCH}-unknown-linux-musl/release/mesh-cni` can be
 copied to a Linux server or VM and run there.
 
 ## License
 
-With the exception of eBPF code, homelab-cni is distributed under the terms
+With the exception of eBPF code, mesh-cni is distributed under the terms
 of either the [MIT license] or the [Apache License] (version 2.0), at your
 option.
 
