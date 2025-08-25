@@ -3,11 +3,12 @@ resolver = "2"
 members = [
     "mesh-cni-api",
     "mesh-cni-agent",
+    "mesh-cni-cli",
     "mesh-cni-common",
     "mesh-cni-ebpf",
     "mesh-cni-plugin",
 ]
-default-members = ["mesh-cni-plugin", "mesh-cni-agent", "mesh-cni-common", "mesh-cni-api"]
+default-members = ["mesh-cni-plugin", "mesh-cni-agent", "mesh-cni-common", "mesh-cni-api", "mesh-cni-cli"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
@@ -51,7 +52,8 @@ opentelemetry_sdk = { version = "0.30", features = ["rt-tokio"] }
 semver = { version = "1" }
 serde = { version = "1.0.219", features = ["derive"]}
 serde_json = { version = "1" }
-tokio = { version = "1.47", default-features = false }
+tabled = { version = "0.20.0" }
+tokio = { version = "1.47", features = ["full"] }
 tokio-util = { version = "0.7"}
 tokio-rustls = { version = "0.26" }
 tokio-stream = { version = "0.1.17" }

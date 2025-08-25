@@ -7,7 +7,6 @@ use mesh_cni_api::ip::v1::{IpId, ListIpsReply, ListIpsRequest};
 use mesh_cni_common::{Ip, IpStateId};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Receiver;
-use tokio::task::JoinHandle;
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
@@ -24,7 +23,6 @@ pub struct IpState {
     // TODO: this only works for ipv4
     ip_to_id: HashMap<MapData, Ip, IpStateId>,
     id: IpStateId,
-    // rx: Receiver<PodIdentityEvent>,
 }
 
 impl IpState {
@@ -139,6 +137,7 @@ impl IpApi for IpServ {
             .iter()
             .map(|k| IpId {
                 ip: k.key().to_string(),
+                labels: k.0.to_hashmap(),
                 id: k.1,
             })
             .collect();

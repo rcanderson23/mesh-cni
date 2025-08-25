@@ -14,7 +14,7 @@ message ListIpsRequest {}
 
 message IpId {
   string ip = 1;
-  // map<string, string> labels = 2;
+  map<string, string> labels = 2;
   uint32 id = 3;
 }
 

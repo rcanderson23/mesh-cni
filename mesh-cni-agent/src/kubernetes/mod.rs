@@ -6,7 +6,7 @@ use k8s_openapi::serde::de::DeserializeOwned;
 use kube::runtime::reflector::ReflectHandle;
 use kube::runtime::{WatchStreamExt, reflector, watcher};
 use kube::{Api, Resource};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::net::IpAddr;
@@ -29,11 +29,29 @@ pub struct PodIdentity {
     pub cluster_id: ClusterId,
 }
 
+// TODO: does this actually need seperateion between types of labels or should
+// there be some prefixing to denote the label origin?
 #[derive(Eq, Hash, PartialEq, Clone)]
 pub struct Labels {
     pub namespace_labels: BTreeMap<String, String>,
     pub pod_labels: BTreeMap<String, String>,
     pub mesh_labels: BTreeMap<&'static str, String>,
+}
+
+impl Labels {
+    pub fn to_hashmap(&self) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        for (k, v) in self.namespace_labels.iter() {
+            map.insert(k.to_owned(), v.to_owned());
+        }
+        for (k, v) in self.pod_labels.iter() {
+            map.insert(k.to_owned(), v.to_owned());
+        }
+        for (k, v) in self.mesh_labels.iter() {
+            map.insert(k.to_string(), v.to_owned());
+        }
+        map
+    }
 }
 
 fn selector_matches(
