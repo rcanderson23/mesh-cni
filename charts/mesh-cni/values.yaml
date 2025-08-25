@@ -34,6 +34,8 @@ agent:
   cniConfDir: /host/etc/cni/net.d
 
   cniPluginLogDir: /host/var/log/mesh-cni
+
+  socketPath: /var/run/mesh/mesh.sock
   
   # This is for setting Kubernetes Annotations to a Pod.
   # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/

@@ -3,8 +3,10 @@ FROM rust:1.88-bookworm AS builder
 
 RUN apt-get update && \
   apt-get -y install ca-certificates \
+  protobuf-compiler \
   llvm && \
   update-ca-certificates
+
 RUN rustup install stable && \
   rustup toolchain install nightly --component rust-src && \
   cargo install just --locked && \
@@ -13,7 +15,8 @@ WORKDIR /app
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
-COPY mesh-cni mesh-cni
+COPY mesh-cni-plugin mesh-cni-plugin
+COPY mesh-cni-api mesh-cni-api
 COPY mesh-cni-agent mesh-cni-agent
 COPY mesh-cni-common mesh-cni-common
 COPY mesh-cni-ebpf mesh-cni-ebpf

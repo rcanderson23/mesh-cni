@@ -1,14 +1,13 @@
 use aya_ebpf::cty::c_long;
-use aya_ebpf::programs::SkBuffContext;
 use aya_ebpf::{bindings::TC_ACT_PIPE, programs::TcContext};
 use aya_log_ebpf::{error, info};
 use network_types::eth::{EthHdr, EtherType};
 use network_types::ip::Ipv4Hdr;
 use network_types::tcp::TcpHdr;
 
-use crate::{IP_IDENTITY, ip_id};
+use crate::ip_id;
 
-static SYN_BIT: usize = 31;
+// static SYN_BIT: usize = 31;
 
 #[inline]
 pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
@@ -30,9 +29,12 @@ pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
 
     // requests on the same node do not got through eth0 so we need to attach elsewhere
     // likely the cgroup path so we will need to determine those based on the pods present
-    info!(&ctx, "getting tcphdr");
+    info!(&ctx, "checking tcphdr");
     let tcphdr: Result<TcpHdr, c_long> = match ipv4hdr.proto {
-        network_types::ip::IpProto::Tcp => ctx.load(EthHdr::LEN + Ipv4Hdr::LEN),
+        network_types::ip::IpProto::Tcp => {
+            info!(&ctx, "found tcp proto");
+            ctx.load(EthHdr::LEN + Ipv4Hdr::LEN)
+        }
         network_types::ip::IpProto::Ipv4 => {
             info!(&ctx, "found ipv4 proto");
             return Ok(TC_ACT_PIPE);

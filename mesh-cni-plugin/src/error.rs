@@ -42,6 +42,12 @@ pub enum Error {
 
     #[error("cni must be chained after interfaces are created")]
     MissingInterfaces,
+
+    #[error("{0}")]
+    Tonic(#[from] tonic::Status),
+
+    #[error("{0}")]
+    TonicTransport(#[from] tonic::transport::Error),
 }
 
 impl Error {
@@ -117,6 +123,18 @@ impl Error {
                 cni_version,
                 code: 103,
                 msg: "No Interfaces".into(),
+                details: self.to_string(),
+            },
+            Error::Tonic(_) => CniErrorResponse {
+                cni_version,
+                code: 104,
+                msg: "Tonic".into(),
+                details: self.to_string(),
+            },
+            Error::TonicTransport(_) => CniErrorResponse {
+                cni_version,
+                code: 105,
+                msg: "Tonic Transport".into(),
                 details: self.to_string(),
             },
         };

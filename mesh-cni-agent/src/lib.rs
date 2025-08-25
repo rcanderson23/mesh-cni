@@ -6,6 +6,7 @@ pub mod kubernetes;
 pub mod metrics;
 
 use aya::EbpfError;
+use aya::pin::PinError;
 use aya::programs::ProgramError;
 use thiserror::Error;
 
@@ -49,6 +50,25 @@ pub enum Error {
 
     #[error(transparent)]
     JsonConversion(#[from] serde_json::Error),
+
+    // TODO: improve error
+    #[error("network namespace provided is invalid: {0}")]
+    InvalidSandbox(String),
+
+    #[error("network namespace provided is invalid")]
+    NetNs(#[from] netns_rs::Error),
+
+    #[error("{0}")]
+    Other(String),
+
+    #[error("map {name} not found")]
+    MapNotFound { name: String },
+
+    #[error("{0}")]
+    TonicTransport(#[from] tonic::transport::Error),
+
+    #[error("failed to pin program: {0}")]
+    PinError(#[from] PinError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

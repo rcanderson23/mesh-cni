@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package grpc.ip.v1;
+
+service Ip {
+    rpc ListIps(ListIpsRequest) returns (ListIpsReply) {}
+}
+
+message ListIpsReply {
+  repeated IpId ips = 1;
+}
+
+message ListIpsRequest {}
+
+message IpId {
+  string ip = 1;
+  // map<string, string> labels = 2;
+  uint32 id = 3;
+}
+

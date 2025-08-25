@@ -19,11 +19,11 @@ pub struct Args {
 
     /// Container ID
     #[arg(long, env = "CNI_CONTAINERID")]
-    pub containerid: String,
+    pub container_id: String,
 
     /// Path to the network namespace
     #[arg(long, env = "CNI_NETNS")]
-    pub netns: Option<PathBuf>,
+    pub net_ns: Option<PathBuf>,
 
     /// Extra arguments
     #[arg(long, env = "CNI_IFNAME")]

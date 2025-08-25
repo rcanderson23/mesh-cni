@@ -1,17 +1,23 @@
+pub mod bpf;
 pub mod ip;
 pub mod metrics;
 
-use aya::Ebpf;
-use aya::maps::HashMap;
-use aya::programs::tc::SchedClassifierLinkId;
-use aya::programs::{SchedClassifier, TcAttachType, tc};
-use mesh_cni_common::{Ip, IpStateId};
-use tokio::task::JoinError;
-use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use std::fs;
+use std::io::ErrorKind;
+use std::path::PathBuf;
 
-use crate::agent::ip::IpState;
+use mesh_cni_api::bpf::v1::bpf_server::BpfServer;
+use mesh_cni_api::ip::v1::ip_server::IpServer;
+use tokio::net::UnixListener;
+use tokio_stream::wrappers::UnixListenerStream;
+use tokio_util::sync::CancellationToken;
+use tonic::service::{Routes, RoutesBuilder};
+use tonic::transport::Server;
+use tracing::{error, info};
+
+use crate::agent::ip::IpServ;
 use crate::config::ControllerArgs;
+use crate::http::shutdown;
 use crate::kubernetes::pod::NamespacePodState;
 use crate::{Error, Result};
 
@@ -19,23 +25,6 @@ use crate::{Error, Result};
 const POD_IDENTITY_CAPACITY: usize = 1000;
 
 pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()> {
-    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("OUT_DIR"),
-        "/mesh-cni"
-    )))?;
-    if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
-        // This can happen if you remove all log statements from your eBPF program.
-        warn!("failed to initialize eBPF logger: {e}");
-    }
-    let iface = &args.iface;
-    // error adding clsact to the interface if it is already added is harmless
-    // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
-    let _ = tc::qdisc_add_clsact(iface);
-    let _ingress_id =
-        attach_tc_bpf_program(&mut ebpf, iface, "mesh_cni_ingress", TcAttachType::Ingress)?;
-    let _egress_id =
-        attach_tc_bpf_program(&mut ebpf, iface, "mesh_cni_egress", TcAttachType::Egress)?;
-
     let (pod_id_tx, pod_id_rx) = tokio::sync::mpsc::channel(POD_IDENTITY_CAPACITY);
 
     // TODO: configure this dynamically for all clusters configured in mesh
@@ -43,41 +32,67 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
     let ns_pod_state = NamespacePodState::try_new(kube_client, args.cluster_id, pod_id_tx).await?;
     let ns_pod_handle = ns_pod_state.start();
 
-    let ip_to_id: HashMap<_, Ip, IpStateId> =
-        HashMap::try_from(ebpf.map_mut("IP_IDENTITY").unwrap()).unwrap();
-    let mut ip_state = IpState::new(pod_id_rx, ip_to_id);
-    let ip_handle = ip_state.start();
+    let bpf = bpf::State::try_new()?;
 
+    // TODO: bpf maps should be pinned and loaded from pinned location
+    let ip_id = bpf
+        .take_map("IP_IDENTITY")
+        .await
+        .ok_or_else(|| Error::MapNotFound {
+            name: "IP_IDENTITY".into(),
+        })?
+        .try_into()?;
+
+    let ipserv = IpServ::from(ip_id, pod_id_rx).await;
+    // TODO: consolidate all state routers for single listener
+    let bpf_server = BpfServer::new(bpf);
+    let ip_server = IpServer::new(ipserv);
+
+    let mut routes = RoutesBuilder::default();
+    let routes = routes.add_service(bpf_server).add_service(ip_server);
+    let routes = routes.to_owned().routes();
+    let server_handle = serve(args.agent_socket_path, routes, cancel.child_token());
     tokio::select! {
         _ = cancel.cancelled() => {},
-        _ = ip_handle => {},
-        _ = ns_pod_handle => {},
+        h = server_handle => exit("bpf", h),
+        h = ns_pod_handle => exit("ns", h),
     }
     Ok(())
 }
 
-fn attach_tc_bpf_program(
-    ebpf: &mut Ebpf,
-    iface: &str,
-    name: &str,
-    attach_type: TcAttachType,
-) -> Result<SchedClassifierLinkId> {
-    let program: &mut SchedClassifier = ebpf
-        .program_mut(name)
-        .ok_or_else(|| Error::EbpfError(format!("failed to load program {name}")))?
-        .try_into()?;
-    program.load()?;
-    Ok(program.attach(iface, attach_type)?)
-}
-
-fn _exit(task: &str, out: Result<Result<()>, JoinError>) {
+fn exit(task: &str, out: Result<()>) {
     match out {
-        Ok(Ok(_)) => {
+        Ok(_) => {
             info!("{task} exited")
         }
-        Ok(Err(e)) => {
+        Err(e) => {
             error!("{task} failed with error: {e}")
         }
-        _ => {}
     }
+}
+
+pub(crate) async fn serve(path: PathBuf, routes: Routes, cancel: CancellationToken) -> Result<()> {
+    if let Err(e) = fs::remove_file(&path)
+        && e.kind() != ErrorKind::NotFound
+    {
+        return Err(e.into());
+    }
+    let Some(parent) = path.parent() else {
+        return Err(std::io::Error::new(
+            ErrorKind::NotFound,
+            format!("parent of path {} could not resolve", path.display()),
+        )
+        .into());
+    };
+    fs::create_dir_all(parent)?;
+    let listener = UnixListener::bind(&path)?;
+
+    let stream = UnixListenerStream::new(listener);
+
+    Server::builder()
+        .add_routes(routes)
+        .serve_with_incoming_shutdown(stream, shutdown(cancel))
+        .await?;
+
+    Ok(())
 }

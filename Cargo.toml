@@ -1,12 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "mesh-cni",
+    "mesh-cni-api",
     "mesh-cni-agent",
     "mesh-cni-common",
     "mesh-cni-ebpf",
+    "mesh-cni-plugin",
 ]
-default-members = ["mesh-cni", "mesh-cni-agent", "mesh-cni-common"]
+default-members = ["mesh-cni-plugin", "mesh-cni-agent", "mesh-cni-common", "mesh-cni-api"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
@@ -14,7 +15,6 @@ edition = "2024"
 
 [workspace.dependencies]
 async-stream = "0.3.6"
-axum = {version = "0.8", features = ["tokio"]}
 aya = { version = "0.13.1", default-features = false }
 aya-build = { version = "0.1.2", default-features = false }
 aya-ebpf = { version = "0.1.1", default-features = false }
@@ -22,9 +22,15 @@ aya-log = { version = "0.2.1", default-features = false }
 aya-log-ebpf = { version = "0.1.1", default-features = false }
 
 anyhow = { version = "1", default-features = false }
+axum = { version = "0.8.4", features = ["tokio"]}
 clap = { version = "4.5", features = ["derive", "env"] }
 dashmap = { version = "6.1"}
 futures = { version = "0.3" }
+http-body-util = { version = "0.1.3" }
+http = { version = "1.3.1"}
+hyper = { version = "1.7.0" }
+hyperlocal = { version = "0.9.1" }
+hyper-util = { version = "0.1.16", features = ["client-legacy"]}
 ipnetwork = { version = "0.21" }
 libc = { version = "0.2.159", default-features = false }
 k8s-openapi = { version = "0.25", features = ["v1_32"] }
@@ -36,6 +42,7 @@ kube = { version = "1.1", default-features = false, features = [
   "derive",
   "unstable-runtime"
 ] }
+netns-rs = "0.1.0"
 network-types = { version = "0.0.8" }
 prometheus-client = { version = "0.23.1" }
 opentelemetry = { version = "0.30", features = ["trace"] }
@@ -47,11 +54,18 @@ serde_json = { version = "1" }
 tokio = { version = "1.47", default-features = false }
 tokio-util = { version = "0.7"}
 tokio-rustls = { version = "0.26" }
+tokio-stream = { version = "0.1.17" }
+tower = { version = "0.5.2"}
+prost = { version = "0.14.1"}
+tonic = { version = "0.14.1" }
+tonic-prost = { version = "0.14.1" }
+tonic-prost-build = { version = "0.14.1" }
 thiserror = { version = "2" }
 tracing = "0.1"
 tracing-opentelemetry = "0.31"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+walkdir = { version = "2.5.0" }
 which = { version = "8.0.0"}
 
 [profile.release.package.mesh-cni-ebpf]
