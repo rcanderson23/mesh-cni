@@ -24,6 +24,7 @@ libc = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true}
 netns-rs = { workspace = true }
+network-types = { workspace = true }
 prometheus-client = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }

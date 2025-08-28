@@ -1782,6 +1782,7 @@ dependencies = [
  "mesh-cni-common",
  "mesh-cni-plugin",
  "netns-rs",
+ "network-types",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -1835,6 +1836,7 @@ name = "mesh-cni-common"
 version = "0.1.0"
 dependencies = [
  "aya",
+ "network-types",
 ]
 
 [[package]]

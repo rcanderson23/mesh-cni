@@ -1,38 +1,34 @@
 use std::collections::BTreeMap;
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::thread;
 use std::thread::JoinHandle;
-use std::{fs, thread};
 
 use aya::Ebpf;
 use aya::maps::Map;
 use aya::programs::tc::{self, SchedClassifierLinkId};
 use aya::programs::{SchedClassifier, TcAttachType};
 use mesh_cni_api::bpf::v1::{AddContainerReply, AddContainerRequest};
-use tokio::net::UnixListener;
 use tokio::sync::Mutex;
-use tokio_stream::wrappers::UnixListenerStream;
-use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
-use crate::http::shutdown;
 use crate::{Error, Result};
 
-use mesh_cni_api::bpf::v1::bpf_server::{Bpf as BpfApi, BpfServer};
+use mesh_cni_api::bpf::v1::bpf_server::Bpf as BpfApi;
 
 const NET_NS_DIR: &str = "/var/run/mesh/netns";
-const BPF_FS_DIR: &str = "/sys/fs/bpf";
 const INGRESS_TC_NAME: &str = "mesh_cni_ingress";
 const EGRESS_TC_NAME: &str = "mesh_cni_egress";
+
+type IfaceStore =
+    Arc<Mutex<BTreeMap<(String, String), (SchedClassifierLinkId, SchedClassifierLinkId)>>>;
 
 #[derive(Clone)]
 pub(crate) struct State {
     ebpf: Arc<Mutex<Ebpf>>,
     // TODO: consider remvoing as these are likely unneeded
-    ifaces: Arc<Mutex<BTreeMap<(String, String), (SchedClassifierLinkId, SchedClassifierLinkId)>>>,
+    ifaces: IfaceStore,
 }
 
 impl State {
@@ -44,7 +40,7 @@ impl State {
         if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
             warn!(%e, "failed to init ebpf logger");
         }
-        let mut ifaces = BTreeMap::default();
+        let ifaces = BTreeMap::default();
         // info!("adding root netns eth0 tc");
         // let iface = "eth0";
         // let _ = tc::qdisc_add_clsact(iface);

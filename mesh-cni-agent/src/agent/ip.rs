@@ -21,6 +21,7 @@ pub struct IpState {
     pub labels_to_id: DashMap<Labels, IpStateId>,
     pub ip_to_labels_id: DashMap<IpAddr, (Labels, IpStateId)>,
     // TODO: this only works for ipv4
+    // TODO: expose this so we can get the actual bpf state via the socket
     ip_to_id: HashMap<MapData, Ip, IpStateId>,
     id: IpStateId,
 }
