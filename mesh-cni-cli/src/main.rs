@@ -1,6 +1,7 @@
 mod cli;
 mod client;
 mod ip;
+mod service;
 
 use crate::cli::Cli;
 use clap::Parser;
@@ -11,6 +12,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         crate::cli::Commands::Ip(ip_commands) => ip::run(ip_commands).await?,
+        crate::cli::Commands::Service(service_commands) => service::run(service_commands).await?,
     };
     Ok(())
 }

@@ -16,7 +16,7 @@ use crate::{Error, Result};
 
 const LABEL_MESH_CLUSTER_ID: &str = "mesh.dev/cluster-id";
 
-pub type ClusterId = u32;
+pub type ClusterId = u16;
 
 pub enum PodIdentityEvent {
     Add(PodIdentity),

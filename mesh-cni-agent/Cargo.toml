@@ -10,6 +10,7 @@ mesh-cni-common = { path = "../mesh-cni-common", features = ["user"] }
 mesh-cni-plugin = { path = "../mesh-cni-plugin"}
 mesh-cni-api = { path = "../mesh-cni-api"}
 
+ahash = { workspace = true }
 async-stream = { workspace = true }
 axum = { version = "0.8.4", features = ["tokio"]}
 aya = { workspace = true }

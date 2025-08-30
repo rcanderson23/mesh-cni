@@ -69,6 +69,9 @@ pub enum Error {
 
     #[error("failed to pin program: {0}")]
     PinError(#[from] PinError),
+
+    #[error("task failed: {0}")]
+    Task(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

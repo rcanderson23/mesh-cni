@@ -25,3 +25,27 @@ impl Tabled for crate::ip::v1::IpId {
         ]
     }
 }
+
+impl Tabled for crate::service::v1::ServiceWithEndpoints {
+    const LENGTH: usize = 3;
+
+    fn fields(&self) -> Vec<std::borrow::Cow<'_, str>> {
+        let mut endpoints = String::new();
+        for ep in &self.endpoints {
+            endpoints.push_str(&format!("{}\n", ep));
+        }
+        vec![
+            Cow::Borrowed(&self.service_endpoint),
+            Cow::Borrowed(&self.protocol),
+            Cow::Owned(endpoints),
+        ]
+    }
+
+    fn headers() -> Vec<std::borrow::Cow<'static, str>> {
+        vec![
+            Cow::Borrowed("SERVICE_ENDPOINT"),
+            Cow::Borrowed("PROTOCOL"),
+            Cow::Borrowed("BACKEND_ENDPOINTS"),
+        ]
+    }
+}

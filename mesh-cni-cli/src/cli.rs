@@ -12,10 +12,20 @@ pub enum Commands {
     /// Used to interact with the IP subsystem
     #[command(subcommand)]
     Ip(IpCommands),
+
+    /// Used to interact with the Service subsystem
+    #[command(subcommand)]
+    Service(ServiceCommands),
 }
 
 #[derive(Clone, Subcommand, Debug)]
 pub enum IpCommands {
     /// List the IPs and their associated IDs
+    List,
+}
+
+#[derive(Clone, Subcommand, Debug)]
+pub enum ServiceCommands {
+    /// List the Service and their associated IDs
     List,
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use aya::maps::{HashMap, MapData};
 use dashmap::DashMap;
 use mesh_cni_api::ip::v1::{IpId, ListIpsReply, ListIpsRequest};
-use mesh_cni_common::{Ip, IpStateId};
+use mesh_cni_common::{Id, Ip};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Receiver;
 use tonic::{Request, Response, Status};
@@ -15,22 +15,23 @@ use crate::kubernetes::{Labels, PodIdentityEvent};
 
 use mesh_cni_api::ip::v1::ip_server::Ip as IpApi;
 
-const STARTING_CLUSTER_POD_CAPACITY: usize = 1000;
+const STARTING_CLUSTER_IP_CAPACITY: usize = 1000;
 
+// replace map with https://docs.ebpf.io/linux/map-type/BPF_MAP_TYPE_LPM_TRIE/
 pub struct IpState {
-    pub labels_to_id: DashMap<Labels, IpStateId>,
-    pub ip_to_labels_id: DashMap<IpAddr, (Labels, IpStateId)>,
+    pub ip_to_labels_id: DashMap<IpAddr, (Labels, Id)>,
+    pub labels_to_id: DashMap<Labels, Id>,
     // TODO: this only works for ipv4
     // TODO: expose this so we can get the actual bpf state via the socket
-    ip_to_id: HashMap<MapData, Ip, IpStateId>,
-    id: IpStateId,
+    ip_to_id: HashMap<MapData, Ip, Id>,
+    id: Id,
 }
 
 impl IpState {
-    fn new(ip_to_id: HashMap<MapData, Ip, IpStateId>) -> Self {
+    fn new(ip_to_id: HashMap<MapData, Ip, Id>) -> Self {
         Self {
-            labels_to_id: DashMap::with_capacity(STARTING_CLUSTER_POD_CAPACITY),
-            ip_to_labels_id: DashMap::with_capacity(STARTING_CLUSTER_POD_CAPACITY),
+            labels_to_id: DashMap::with_capacity(STARTING_CLUSTER_IP_CAPACITY),
+            ip_to_labels_id: DashMap::with_capacity(STARTING_CLUSTER_IP_CAPACITY),
             // id less than 128 are reserved for cluster specific items
             id: 128,
             ip_to_id,
@@ -69,7 +70,7 @@ impl IpState {
         Ok(())
     }
 
-    pub fn get_id_from_labels(&self, labels: &Labels) -> Option<IpStateId> {
+    pub fn get_id_from_labels(&self, labels: &Labels) -> Option<Id> {
         self.labels_to_id.get(labels).map(|id| *id)
     }
 }
@@ -80,10 +81,7 @@ pub struct IpServ {
 }
 
 impl IpServ {
-    pub async fn from(
-        ip_to_id: HashMap<MapData, Ip, IpStateId>,
-        rx: Receiver<PodIdentityEvent>,
-    ) -> Self {
+    pub async fn from(ip_to_id: HashMap<MapData, Ip, Id>, rx: Receiver<PodIdentityEvent>) -> Self {
         let state = IpState::new(ip_to_id);
         let state = Arc::new(Mutex::new(state));
         // TODO:
@@ -139,7 +137,7 @@ impl IpApi for IpServ {
             .map(|k| IpId {
                 ip: k.key().to_string(),
                 labels: k.0.to_hashmap(),
-                id: k.1,
+                id: k.1 as u32,
             })
             .collect();
         drop(state);

@@ -3,8 +3,7 @@ use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::discovery::v1::{EndpointConditions, EndpointSlice};
 use kube::runtime::reflector::{ObjectRef, ReflectHandle, Store};
 use kube::{Api, ResourceExt};
-use mesh_cni_common::{DestinationWithProto, Ip};
-use network_types::ip::IpProto;
+use mesh_cni_common::{Ip, KubeProtocol, ServiceKey};
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::pin::pin;
@@ -21,7 +20,7 @@ const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
 #[derive(Clone, Debug, PartialEq)]
 pub enum EndpointEvent {
     Update(ServiceIdentity),
-    Delete(DestinationWithProto),
+    Delete(ServiceKey),
 }
 
 pub trait KubeStore<K: k8s_openapi::Metadata + kube::Resource> {
@@ -45,8 +44,8 @@ where
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ServiceIdentity {
-    pub service_destination: DestinationWithProto,
-    pub ready_destinations: Vec<DestinationWithProto>,
+    pub service_destination: ServiceKey,
+    pub ready_destinations: Vec<ServiceKey>,
     pub cluster_id: ClusterId,
 }
 
@@ -173,7 +172,7 @@ struct MinService {
 struct NamedPort {
     name: String,
     port: u16,
-    protocol: IpProto,
+    protocol: KubeProtocol,
 }
 
 impl TryFrom<&Service> for MinService {
@@ -198,12 +197,10 @@ impl TryFrom<&Service> for MinService {
             .iter()
             .flat_map(|svc_ports| {
                 svc_ports.iter().filter_map(|svc_port| {
-                    let (Some(name), Ok(port), Some(protocol)) = (
+                    let (Some(name), Ok(port), protocol) = (
                         &svc_port.name,
                         u16::try_from(svc_port.port),
-                        kube_proto_from_str(
-                            &svc_port.protocol.clone().unwrap_or_else(|| "TCP".into()),
-                        ),
+                        kube_proto_from_str(&svc_port.protocol),
                     ) else {
                         return None;
                     };
@@ -260,7 +257,7 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
         let mut events = vec![];
         for ip in min.ips {
             for np in &min.named_ports {
-                events.push(EndpointEvent::Delete(DestinationWithProto {
+                events.push(EndpointEvent::Delete(ServiceKey {
                     ip: Ip::from(ip),
                     port: np.port,
                     protocol: np.protocol,
@@ -272,7 +269,7 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
 
     let slices = endpoint_slices_owned_by_service(store, svc);
 
-    let mut destinations_map: BTreeMap<String, Vec<DestinationWithProto>> = BTreeMap::new();
+    let mut destinations_map: BTreeMap<String, Vec<ServiceKey>> = BTreeMap::new();
     for slice in slices {
         let dsts = destinations_from_ep_slice(slice.as_ref());
         for (k, mut v) in dsts {
@@ -288,7 +285,7 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
     let mut events = vec![];
     for ip in min.ips {
         for np in &min.named_ports {
-            let service_destination = DestinationWithProto {
+            let service_destination = ServiceKey {
                 ip: Ip::from(ip),
                 port: np.port,
                 protocol: np.protocol,
@@ -306,9 +303,7 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
 }
 
 /// Returns ready destinations from an EndpointSlice
-fn destinations_from_ep_slice(
-    slice: &EndpointSlice,
-) -> BTreeMap<String, Vec<DestinationWithProto>> {
+fn destinations_from_ep_slice(slice: &EndpointSlice) -> BTreeMap<String, Vec<ServiceKey>> {
     let addrs: Vec<String> = slice
         .endpoints
         .iter()
@@ -346,18 +341,10 @@ fn destinations_from_ep_slice(
             );
             continue;
         };
-        let Some(protocol) = kube_proto_from_str(port_proto_name.1.as_str()) else {
-            warn!(
-                "found unknown protocol {} parsing EndpointSlice {}/{}",
-                port_proto_name.1,
-                slice.namespace().unwrap_or_default(),
-                slice.name_any()
-            );
-            continue;
-        };
-        let destinations: Vec<DestinationWithProto> = addrs.iter().filter_map(|addr| match addr.parse::<IpAddr>(){
+        let protocol = KubeProtocol::try_from(port_proto_name.1.as_str()).unwrap_or_default();
+        let destinations: Vec<ServiceKey> = addrs.iter().filter_map(|addr| match addr.parse::<IpAddr>(){
             Ok(ip) => {
-                Some(DestinationWithProto{ ip: Ip::from(ip), port, protocol })
+                Some(ServiceKey{ ip: Ip::from(ip), port, protocol })
             },
             Err(e) => {
                 error!(%e, "failed to parse address {} from EndpointSlice {}/{}", addr, slice.namespace().unwrap_or_default() ,slice.name_any());
@@ -369,12 +356,10 @@ fn destinations_from_ep_slice(
     dwp
 }
 
-fn kube_proto_from_str(proto: &str) -> Option<IpProto> {
+fn kube_proto_from_str(proto: &Option<String>) -> KubeProtocol {
     match proto {
-        "tcp" | "TCP" => Some(IpProto::Tcp),
-        "udp" | "UDP" => Some(IpProto::Udp),
-        "sctp" | "SCTP" => Some(IpProto::Sctp),
-        _ => None,
+        Some(p) => KubeProtocol::try_from(p.as_str()).unwrap_or_default(),
+        None => KubeProtocol::Tcp,
     }
 }
 
@@ -389,6 +374,7 @@ mod test {
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
     use k8s_openapi::chrono::Utc;
     use kube::api::ObjectMeta;
+    use mesh_cni_common::ServiceKey;
 
     use super::*;
 
@@ -472,15 +458,15 @@ mod test {
         assert_eq!(
             generate_endpoint_events(&store, &svc, 1).unwrap(),
             vec![EndpointEvent::Update(ServiceIdentity {
-                service_destination: DestinationWithProto {
+                service_destination: ServiceKey {
                     ip: Ip::from(IpAddr::from(Ipv4Addr::new(10, 96, 0, 25))),
                     port: 8080,
-                    protocol: IpProto::Tcp,
+                    protocol: KubeProtocol::Tcp,
                 },
-                ready_destinations: vec![DestinationWithProto {
+                ready_destinations: vec![ServiceKey {
                     ip: Ip::from(IpAddr::from(Ipv4Addr::new(192, 168, 1, 1))),
                     port: 80,
-                    protocol: IpProto::Tcp,
+                    protocol: KubeProtocol::Tcp,
                 }],
                 cluster_id: 1,
             })]
@@ -489,10 +475,10 @@ mod test {
         svc.metadata.deletion_timestamp = Some(Time(Utc::now()));
         assert_eq!(
             generate_endpoint_events(&store, &svc, 1).unwrap(),
-            vec![EndpointEvent::Delete(DestinationWithProto {
+            vec![EndpointEvent::Delete(ServiceKey {
                 ip: Ip::from(IpAddr::from(Ipv4Addr::new(10, 96, 0, 25))),
                 port: 8080,
-                protocol: IpProto::Tcp,
+                protocol: KubeProtocol::Tcp,
             })]
         );
     }
@@ -521,13 +507,12 @@ mod test {
         let mut map = BTreeMap::new();
         map.insert(
             "http".into(),
-            vec![DestinationWithProto {
+            vec![ServiceKey {
                 ip: Ip::from(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))),
                 port: 80,
-                protocol: IpProto::Tcp,
+                protocol: KubeProtocol::Tcp,
             }],
         );
         assert_eq!(destinations_from_ep_slice(&slice), map);
     }
 }
-

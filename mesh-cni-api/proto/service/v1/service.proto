@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package grpc.service.v1;
+
+service Service {
+    rpc ListServices(ListServicesRequest) returns (ListServicesReply) {}
+}
+
+message ListServicesReply {
+  repeated ServiceWithEndpoints services = 1;
+}
+
+message ListServicesRequest {}
+
+message ServiceWithEndpoints {
+  string service_endpoint = 1;
+  string protocol = 2;
+  repeated string endpoints = 3;
+}
+
