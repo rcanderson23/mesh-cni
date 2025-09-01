@@ -6,7 +6,6 @@ use mesh_cni::delete::delete;
 use mesh_cni::types::Input;
 use mesh_cni::{CNI_VERSION, add::add};
 use mesh_cni::{Result, config::Args};
-use tracing::info;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;

@@ -44,6 +44,7 @@ kube = { version = "1.1", default-features = false, features = [
   "derive",
   "unstable-runtime"
 ] }
+memoffset = { version = "0.9.1" }
 netns-rs = "0.1.0"
 network-types = { version = "0.0.8" }
 prometheus-client = { version = "0.23.1" }

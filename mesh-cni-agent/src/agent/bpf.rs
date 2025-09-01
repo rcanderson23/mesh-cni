@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::os::fd::AsFd;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
@@ -6,8 +8,9 @@ use std::thread::JoinHandle;
 
 use aya::Ebpf;
 use aya::maps::Map;
+use aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId;
 use aya::programs::tc::{self, SchedClassifierLinkId};
-use aya::programs::{SchedClassifier, TcAttachType};
+use aya::programs::{CgroupAttachMode, CgroupSockAddr, SchedClassifier, TcAttachType};
 use mesh_cni_api::bpf::v1::{AddContainerReply, AddContainerRequest};
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
@@ -18,6 +21,7 @@ use crate::{Error, Result};
 use mesh_cni_api::bpf::v1::bpf_server::Bpf as BpfApi;
 
 const NET_NS_DIR: &str = "/var/run/mesh/netns";
+const CGROUP_SYS_DIR: &str = "/sys/fs/cgroup";
 const INGRESS_TC_NAME: &str = "mesh_cni_ingress";
 const EGRESS_TC_NAME: &str = "mesh_cni_egress";
 
@@ -29,6 +33,7 @@ pub(crate) struct State {
     ebpf: Arc<Mutex<Ebpf>>,
     // TODO: consider remvoing as these are likely unneeded
     ifaces: IfaceStore,
+    _cgroup_addr_link_id: Arc<CgroupSockAddrLinkId>,
 }
 
 impl State {
@@ -41,6 +46,7 @@ impl State {
             warn!(%e, "failed to init ebpf logger");
         }
         let ifaces = BTreeMap::default();
+
         // info!("adding root netns eth0 tc");
         // let iface = "eth0";
         // let _ = tc::qdisc_add_clsact(iface);
@@ -61,9 +67,17 @@ impl State {
         //     .map_mut("mesh_cni_egress")
         //     .ok_or_else(|| Error::EbpfProgramError("failed to load ingress program".into()))?;
         // egress.pin(format!("{}/{}", BPF_FS_DIR, INGRESS_TC_NAME))?;
+        let cgroup = File::open(CGROUP_SYS_DIR)?;
+        let _cgroup_addr_link_id = Arc::new(attach_cgroup_connect_bpf_program(
+            &mut ebpf,
+            cgroup,
+            "mesh_cni_cgroup_connect4",
+            CgroupAttachMode::Single,
+        )?);
         Ok(Self {
             ebpf: Arc::new(Mutex::new(ebpf)),
             ifaces: Arc::new(Mutex::new(ifaces)),
+            _cgroup_addr_link_id,
         })
     }
     pub async fn take_map(&self, name: &str) -> Option<Map> {
@@ -164,4 +178,22 @@ fn attach_tc_bpf_program(
         return Err(e.into());
     };
     Ok(program.attach(iface, attach_type)?)
+}
+
+fn attach_cgroup_connect_bpf_program<F: AsFd>(
+    ebpf: &mut Ebpf,
+    cgroup: F,
+    name: &str,
+    attach_mode: CgroupAttachMode,
+) -> Result<CgroupSockAddrLinkId> {
+    let program: &mut CgroupSockAddr = ebpf
+        .program_mut(name)
+        .ok_or_else(|| Error::EbpfProgramError(format!("failed to load program {name}")))?
+        .try_into()?;
+    if let Err(e) = program.load()
+        && !matches!(e, aya::programs::ProgramError::AlreadyLoaded)
+    {
+        return Err(e.into());
+    };
+    Ok(program.attach(cgroup, attach_mode)?)
 }

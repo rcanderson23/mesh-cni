@@ -1,8 +1,10 @@
 #![no_std]
 
-use core::fmt::{Display, write};
+pub mod service_v4;
+
+use core::fmt::Display;
 use core::hash::Hash;
-use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use core::net::{IpAddr, Ipv6Addr};
 
 pub type Id = u16;
 
@@ -50,45 +52,6 @@ impl From<Ip> for IpAddr {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct ServiceKey {
-    pub ip: Ip,
-    pub port: u16,
-    pub protocol: KubeProtocol,
-}
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for ServiceKey {}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct ServiceValue {
-    pub id: Id,
-    pub count: u16,
-}
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for ServiceValue {}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct EndpointKey {
-    pub id: u16,
-    pub position: u16,
-}
-
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for EndpointKey {}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct EndpointValue {
-    pub ip: Ip,
-    pub port: u16,
-    pub _protocol: KubeProtocol,
-}
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for EndpointValue {}
-
-#[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
 pub enum KubeProtocol {
     #[default]
@@ -119,6 +82,23 @@ impl Display for KubeProtocol {
             KubeProtocol::Udp => write!(f, "UDP"),
             KubeProtocol::Sctp => write!(f, "SCTP"),
         }
+    }
+}
+
+impl TryFrom<u32> for KubeProtocol {
+    type Error = &'static str;
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        let proto = match value {
+            6 => KubeProtocol::Tcp,
+            17 => KubeProtocol::Udp,
+            132 => KubeProtocol::Sctp,
+            _ => {
+                return Err(
+                    "Protocol provided is not a valid kube protocol. Only TCP, UDP, or SCTP allowed",
+                );
+            }
+        };
+        Ok(proto)
     }
 }
 

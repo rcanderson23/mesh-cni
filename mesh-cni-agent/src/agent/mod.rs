@@ -11,10 +11,10 @@ use std::path::PathBuf;
 
 use ahash::HashMapExt;
 use aya::Pod;
-use aya::maps::{HashMap, Map, MapData};
+use aya::maps::{HashMap, MapData};
 use mesh_cni_api::bpf::v1::bpf_server::BpfServer;
 use mesh_cni_api::ip::v1::ip_server::IpServer;
-use mesh_cni_common::{EndpointKey, EndpointValue, ServiceKey, ServiceValue};
+use mesh_cni_common::service_v4::{EndpointKeyV4, EndpointValueV4, ServiceKeyV4, ServiceValueV4};
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
 use tokio_util::sync::CancellationToken;
@@ -140,7 +140,7 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
         })?
         .try_into()?;
 
-    let service_map: HashMap<MapData, ServiceKey, ServiceValue> = bpf
+    let service_map: HashMap<MapData, ServiceKeyV4, ServiceValueV4> = bpf
         .take_map("SERVICES")
         .await
         .ok_or_else(|| Error::MapNotFound {
@@ -148,7 +148,7 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
         })?
         .try_into()?;
 
-    let endpoint_map: HashMap<MapData, EndpointKey, EndpointValue> = bpf
+    let endpoint_map: HashMap<MapData, EndpointKeyV4, EndpointValueV4> = bpf
         .take_map("ENDPOINTS")
         .await
         .ok_or_else(|| Error::MapNotFound {

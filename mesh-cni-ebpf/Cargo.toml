@@ -9,6 +9,7 @@ mesh-cni-common = { path = "../mesh-cni-common" }
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
 network-types = { workspace = true }
+memoffset = { workspace = true } 
 
 [build-dependencies]
 which = { workspace = true }

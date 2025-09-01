@@ -3,7 +3,7 @@ use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::discovery::v1::{EndpointConditions, EndpointSlice};
 use kube::runtime::reflector::{ObjectRef, ReflectHandle, Store};
 use kube::{Api, ResourceExt};
-use mesh_cni_common::{Ip, KubeProtocol, ServiceKey};
+use mesh_cni_common::{KubeProtocol, service_v4::ServiceKeyV4};
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::pin::pin;
@@ -20,7 +20,7 @@ const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
 #[derive(Clone, Debug, PartialEq)]
 pub enum EndpointEvent {
     Update(ServiceIdentity),
-    Delete(ServiceKey),
+    Delete(ServiceKeyV4),
 }
 
 pub trait KubeStore<K: k8s_openapi::Metadata + kube::Resource> {
@@ -44,8 +44,8 @@ where
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ServiceIdentity {
-    pub service_destination: ServiceKey,
-    pub ready_destinations: Vec<ServiceKey>,
+    pub service_destination: ServiceKeyV4,
+    pub ready_destinations: Vec<ServiceKeyV4>,
     pub cluster_id: ClusterId,
 }
 
@@ -257,11 +257,17 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
         let mut events = vec![];
         for ip in min.ips {
             for np in &min.named_ports {
-                events.push(EndpointEvent::Delete(ServiceKey {
-                    ip: Ip::from(ip),
-                    port: np.port,
-                    protocol: np.protocol,
-                }));
+                match ip {
+                    IpAddr::V4(ipv4_addr) => {
+                        events.push(EndpointEvent::Delete(ServiceKeyV4 {
+                            ip: ipv4_addr.into(),
+                            port: np.port,
+                            protocol: np.protocol,
+                        }));
+                    }
+                    // TODO: Add Ipv6
+                    IpAddr::V6(_) => {}
+                }
             }
         }
         return Ok(events);
@@ -269,7 +275,7 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
 
     let slices = endpoint_slices_owned_by_service(store, svc);
 
-    let mut destinations_map: BTreeMap<String, Vec<ServiceKey>> = BTreeMap::new();
+    let mut destinations_map: BTreeMap<String, Vec<ServiceKeyV4>> = BTreeMap::new();
     for slice in slices {
         let dsts = destinations_from_ep_slice(slice.as_ref());
         for (k, mut v) in dsts {
@@ -285,17 +291,23 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
     let mut events = vec![];
     for ip in min.ips {
         for np in &min.named_ports {
-            let service_destination = ServiceKey {
-                ip: Ip::from(ip),
-                port: np.port,
-                protocol: np.protocol,
-            };
-            let ready_destinations = destinations_map.remove(&np.name).unwrap_or_default();
-            events.push(EndpointEvent::Update(ServiceIdentity {
-                service_destination,
-                ready_destinations,
-                cluster_id,
-            }));
+            match ip {
+                IpAddr::V4(ipv4_addr) => {
+                    let service_destination = ServiceKeyV4 {
+                        ip: ipv4_addr.into(),
+                        port: np.port,
+                        protocol: np.protocol,
+                    };
+                    let ready_destinations = destinations_map.remove(&np.name).unwrap_or_default();
+                    events.push(EndpointEvent::Update(ServiceIdentity {
+                        service_destination,
+                        ready_destinations,
+                        cluster_id,
+                    }));
+                }
+                // TODO: Add Ipv6
+                IpAddr::V6(_) => {}
+            }
         }
     }
 
@@ -303,7 +315,7 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
 }
 
 /// Returns ready destinations from an EndpointSlice
-fn destinations_from_ep_slice(slice: &EndpointSlice) -> BTreeMap<String, Vec<ServiceKey>> {
+fn destinations_from_ep_slice(slice: &EndpointSlice) -> BTreeMap<String, Vec<ServiceKeyV4>> {
     let addrs: Vec<String> = slice
         .endpoints
         .iter()
@@ -342,9 +354,13 @@ fn destinations_from_ep_slice(slice: &EndpointSlice) -> BTreeMap<String, Vec<Ser
             continue;
         };
         let protocol = KubeProtocol::try_from(port_proto_name.1.as_str()).unwrap_or_default();
-        let destinations: Vec<ServiceKey> = addrs.iter().filter_map(|addr| match addr.parse::<IpAddr>(){
+        let destinations: Vec<ServiceKeyV4> = addrs.iter().filter_map(|addr| match addr.parse::<IpAddr>(){
             Ok(ip) => {
-                Some(ServiceKey{ ip: Ip::from(ip), port, protocol })
+                match ip{
+                    IpAddr::V4(ipv4_addr) => Some(ServiceKeyV4{ip: ipv4_addr.into(), port, protocol}),
+                    // TODO: Add ipv6 support
+                    IpAddr::V6(_) => None,
+                }
             },
             Err(e) => {
                 error!(%e, "failed to parse address {} from EndpointSlice {}/{}", addr, slice.namespace().unwrap_or_default() ,slice.name_any());
@@ -374,7 +390,7 @@ mod test {
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
     use k8s_openapi::chrono::Utc;
     use kube::api::ObjectMeta;
-    use mesh_cni_common::ServiceKey;
+    use mesh_cni_common::service_v4::ServiceKeyV4;
 
     use super::*;
 
@@ -458,13 +474,13 @@ mod test {
         assert_eq!(
             generate_endpoint_events(&store, &svc, 1).unwrap(),
             vec![EndpointEvent::Update(ServiceIdentity {
-                service_destination: ServiceKey {
-                    ip: Ip::from(IpAddr::from(Ipv4Addr::new(10, 96, 0, 25))),
+                service_destination: ServiceKeyV4 {
+                    ip: Ipv4Addr::new(10, 96, 0, 25).into(),
                     port: 8080,
                     protocol: KubeProtocol::Tcp,
                 },
-                ready_destinations: vec![ServiceKey {
-                    ip: Ip::from(IpAddr::from(Ipv4Addr::new(192, 168, 1, 1))),
+                ready_destinations: vec![ServiceKeyV4 {
+                    ip: Ipv4Addr::new(192, 168, 1, 1).into(),
                     port: 80,
                     protocol: KubeProtocol::Tcp,
                 }],
@@ -475,8 +491,8 @@ mod test {
         svc.metadata.deletion_timestamp = Some(Time(Utc::now()));
         assert_eq!(
             generate_endpoint_events(&store, &svc, 1).unwrap(),
-            vec![EndpointEvent::Delete(ServiceKey {
-                ip: Ip::from(IpAddr::from(Ipv4Addr::new(10, 96, 0, 25))),
+            vec![EndpointEvent::Delete(ServiceKeyV4 {
+                ip: Ipv4Addr::new(10, 96, 0, 25).into(),
                 port: 8080,
                 protocol: KubeProtocol::Tcp,
             })]
@@ -507,8 +523,8 @@ mod test {
         let mut map = BTreeMap::new();
         map.insert(
             "http".into(),
-            vec![ServiceKey {
-                ip: Ip::from(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))),
+            vec![ServiceKeyV4 {
+                ip: Ipv4Addr::new(192, 168, 1, 1).into(),
                 port: 80,
                 protocol: KubeProtocol::Tcp,
             }],
