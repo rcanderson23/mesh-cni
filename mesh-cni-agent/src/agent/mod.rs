@@ -13,7 +13,7 @@ use ahash::HashMapExt;
 use aya::Pod;
 use aya::maps::{HashMap, MapData};
 use mesh_cni_api::bpf::v1::bpf_server::BpfServer;
-use mesh_cni_api::ip::v1::ip_server::IpServer;
+use mesh_cni_common::Id;
 use mesh_cni_common::service_v4::{EndpointKeyV4, EndpointValueV4, ServiceKeyV4, ServiceValueV4};
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -22,10 +22,8 @@ use tonic::service::{Routes, RoutesBuilder};
 use tonic::transport::Server;
 use tracing::{error, info};
 
-use crate::agent::ip::IpServ;
 use crate::config::ControllerArgs;
 use crate::http::shutdown;
-use crate::kubernetes::pod::NamespacePodState;
 use crate::{Error, Result};
 
 pub trait BpfMap<K, V> {
@@ -117,26 +115,24 @@ where
     }
 }
 
-// TODO: make this configurable?
-const POD_IDENTITY_CAPACITY: usize = 1000;
-
 pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()> {
-    let (pod_id_tx, pod_id_rx) = tokio::sync::mpsc::channel(POD_IDENTITY_CAPACITY);
-
     // TODO: configure this dynamically for all clusters configured in mesh
     let kube_client = kube::Client::try_default().await?;
-    let ns_pod_state =
-        NamespacePodState::try_new(kube_client.clone(), args.cluster_id, pod_id_tx).await?;
-    let ns_pod_handle = ns_pod_state.start();
-
     let bpf = bpf::State::try_new()?;
 
     // TODO: bpf maps should be pinned and loaded from pinned location
-    let ip_id = bpf
-        .take_map("IP_IDENTITY")
+    let ipv4_map: HashMap<MapData, u32, Id> = bpf
+        .take_map("IPV4_IDENTITY")
         .await
         .ok_or_else(|| Error::MapNotFound {
-            name: "IP_IDENTITY".into(),
+            name: "IPV4_IDENTITY".into(),
+        })?
+        .try_into()?;
+    let ipv6_map: HashMap<MapData, u128, Id> = bpf
+        .take_map("IPV6_IDENTITY")
+        .await
+        .ok_or_else(|| Error::MapNotFound {
+            name: "IPV6_IDENTITY".into(),
         })?
         .try_into()?;
 
@@ -156,6 +152,9 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
         })?
         .try_into()?;
 
+    let (ip_server, ip_handle) =
+        ip::run(ipv4_map, ipv6_map, kube_client.clone(), args.cluster_id).await?;
+
     let (service_server, service_handle) = service::run(
         service_map,
         endpoint_map,
@@ -164,10 +163,7 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
     )
     .await?;
 
-    let ipserv = IpServ::from(ip_id, pod_id_rx).await;
-    // TODO: consolidate all state routers for single listener
     let bpf_server = BpfServer::new(bpf);
-    let ip_server = IpServer::new(ipserv);
 
     let mut routes = RoutesBuilder::default();
     let routes = routes
@@ -176,11 +172,13 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
         .add_service(service_server);
     let routes = routes.to_owned().routes();
     let server_handle = serve(args.agent_socket_path, routes, cancel.child_token());
+
+    // TODO: add graceful shutdown
     tokio::select! {
         _ = cancel.cancelled() => {},
         h = server_handle => exit("bpf", h),
-        h = ns_pod_handle => exit("ns", h),
         h = service_handle => exit("service", h.map_err(|e| Error::Task(e.to_string()))?),
+        h = ip_handle => exit("ip", h.map_err(|e| Error::Task(e.to_string()))?),
     }
     Ok(())
 }

@@ -31,7 +31,7 @@ where
         let state = Arc::new(Mutex::new(state));
         let event_state = state.clone();
 
-        tokio::spawn(async move { start_event_receiver(event_state, rx).await });
+        tokio::spawn(start_event_receiver(event_state, rx));
         Self { state }
     }
 }
@@ -85,14 +85,20 @@ where
                 let service = service_identity.service_destination;
                 let destinations = service_identity.ready_destinations;
 
-                info!("updating service map with {:?}", service);
+                info!(
+                    "updating service map with service {}:{}/{}",
+                    service.ip, service.port, service.protocol
+                );
                 if let Err(e) = state.update(service, destinations) {
                     error!(%e, "failed to update map");
                     continue;
                 }
             }
             EndpointEvent::Delete(service) => {
-                info!("deleting service map entry {:?}", service);
+                info!(
+                    "deleting service map entry {}:{}/{}",
+                    service.ip, service.port, service.protocol
+                );
                 if let Err(e) = state.remove(&service) {
                     error!(%e, "failed to update map");
                     continue;

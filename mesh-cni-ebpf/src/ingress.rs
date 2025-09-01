@@ -5,7 +5,7 @@ use network_types::eth::{EthHdr, EtherType};
 use network_types::ip::Ipv4Hdr;
 use network_types::tcp::TcpHdr;
 
-use crate::ip_id;
+use crate::ipv4_id;
 
 // static SYN_BIT: usize = 31;
 
@@ -23,7 +23,7 @@ pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
     let src = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst = u32::from_be_bytes(ipv4hdr.dst_addr);
 
-    let (Some(src_id), Some(dst_id)) = (ip_id(src.into()), ip_id(dst.into())) else {
+    let (Some(src_id), Some(dst_id)) = (ipv4_id(src), ipv4_id(dst)) else {
         return Ok(TC_ACT_PIPE);
     };
 

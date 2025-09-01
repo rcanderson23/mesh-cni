@@ -25,8 +25,8 @@ where
     let (tx, rx) = tokio::sync::mpsc::channel(1000);
     let svc_epslice_state = ServiceEndpointState::try_new(kube_client, cluster_id, tx).await?;
     let state = state::State::new(service_map, endpoint_map);
-    let serve = Server::new(state, rx).await;
-    let server = mesh_cni_api::service::v1::service_server::ServiceServer::new(serve);
+    let server = Server::new(state, rx).await;
+    let server = mesh_cni_api::service::v1::service_server::ServiceServer::new(server);
 
     let h = tokio::spawn(async move { svc_epslice_state.start().await });
     Ok((server, h))
