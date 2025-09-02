@@ -13,9 +13,19 @@ use tracing::{debug, error, info};
 
 use crate::Result;
 use crate::kubernetes::{
-    ClusterId, LABEL_MESH_CLUSTER_ID, Labels, PodIdentity, PodIdentityEvent, create_subscriber,
-    selector_matches,
+    ClusterId, LABEL_MESH_CLUSTER_ID, Labels, create_store_and_subscriber, selector_matches,
 };
+
+pub enum PodIdentityEvent {
+    Add(PodIdentity),
+    Delete(IpAddr),
+}
+
+pub struct PodIdentity {
+    pub labels: Labels,
+    pub ips: Vec<IpAddr>,
+    pub cluster_id: ClusterId,
+}
 
 pub struct NamespacePodState {
     pub pod_subscriber: ReflectHandle<Pod>,
@@ -33,8 +43,9 @@ impl NamespacePodState {
         let pod: Api<Pod> = Api::all(client.clone());
         let namespace: Api<Namespace> = Api::all(client);
 
-        let pod_subscriber = create_subscriber(pod).await?;
-        let namespace_subscriber = create_subscriber(namespace).await?;
+        let (_pod_store, pod_subscriber) = create_store_and_subscriber(pod).await?;
+        let (_namespace_store, namespace_subscriber) =
+            create_store_and_subscriber(namespace).await?;
 
         Ok(Self {
             pod_subscriber,

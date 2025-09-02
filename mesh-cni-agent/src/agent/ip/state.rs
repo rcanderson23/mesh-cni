@@ -75,6 +75,6 @@ where
     }
 
     pub fn get_id_from_labels(&self, labels: &Labels) -> Option<Id> {
-        self.labels_to_id.get(labels).map(|id| *id)
+        self.labels_to_id.get(labels).cloned()
     }
 }

@@ -30,6 +30,7 @@ prometheus-client = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+serde_yaml = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
     "rt",

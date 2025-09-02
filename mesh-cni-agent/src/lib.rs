@@ -72,6 +72,12 @@ pub enum Error {
 
     #[error("task failed: {0}")]
     Task(String),
+
+    #[error("failed to create config from kubeconfig: {0}")]
+    KubeConfig(#[from] kube::config::KubeconfigError),
+
+    #[error("failed to parse clusters config: {0}")]
+    YamlConversion(#[from] serde_yaml::Error),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

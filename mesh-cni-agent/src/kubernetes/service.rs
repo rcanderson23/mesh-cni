@@ -12,7 +12,7 @@ use tokio::select;
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info, warn};
 
-use crate::kubernetes::{ClusterId, create_subscriber, selector_matches};
+use crate::kubernetes::{ClusterId, create_store_and_subscriber, selector_matches};
 use crate::{Error, Result};
 
 const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
@@ -66,8 +66,9 @@ impl ServiceEndpointState {
         let service: Api<Service> = Api::all(client.clone());
         let endpoint_slice: Api<EndpointSlice> = Api::all(client);
 
-        let service_subscriber = create_subscriber(service).await?;
-        let endpoint_slice_subscriber = create_subscriber(endpoint_slice).await?;
+        let (_service_store, service_subscriber) = create_store_and_subscriber(service).await?;
+        let (_endpoint_slice_store, endpoint_slice_subscriber) =
+            create_store_and_subscriber(endpoint_slice).await?;
 
         Ok(Self {
             service_subscriber,

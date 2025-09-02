@@ -11,7 +11,7 @@ use tracing::{error, info};
 use crate::Result;
 use crate::agent::BpfMap;
 use crate::agent::ip::state::State;
-use crate::kubernetes::PodIdentityEvent;
+use crate::kubernetes::pod::PodIdentityEvent;
 
 #[derive(Clone)]
 pub struct Server<I, P>

@@ -59,6 +59,14 @@ pub struct ControllerArgs {
     #[arg(long, env = "CNI_PLUGIN_LOG_PATH", default_value = "/var/log/mesh-cni")]
     pub cni_plugin_log_dir: PathBuf,
 
+    /// Cluster configs path
+    #[arg(
+        long,
+        env = "MESH_CLUSTERS_CONFIG",
+        default_value = "/etc/mesh-cni/cluster-config"
+    )]
+    pub mesh_clusters_config: PathBuf,
+
     /// Agent socket path
     #[arg(
         long,

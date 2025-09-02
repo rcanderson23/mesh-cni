@@ -1,33 +1,26 @@
+mod cluster;
 pub mod pod;
 pub mod service;
+mod state;
 
 use futures::StreamExt;
 use k8s_openapi::serde::de::DeserializeOwned;
-use kube::runtime::reflector::ReflectHandle;
+use kube::runtime::reflector::{ObjectRef, ReflectHandle, Store};
 use kube::runtime::{WatchStreamExt, reflector, watcher};
 use kube::{Api, Resource};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::net::IpAddr;
+use std::sync::Arc;
 use tracing::{error, trace};
 
 use crate::{Error, Result};
 
 const LABEL_MESH_CLUSTER_ID: &str = "mesh.dev/cluster-id";
 
-pub type ClusterId = u16;
-
-pub enum PodIdentityEvent {
-    Add(PodIdentity),
-    Delete(IpAddr),
-}
-
-pub struct PodIdentity {
-    pub labels: Labels,
-    pub ips: Vec<IpAddr>,
-    pub cluster_id: ClusterId,
-}
+pub type ClusterId = u32;
 
 // TODO: does this actually need seperateion between types of labels or should
 // there be some prefixing to denote the label origin?
@@ -40,7 +33,7 @@ pub struct Labels {
 
 impl Labels {
     pub fn to_hashmap(&self) -> HashMap<String, String> {
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         for (k, v) in self.namespace_labels.iter() {
             map.insert(k.to_owned(), v.to_owned());
         }
@@ -67,7 +60,7 @@ fn selector_matches(
     true
 }
 
-async fn create_subscriber<K>(api: Api<K>) -> Result<ReflectHandle<K>>
+async fn create_store_and_subscriber<K>(api: Api<K>) -> Result<(Store<K>, ReflectHandle<K>)>
 where
     K: Resource + Send + Clone + Debug + DeserializeOwned + Sync + 'static,
     <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + Hash + Clone,
@@ -94,7 +87,7 @@ where
         .wait_until_ready()
         .await
         .map_err(|e| Error::StoreCreation(e.to_string()))?;
-    Ok(subscriber)
+    Ok((store, subscriber))
 }
 
 #[cfg(test)]
