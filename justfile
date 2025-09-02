@@ -1,6 +1,6 @@
 name := "mesh-cni"
 container_image := "ghcr.io/rcanderson23/" + name
-kind_path := "./kind/multi-node.yaml"
+kind_path := "./kind/single-node.yaml"
 
 default:
   @just --list
