@@ -72,7 +72,7 @@ fn setup_subscriber(_telemetry_endpoint: Option<&str>) {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "mesh_cni_agent=info,mesh_cni_ebpf=info".into()),
+                .unwrap_or_else(|_| "mesh_cni_agent=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

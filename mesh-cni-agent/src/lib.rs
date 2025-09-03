@@ -79,6 +79,9 @@ pub enum Error {
 
     #[error("failed to parse clusters config: {0}")]
     YamlConversion(#[from] serde_yaml::Error),
+
+    #[error("failed to reconcile resource: {0}")]
+    ReconcileError(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

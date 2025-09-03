@@ -1,4 +1,5 @@
 pub mod cluster;
+pub mod controllers;
 pub mod pod;
 pub mod service;
 pub mod state;

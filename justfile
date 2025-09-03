@@ -25,6 +25,7 @@ install:
 
 restart:
   kubectl rollout restart daemonset -n kube-system {{name}}-agent
+  kubectl rollout restart deployment -n kube-system {{name}}-controller
 
 load-image:
     kind load docker-image {{container_image}}:latest --name={{name}}

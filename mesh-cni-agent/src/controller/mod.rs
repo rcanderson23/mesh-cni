@@ -1,16 +1,20 @@
+use std::pin::pin;
+use std::sync::Arc;
+
 use k8s_openapi::api::core::v1::Service;
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tracing::{error, info, warn};
 
 use crate::config::ControllerArgs;
 use crate::kubernetes::cluster::{Cluster, ClusterConfigs};
-use crate::kubernetes::state::GlobalState;
+use crate::kubernetes::state::MultiClusterState;
 use crate::{Error, Result, kubernetes};
 
 pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()> {
     let configs = ClusterConfigs::try_new_configs(args.mesh_clusters_config).await?;
     let mut clusters = vec![];
-    let local_cluster = Cluster::try_new(configs.local).await?;
+    let mut local_cluster = Cluster::try_new(configs.local).await?;
     for config in configs.remote {
         let Ok(cluster) = Cluster::try_new(config).await else {
             warn!("failed to create cluster from config");
@@ -18,22 +22,54 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
         };
         clusters.push(cluster);
     }
-    clusters.push(local_cluster);
+    clusters.push(local_cluster.clone());
 
-    let mut service_state: GlobalState<Service> =
-        kubernetes::state::GlobalState::try_new(clusters).await?;
+    let mut service_state: MultiClusterState<Service> =
+        kubernetes::state::MultiClusterState::try_new(clusters.clone()).await?;
+    let mut endpoint_slice_state: MultiClusterState<EndpointSlice> =
+        kubernetes::state::MultiClusterState::try_new(clusters).await?;
 
-    let Some(rx) = service_state.take_receiver() else {
+    let Some(_svc_rx) = service_state.take_receiver() else {
         return Err(Error::Other(
-            "global cluster store receiver not present".into(),
+            "multi cluster store receiver not present".into(),
         ));
     };
-    let mut rx = rx;
-    while let Some(event) = rx.recv().await {
-        println!(
-            "received event in cluster {} for service {:?}",
-            event.cluster.name, event.resource
-        );
+    let Some(_eps_rx) = endpoint_slice_state.take_receiver() else {
+        return Err(Error::Other(
+            "multi cluster store receiver not present".into(),
+        ));
+    };
+
+    let service_state = Arc::new(service_state);
+    let endpoint_slice_state = Arc::new(endpoint_slice_state);
+
+    let Some(local_client) = local_cluster.take_client() else {
+        return Err(Error::Other("failed to get local cluster client".into()));
+    };
+
+    let cancel = CancellationToken::new();
+    let service_controller = crate::kubernetes::controllers::service::start_service_controller(
+        local_client,
+        service_state,
+        endpoint_slice_state,
+        cancel.clone(),
+    );
+
+    tokio::select! {
+        _ = service_controller => {},
+        _ = cancel.cancelled() => {},
     }
+
     Ok(())
+}
+
+fn exit(task: &str, out: Result<()>) {
+    match out {
+        Ok(_) => {
+            info!("{task} exited")
+        }
+        Err(e) => {
+            error!("{task} failed with error: {e}")
+        }
+    }
 }

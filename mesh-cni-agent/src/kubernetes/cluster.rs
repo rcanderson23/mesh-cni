@@ -7,6 +7,7 @@ use crate::kubernetes::ClusterId;
 
 use crate::Result;
 
+#[derive(Clone)]
 pub struct Cluster {
     pub id: ClusterId,
     pub name: String,

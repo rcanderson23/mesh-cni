@@ -12,27 +12,27 @@ use tracing::{error, warn};
 
 use crate::Result;
 use crate::kubernetes::cluster::Cluster;
-use crate::kubernetes::{ClusterId, create_store_and_subscriber};
+use crate::kubernetes::create_store_and_subscriber;
 
-pub trait GlobalStore<K>
+pub trait MultiClusterStore<K>
 where
     K: k8s_openapi::Metadata + kube::Resource + Clone,
     K::DynamicType: std::hash::Hash + std::cmp::Eq + Clone,
 {
-    fn get_from_cluster(&self, obj_ref: &ObjectRef<K>, cluster_name: &str) -> Vec<Arc<K>>;
+    fn get_from_cluster(&self, obj_ref: &ObjectRef<K>, cluster_name: &str) -> Option<Arc<K>>;
     fn get_all(&self, obj_ref: &ObjectRef<K>) -> Vec<Arc<K>>;
 }
 
-pub struct GlobalState<K>
+pub struct MultiClusterState<K>
 where
     K: Resource + Send + Clone + core::fmt::Debug + DeserializeOwned + Metadata + Sync + 'static,
     <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + core::hash::Hash + Clone,
 {
-    state: HashMap<ClusterId, Store<K>>,
+    state: HashMap<String, Store<K>>,
     rx: Option<Receiver<ClusterEvent<K>>>,
 }
 
-impl<K> GlobalState<K>
+impl<K> MultiClusterState<K>
 where
     K: Resource
         + Send
@@ -60,7 +60,7 @@ where
                 warn!("failed to create store for cluster {}", cluster.name);
                 continue;
             };
-            state.insert(cluster.id, store);
+            state.insert(cluster.name.clone(), store);
 
             // TODO: handle this?
             tokio::spawn(start_cluster_event_loop(cluster, subscriber, tx.clone()));
@@ -73,6 +73,35 @@ where
     }
     pub fn take_receiver(&mut self) -> Option<Receiver<ClusterEvent<K>>> {
         self.rx.take()
+    }
+}
+
+impl<K> MultiClusterStore<K> for MultiClusterState<K>
+where
+    K: Resource
+        + Send
+        + Clone
+        + core::fmt::Debug
+        + DeserializeOwned
+        + k8s_openapi::Metadata
+        + Sync
+        + 'static,
+    <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + core::hash::Hash + Clone,
+{
+    fn get_from_cluster(&self, obj_ref: &ObjectRef<K>, cluster_name: &str) -> Option<Arc<K>> {
+        let store = self.state.get(cluster_name)?;
+        store.get(obj_ref)
+    }
+
+    fn get_all(&self, obj_ref: &ObjectRef<K>) -> Vec<Arc<K>> {
+        let mut result = vec![];
+        for (_, store) in self.state.iter() {
+            let Some(o) = store.get(obj_ref) else {
+                continue;
+            };
+            result.push(o);
+        }
+        result
     }
 }
 
