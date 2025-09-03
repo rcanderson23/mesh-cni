@@ -1,7 +1,7 @@
-mod cluster;
+pub mod cluster;
 pub mod pod;
 pub mod service;
-mod state;
+pub mod state;
 
 use futures::StreamExt;
 use k8s_openapi::serde::de::DeserializeOwned;

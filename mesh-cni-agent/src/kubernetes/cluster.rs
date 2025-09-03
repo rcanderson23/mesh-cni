@@ -14,7 +14,6 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    /// Will
     pub async fn try_new(config: Config) -> Result<Self> {
         let client = if config.context.is_some() {
             let config = kube::Config::from_kubeconfig(&KubeConfigOptions {
@@ -28,8 +27,8 @@ impl Cluster {
         };
 
         Ok(Self {
-            id: config.cluster_id,
-            name: config.cluster_name,
+            id: config.id,
+            name: config.name,
             client: Some(client),
         })
     }
@@ -58,9 +57,9 @@ impl ClusterConfigs {
 
 #[derive(Clone, Deserialize)]
 pub struct Config {
-    pub cluster_id: ClusterId,
+    pub id: ClusterId,
 
-    pub cluster_name: String,
+    pub name: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,

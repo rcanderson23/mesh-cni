@@ -71,6 +71,9 @@ where
             rx: Some(rx),
         })
     }
+    pub fn take_receiver(&mut self) -> Option<Receiver<ClusterEvent<K>>> {
+        self.rx.take()
+    }
 }
 
 async fn start_cluster_event_loop<K>(

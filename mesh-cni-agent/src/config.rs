@@ -14,11 +14,12 @@ pub struct Cli {
 
 #[derive(Clone, Subcommand, Debug)]
 pub enum Commands {
+    Agent(AgentArgs),
     Controller(ControllerArgs),
 }
 
 #[derive(Parser, Debug, Clone)]
-pub struct ControllerArgs {
+pub struct AgentArgs {
     /// Path to the bpf fs for bpf maps
     #[arg(long, default_value = "/sys/fs/bpf")]
     pub bpf_fs: PathBuf,
@@ -74,4 +75,19 @@ pub struct ControllerArgs {
         default_value = "/var/run/mesh/mesh.sock"
     )]
     pub agent_socket_path: PathBuf,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct ControllerArgs {
+    /// Cluster configs path
+    #[arg(
+        long,
+        env = "MESH_CLUSTERS_CONFIG",
+        default_value = "/etc/mesh-cni/cluster-config"
+    )]
+    pub mesh_clusters_config: PathBuf,
+
+    /// Metrics listener for agent
+    #[arg(long, default_value = "0.0.0.0:9090")]
+    pub metrics_address: SocketAddr,
 }

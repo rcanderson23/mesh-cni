@@ -60,3 +60,34 @@ Create the name of the service account to use for the agent
 {{- default "default" .Values.agent.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Common controller labels
+*/}}
+{{- define "mesh-cni.controller.labels" -}}
+helm.sh/chart: {{ include "mesh-cni.chart" . }}
+{{ include "mesh-cni.controller.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+controller Selector labels
+*/}}
+{{- define "mesh-cni.controller.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "mesh-cni.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Create the name of the service account to use for the controller
+*/}}
+{{- define "mesh-cni.controller.serviceAccountName" -}}
+{{- if .Values.controller.serviceAccount.create }}
+{{- default (include "mesh-cni.fullname" .) .Values.controller.serviceAccount.name }}-controller
+{{- else }}
+{{- default "default" .Values.controller.serviceAccount.name }}
+{{- end }}
+{{- end }}

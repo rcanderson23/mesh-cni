@@ -37,7 +37,7 @@ spec:
       containers:
         - name: {{ .Chart.Name }}
           args:
-          - controller
+          - agent
           - --metrics-address=0.0.0.0:{{ .Values.agent.metrics.port }}
           - --cluster-id={{ .Values.agent.cluster.id }}
           - --cni-bin-dir={{ .Values.agent.cniBinDir }}

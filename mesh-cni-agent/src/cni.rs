@@ -8,12 +8,12 @@ use mesh_cni::config::PluginConfig;
 use tracing::info;
 
 use crate::Result;
-use crate::config::ControllerArgs;
+use crate::config::AgentArgs;
 
 const CNI_PATH: &str = "./mesh-cni";
 const CONFLIST_NAME: &str = "05-mesh.conflist";
 
-pub fn ensure_cni_preconditions(args: &ControllerArgs) -> Result<()> {
+pub fn ensure_cni_preconditions(args: &AgentArgs) -> Result<()> {
     ensure_cni_log_dir(&args.cni_plugin_log_dir)?;
     ensure_cni_bin(&args.cni_bin_dir)?;
     let existing_conf = get_existing_conflist(&args.cni_conf_dir)?;

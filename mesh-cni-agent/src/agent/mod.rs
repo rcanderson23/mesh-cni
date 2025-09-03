@@ -22,7 +22,7 @@ use tonic::service::{Routes, RoutesBuilder};
 use tonic::transport::Server;
 use tracing::{error, info};
 
-use crate::config::ControllerArgs;
+use crate::config::AgentArgs;
 use crate::http::shutdown;
 use crate::{Error, Result};
 
@@ -115,7 +115,7 @@ where
     }
 }
 
-pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()> {
+pub async fn start(args: AgentArgs, cancel: CancellationToken) -> Result<()> {
     // TODO: configure this dynamically for all clusters configured in mesh
     let kube_client = kube::Client::try_default().await?;
     let bpf = bpf::State::try_new()?;
