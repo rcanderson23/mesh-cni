@@ -18,7 +18,7 @@ COPY Cargo.lock Cargo.lock
 COPY mesh-cni-plugin mesh-cni-plugin
 COPY mesh-cni-api mesh-cni-api
 COPY mesh-cni-cli mesh-cni-cli
-COPY mesh-cni-agent mesh-cni-agent
+COPY mesh-cni mesh-cni
 COPY mesh-cni-common mesh-cni-common
 COPY mesh-cni-ebpf mesh-cni-ebpf
 COPY justfile justfile

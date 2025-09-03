@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use mesh_cni_api::service::v1::service_server::Service as ServiceApi;
@@ -87,7 +87,9 @@ where
 
                 info!(
                     "updating service map with service {}:{}/{}",
-                    service.ip, service.port, service.protocol
+                    Ipv4Addr::from(service.ip),
+                    service.port,
+                    service.protocol
                 );
                 if let Err(e) = state.update(service, destinations) {
                     error!(%e, "failed to update map");

@@ -12,6 +12,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Subcommand, Debug)]
 pub enum Commands {
     Agent(AgentArgs),

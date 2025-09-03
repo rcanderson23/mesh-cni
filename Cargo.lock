@@ -1771,7 +1771,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-cni-agent"
+name = "mesh-cni"
 version = "0.1.0"
 dependencies = [
  "ahash",

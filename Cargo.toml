@@ -2,13 +2,13 @@
 resolver = "2"
 members = [
     "mesh-cni-api",
-    "mesh-cni-agent",
+    "mesh-cni",
     "mesh-cni-cli",
     "mesh-cni-common",
     "mesh-cni-ebpf",
     "mesh-cni-plugin",
 ]
-default-members = ["mesh-cni-plugin", "mesh-cni-agent", "mesh-cni-common", "mesh-cni-api", "mesh-cni-cli"]
+default-members = ["mesh-cni-plugin", "mesh-cni", "mesh-cni-common", "mesh-cni-api", "mesh-cni-cli"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"

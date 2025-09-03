@@ -1,4 +1,3 @@
-use std::pin::pin;
 use std::sync::Arc;
 
 use k8s_openapi::api::core::v1::Service;
@@ -47,7 +46,6 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
         return Err(Error::Other("failed to get local cluster client".into()));
     };
 
-    let cancel = CancellationToken::new();
     let service_controller = crate::kubernetes::controllers::service::start_service_controller(
         local_client,
         service_state,
@@ -56,7 +54,7 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
     );
 
     tokio::select! {
-        _ = service_controller => {},
+        h = service_controller => exit("service_controller", h),
         _ = cancel.cancelled() => {},
     }
 
