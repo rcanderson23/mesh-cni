@@ -4,13 +4,13 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use mesh_cni::config::PluginConfig;
+use mesh_cni_plugin::config::PluginConfig;
 use tracing::info;
 
 use crate::Result;
 use crate::config::AgentArgs;
 
-const CNI_PATH: &str = "./mesh-cni";
+const CNI_PATH: &str = "./mesh-cni-plugin";
 const CONFLIST_NAME: &str = "05-mesh.conflist";
 
 pub fn ensure_cni_preconditions(args: &AgentArgs) -> Result<()> {
@@ -110,7 +110,7 @@ fn ensure_cni_bin(dst: impl AsRef<Path>) -> Result<()> {
 
 // updates the existing cni config to include mesh-cni plugin
 fn update_cni_conf(conf: &[u8]) -> Result<Vec<u8>> {
-    let mut conf: mesh_cni::config::Config = serde_json::from_slice(conf)?;
+    let mut conf: mesh_cni_plugin::config::Config = serde_json::from_slice(conf)?;
     conf.plugins.push(PluginConfig {
         r#type: "mesh-cni".into(),
         options: Default::default(),

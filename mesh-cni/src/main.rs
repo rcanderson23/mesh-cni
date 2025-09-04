@@ -1,6 +1,6 @@
 use clap::Parser;
-use mesh_cni_agent::controller;
-use mesh_cni_agent::{Result, agent, cni, config::Cli, http};
+use mesh_cni::controller;
+use mesh_cni::{Result, agent, cni, config::Cli, http};
 use tokio::task::JoinError;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -10,7 +10,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     setup_subscriber(None);
     match cli.command {
-        mesh_cni_agent::config::Commands::Agent(agent_args) => {
+        mesh_cni::config::Commands::Agent(agent_args) => {
             cni::ensure_cni_preconditions(&agent_args)?;
 
             let cancel = tokio_util::sync::CancellationToken::new();
@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
             };
             info!("Exiting...");
         }
-        mesh_cni_agent::config::Commands::Controller(controller_args) => {
+        mesh_cni::config::Commands::Controller(controller_args) => {
             let cancel = tokio_util::sync::CancellationToken::new();
             let mut metrics_handle = tokio::spawn(http::serve_metrics(
                 controller_args.metrics_address,
@@ -63,6 +63,7 @@ async fn main() -> Result<()> {
             };
             info!("Exiting...");
         }
+        mesh_cni::config::Commands::Crdgen => mesh_cni::kubernetes::crds::crd_gen()?,
     }
     Ok(())
 }
@@ -72,7 +73,7 @@ fn setup_subscriber(_telemetry_endpoint: Option<&str>) {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "mesh_cni_agent=info".into()),
+                .unwrap_or_else(|_| "mesh_cni=info,mesh_cni_ebpf=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

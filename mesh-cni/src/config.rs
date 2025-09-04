@@ -17,6 +17,7 @@ pub struct Cli {
 pub enum Commands {
     Agent(AgentArgs),
     Controller(ControllerArgs),
+    Crdgen,
 }
 
 #[derive(Parser, Debug, Clone)]

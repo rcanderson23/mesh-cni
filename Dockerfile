@@ -30,7 +30,7 @@ FROM gcr.io/distroless/cc-debian12
 WORKDIR /app
 ENV PATH="$PATH:/app"
 
-COPY --from=builder /app/target/release/mesh-cni /app/target/release/mesh-cni-agent /app/target/release/mesh /app/
+COPY --from=builder /app/target/release/mesh-cni /app/target/release/mesh-cni-plugin /app/target/release/mesh /app/
 
-ENTRYPOINT [ "/app/mesh-cni-agent" ]
+ENTRYPOINT [ "/app/mesh-cni" ]
 

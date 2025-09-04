@@ -82,6 +82,9 @@ pub enum Error {
 
     #[error("failed to reconcile resource: {0}")]
     ReconcileError(String),
+
+    #[error("failed to wait on condition: {0}")]
+    KubeWait(#[from] kube::runtime::wait::Error),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

@@ -16,8 +16,10 @@ axum = { version = "0.8.4", features = ["tokio"]}
 aya = { workspace = true }
 aya-log = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-dashmap = { workspace = true }
+chrono = { workspace = true }
 futures = { workspace = true }
+schemars = { workspace = true, features = ["preserve_order"]}
+
 http = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -53,9 +55,9 @@ anyhow = { workspace = true }
 aya-build = { workspace = true }
 
 [[bin]]
-name = "mesh-cni-agent"
+name = "mesh-cni"
 path = "src/main.rs"
 
 [lib]
-name = "mesh_cni_agent"
+name = "mesh_cni"
 path = "src/lib.rs"

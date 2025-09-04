@@ -24,9 +24,9 @@ tracing-subscriber = { workspace = true }
 
 
 [[bin]]
-name = "mesh-cni"
+name = "mesh-cni-plugin"
 path = "src/main.rs"
 
 [lib]
-name = "mesh_cni"
+name = "mesh_cni_plugin"
 path = "src/lib.rs"
