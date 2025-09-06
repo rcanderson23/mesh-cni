@@ -23,6 +23,7 @@ kind-down:
 install: 
   helm upgrade --install {{name}} ./charts/mesh-cni -n kube-system --set=agent.image.tag=latest
 
+
 restart:
   kubectl rollout restart daemonset -n kube-system {{name}}-agent
   kubectl rollout restart deployment -n kube-system {{name}}-controller

@@ -4,8 +4,9 @@ use std::sync::Arc;
 use ahash::{HashMap, HashMapExt};
 use futures::StreamExt;
 use k8s_openapi::Metadata;
-use kube::Resource;
+use kube::core::{Selector, SelectorExt};
 use kube::runtime::reflector::{ObjectRef, ReflectHandle, Store};
+use kube::{Resource, ResourceExt};
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, warn};
@@ -21,6 +22,11 @@ where
 {
     fn get_from_cluster(&self, obj_ref: &ObjectRef<K>, cluster_name: &str) -> Option<Arc<K>>;
     fn get_all(&self, obj_ref: &ObjectRef<K>) -> Vec<Arc<K>>;
+    fn get_all_by_namespace_label(
+        &self,
+        namespace: Option<&str>,
+        selector: &Selector,
+    ) -> Vec<Arc<K>>;
 }
 
 pub struct MultiClusterState<K>
@@ -100,6 +106,22 @@ where
                 continue;
             };
             result.push(o);
+        }
+        result
+    }
+
+    fn get_all_by_namespace_label(
+        &self,
+        namespace: Option<&str>,
+        selector: &Selector,
+    ) -> Vec<Arc<K>> {
+        let mut result = Vec::new();
+        for (_cluster, state) in &self.state {
+            for k in state.state().iter() {
+                if selector.matches(k.labels()) && k.namespace().as_deref() == namespace {
+                    result.push(k.clone());
+                }
+            }
         }
         result
     }

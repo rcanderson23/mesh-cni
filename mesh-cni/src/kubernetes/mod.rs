@@ -7,15 +7,13 @@ pub mod state;
 
 use futures::StreamExt;
 use k8s_openapi::serde::de::DeserializeOwned;
-use kube::runtime::reflector::{ObjectRef, ReflectHandle, Store};
+use kube::runtime::reflector::{ReflectHandle, Store};
 use kube::runtime::{WatchStreamExt, reflector, watcher};
 use kube::{Api, Resource};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::net::IpAddr;
-use std::sync::Arc;
 use tracing::{error, trace};
 
 use crate::{Error, Result};
@@ -62,11 +60,12 @@ fn selector_matches(
     true
 }
 
-async fn create_store_and_subscriber<K>(api: Api<K>) -> Result<(Store<K>, ReflectHandle<K>)>
+pub async fn create_store_and_subscriber<K>(api: Api<K>) -> Result<(Store<K>, ReflectHandle<K>)>
 where
     K: Resource + Send + Clone + Debug + DeserializeOwned + Sync + 'static,
     <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + Hash + Clone,
 {
+    // TODO: figure out an appropriate number here and get rid of magic number
     let (store, writer) = reflector::store_shared(1000);
     let subscriber: ReflectHandle<K> = writer
         .subscribe()

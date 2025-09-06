@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub const NAME_GROUP_MESHENDPOINT: &str = "meshendpoints.mesh-cni.dev";
 pub mod v1alpha1 {
 
+    use std::net::IpAddr;
+
     use super::*;
 
     #[derive(
@@ -15,17 +17,19 @@ pub mod v1alpha1 {
         version = "v1alpha1",
         kind = "MeshEndpoint",
         derive = "Default",
-        derive = "PartialEq"
+        derive = "PartialEq",
+        namespaced
     )]
     pub struct MeshEndpointSpec {
-        pub service_ips: Vec<String>,
-        pub port_mappings: Vec<PortMapping>,
+        pub service_ips: Vec<IpAddr>,
+        pub backend_port_mappings: Vec<BackendPortMapping>,
     }
 
-    #[derive(KubeSchema, Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug)]
-    pub struct PortMapping {
-        pub port: u16,
-        pub target_port: u16,
+    #[derive(KubeSchema, Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+    pub struct BackendPortMapping {
+        pub ip: IpAddr,
+        pub service_port: u16,
+        pub backend_port: u16,
         pub protocol: String,
     }
 }

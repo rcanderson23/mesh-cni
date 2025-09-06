@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 use crate::kubernetes::{ClusterId, create_store_and_subscriber, selector_matches};
 use crate::{Error, Result};
 
-const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
+pub(crate) const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EndpointEvent {
