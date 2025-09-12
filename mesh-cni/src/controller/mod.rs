@@ -42,7 +42,7 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
         ));
     };
 
-    let service_state = Arc::new(service_state);
+    let _service_state = Arc::new(service_state);
     let endpoint_slice_state = Arc::new(endpoint_slice_state);
 
     let Some(local_client) = local_cluster.take_client() else {
@@ -51,15 +51,13 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
 
     crds::apply_crds(local_client.clone()).await?;
 
-    let service_controller = start_service_controller(
-        local_client,
-        service_state,
-        endpoint_slice_state,
-        cancel.clone(),
-    );
+    let service_controller =
+        start_service_controller(local_client, endpoint_slice_state, cancel.clone());
+
+    tokio::spawn(service_controller);
 
     tokio::select! {
-        h = service_controller => exit("service_controller", h),
+        // h = service_controller => exit("service_controller", h),
         _ = cancel.cancelled() => {},
     }
 

@@ -4,9 +4,9 @@ use aya_ebpf::bindings::bpf_sock_addr;
 use aya_ebpf::helpers::r#gen::bpf_get_prandom_u32;
 use aya_ebpf::programs::SockAddrContext;
 use aya_log_ebpf::info;
-use mesh_cni_common::service_v4::{EndpointKeyV4, ServiceKeyV4};
+use mesh_cni_common::service::{EndpointKey, ServiceKeyV4};
 
-use crate::{ENDPOINTS, SERVICES};
+use crate::{ENDPOINTS_V4, SERVICES_V4};
 
 const AF_INET: u16 = 2;
 const _AF_INET6: u16 = 10;
@@ -50,7 +50,7 @@ pub fn try_mesh_cni_group_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
 
     let service_key = build_service_key(&ctx, ptr)?;
     let service_value = unsafe {
-        match SERVICES.get(&service_key) {
+        match SERVICES_V4.get(&service_key) {
             Some(value) => value,
             None => return Ok(1),
         }
@@ -61,7 +61,7 @@ pub fn try_mesh_cni_group_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
     let position = get_position(service_value.count);
 
     let endpoints_value = unsafe {
-        match ENDPOINTS.get(&EndpointKeyV4 {
+        match ENDPOINTS_V4.get(&EndpointKey {
             id: service_value.id,
             position,
         }) {
@@ -70,12 +70,12 @@ pub fn try_mesh_cni_group_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
         }
     };
 
-    info!(
-        &ctx,
-        "found matching service, replacing ip {} and port {}",
-        Ipv4Addr::from(endpoints_value.ip),
-        endpoints_value.port
-    );
+    // info!(
+    //     &ctx,
+    //     "found matching service, replacing ip {} and port {}",
+    //     Ipv4Addr::from(endpoints_value.ip),
+    //     endpoints_value.port
+    // );
     unsafe { *ptr }.user_ip4 = endpoints_value.ip.to_be();
     unsafe { *ptr }.user_port = u32::from(endpoints_value.port.to_be());
 
@@ -89,7 +89,7 @@ fn build_service_key(ctx: &SockAddrContext, ptr: *mut bpf_sock_addr) -> Result<S
     let protocol = unsafe { *ptr }.protocol.try_into().map_err(|_| 1)?;
 
     // TODO: remove unnecessary logging
-    info!(ctx, "found Ipv4: {} port: {}", Ipv4Addr::from(ip), port);
+    // info!(ctx, "found Ipv4: {} port: {}", Ipv4Addr::from(ip), port);
     Ok(ServiceKeyV4 { ip, port, protocol })
 }
 

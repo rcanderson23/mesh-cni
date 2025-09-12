@@ -9,8 +9,8 @@ use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
 use crate::Result;
-use crate::agent::BpfMap;
-use crate::agent::ip::state::State;
+use crate::bpf::BpfMap;
+use crate::bpf::ip::state::State;
 use crate::kubernetes::pod::PodIdentityEvent;
 
 #[derive(Clone)]

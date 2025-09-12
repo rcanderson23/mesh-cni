@@ -127,6 +127,44 @@ where
     }
 }
 
+impl<K> MultiClusterStore<K> for Store<K>
+where
+    K: Resource
+        + Send
+        + Clone
+        + core::fmt::Debug
+        + DeserializeOwned
+        + k8s_openapi::Metadata
+        + Sync
+        + 'static,
+    <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + core::hash::Hash + Clone,
+{
+    fn get_from_cluster(&self, obj_ref: &ObjectRef<K>, _cluster_name: &str) -> Option<Arc<K>> {
+        self.get(obj_ref)
+    }
+
+    fn get_all(&self, obj_ref: &ObjectRef<K>) -> Vec<Arc<K>> {
+        let Some(resource) = self.get(obj_ref) else {
+            return Vec::new();
+        };
+        vec![resource]
+    }
+
+    fn get_all_by_namespace_label(
+        &self,
+        namespace: Option<&str>,
+        selector: &Selector,
+    ) -> Vec<Arc<K>> {
+        let mut result = Vec::new();
+        for item in self.state().iter() {
+            if item.namespace().as_deref() == namespace && selector.matches(item.labels()) {
+                result.push(item.clone());
+            }
+        }
+        result
+    }
+}
+
 async fn start_cluster_event_loop<K>(
     cluster: Cluster,
     subscriber: ReflectHandle<K>,

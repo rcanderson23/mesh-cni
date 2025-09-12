@@ -7,9 +7,9 @@ use mesh_cni_common::Id;
 use tokio::task::JoinHandle;
 
 use crate::Result;
-use crate::agent::BpfMap;
-use crate::agent::ip::server::Server;
-use crate::agent::ip::state::State;
+use crate::bpf::BpfMap;
+use crate::bpf::ip::server::Server;
+use crate::bpf::ip::state::State;
 use crate::kubernetes::ClusterId;
 use crate::kubernetes::pod::NamespacePodState;
 

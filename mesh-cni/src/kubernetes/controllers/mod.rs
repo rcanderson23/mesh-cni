@@ -1,9 +1,3 @@
-use tokio_util::sync::CancellationToken;
-
+pub mod bpf_service;
 pub mod service;
-
-async fn shutdown(cancel: CancellationToken) {
-    tokio::select! {
-        _ = cancel.cancelled() => {}
-    }
-}
+pub mod utils;

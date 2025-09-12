@@ -3,7 +3,7 @@ use kube::api::{Patch, PatchParams};
 use kube::runtime::conditions;
 use kube::runtime::wait::await_condition;
 use kube::{Api, CustomResourceExt};
-use tracing::{error, info};
+use tracing::info;
 
 use crate::kubernetes::crds::meshendpoint::NAME_GROUP_MESHENDPOINT;
 use crate::{Error, Result};
@@ -30,15 +30,4 @@ pub async fn apply_crds(client: kube::Client) -> Result<()> {
     };
     info!("applied MeshEndpoint CRD");
     Ok(())
-}
-
-fn exit(task: &str, out: Result<()>) {
-    match out {
-        Ok(_) => {
-            info!("{task} exited")
-        }
-        Err(e) => {
-            error!("{task} failed with error: {e}")
-        }
-    }
 }

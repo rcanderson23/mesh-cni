@@ -1,6 +1,6 @@
 #![no_std]
 
-pub mod service_v4;
+pub mod service;
 
 use core::fmt::Display;
 use core::hash::Hash;

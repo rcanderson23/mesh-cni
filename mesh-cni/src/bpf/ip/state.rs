@@ -4,7 +4,7 @@ use ahash::HashMap;
 use mesh_cni_common::Id;
 
 use crate::Result;
-use crate::agent::{BpfMap, BpfState};
+use crate::bpf::{BpfMap, BpfState};
 use crate::kubernetes::Labels;
 
 pub type Ipv4State<I> = BpfState<I, u32, Id>;

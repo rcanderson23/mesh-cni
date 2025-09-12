@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod bpf;
 pub mod cni;
 pub mod config;
 pub mod controller;
@@ -85,6 +86,9 @@ pub enum Error {
 
     #[error("failed to wait on condition: {0}")]
     KubeWait(#[from] kube::runtime::wait::Error),
+
+    #[error("failed to reconcile due to missing precondition: {0}")]
+    ReconcileMissingPrecondition(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
