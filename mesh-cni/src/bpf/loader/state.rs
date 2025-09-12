@@ -13,10 +13,7 @@ use tracing::warn;
 
 use crate::{Error, Result};
 
-const NET_NS_DIR: &str = "/var/run/mesh/netns";
 const CGROUP_SYS_DIR: &str = "/sys/fs/cgroup";
-const INGRESS_TC_NAME: &str = "mesh_cni_ingress";
-const EGRESS_TC_NAME: &str = "mesh_cni_egress";
 
 type IfaceStore =
     Arc<Mutex<BTreeMap<(String, String), (SchedClassifierLinkId, SchedClassifierLinkId)>>>;

@@ -7,7 +7,7 @@ use mesh_cni_common::service::{
     EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4,
     ServiceKeyV6, ServiceValue,
 };
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::bpf::BpfMap;
 use crate::{Error, Result};
@@ -34,7 +34,7 @@ pub trait ServiceEndpointBpfMap {
     fn get_endpoint_cache(&self) -> &ahash::HashMap<EndpointKey, Self::EValue>;
 }
 
-pub(crate) struct ServiceEndpoint<S, E, SK, EV>
+pub struct ServiceEndpoint<S, E, SK, EV>
 where
     S: BpfMap<SK, ServiceValue>,
     E: BpfMap<EndpointKey, EV>,

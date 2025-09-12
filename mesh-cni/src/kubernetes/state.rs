@@ -116,7 +116,7 @@ where
         selector: &Selector,
     ) -> Vec<Arc<K>> {
         let mut result = Vec::new();
-        for (_cluster, state) in &self.state {
+        for state in self.state.values() {
             for k in state.state().iter() {
                 if selector.matches(k.labels()) && k.namespace().as_deref() == namespace {
                     result.push(k.clone());

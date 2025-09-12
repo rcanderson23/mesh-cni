@@ -23,11 +23,6 @@ use crate::kubernetes::controllers::bpf_service::start_bpf_meshendpoint_controll
 use crate::kubernetes::controllers::bpf_service::start_bpf_service_controller;
 use crate::kubernetes::{ClusterId, create_store_and_subscriber};
 
-// pub type ServiceStateV4<S4> = BpfState<S4, ServiceKeyV4, ServiceValue>;
-// pub type ServiceStateV6<S6> = BpfState<S6, ServiceKeyV6, ServiceValue>;
-// pub type EndpointStateV4<E4> = BpfState<E4, EndpointKey, EndpointValueV4>;
-// pub type EndpointStateV6<E6> = BpfState<E6, EndpointKey, EndpointValueV6>;
-
 pub async fn run<S4, S6, E4, E6>(
     service_map_v4: S4,
     service_map_v6: S6,

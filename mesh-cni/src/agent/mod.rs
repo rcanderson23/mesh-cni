@@ -4,10 +4,8 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
-use ahash::HashMapExt;
 use aya::maps::{HashMap, MapData};
 use mesh_cni_api::bpf::v1::bpf_server::BpfServer;
-use mesh_cni_api::service::v1::service_server::ServiceServer;
 use mesh_cni_common::Id;
 use mesh_cni_common::service::{
     EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
@@ -17,7 +15,6 @@ use tokio_stream::wrappers::UnixListenerStream;
 use tokio_util::sync::CancellationToken;
 use tonic::service::{Routes, RoutesBuilder};
 use tonic::transport::Server;
-use tracing::{error, info};
 
 use crate::config::AgentArgs;
 use crate::http::shutdown;
@@ -102,21 +99,8 @@ pub async fn start(args: AgentArgs, cancel: CancellationToken) -> Result<()> {
     // TODO: add graceful shutdown
     tokio::select! {
         _ = cancel.cancelled() => {},
-        // h = server_handle => exit("bpf", h),
-        // h = ip_handle => exit("ip", h.map_err(|e| Error::Task(e.to_string()))?),
     }
     Ok(())
-}
-
-fn exit(task: &str, out: Result<()>) {
-    match out {
-        Ok(_) => {
-            info!("{task} exited")
-        }
-        Err(e) => {
-            error!("{task} failed with error: {e}")
-        }
-    }
 }
 
 pub(crate) async fn serve(path: PathBuf, routes: Routes, cancel: CancellationToken) -> Result<()> {

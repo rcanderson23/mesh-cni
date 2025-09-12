@@ -15,7 +15,6 @@ use crate::{Error, Result};
 use mesh_cni_api::bpf::v1::bpf_server::Bpf as BpfApi;
 
 const NET_NS_DIR: &str = "/var/run/mesh/netns";
-const CGROUP_SYS_DIR: &str = "/sys/fs/cgroup";
 const INGRESS_TC_NAME: &str = "mesh_cni_ingress";
 const EGRESS_TC_NAME: &str = "mesh_cni_egress";
 
