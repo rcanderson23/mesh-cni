@@ -25,12 +25,15 @@ COPY justfile justfile
 
 RUN just build
 
+FROM public.ecr.aws/eks-distro/kubernetes-sigs/aws-iam-authenticator:v0.7.4-eks-1-34-latest AS aws-iam
+
 FROM gcr.io/distroless/cc-debian12
 
 WORKDIR /app
 ENV PATH="$PATH:/app"
 
 COPY --from=builder /app/target/release/mesh-cni /app/target/release/mesh-cni-plugin /app/target/release/mesh /app/
+COPY --from=aws-iam /aws-iam-authenticator /app/
 
 ENTRYPOINT [ "/app/mesh-cni" ]
 
