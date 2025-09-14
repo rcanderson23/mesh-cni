@@ -1,35 +1,31 @@
-use std::sync::Arc;
-
+use aya::maps::lpm_trie::Key as LpmKey;
 use mesh_cni_api::ip::v1::ip_server::Ip as IpApi;
-use mesh_cni_api::ip::v1::{IpId, ListIpsReply, ListIpsRequest};
+use mesh_cni_api::ip::v1::{ListIpsReply, ListIpsRequest};
 use mesh_cni_common::Id;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::Receiver;
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
 use crate::Result;
 use crate::bpf::BpfMap;
-use crate::bpf::ip::state::State;
+use crate::bpf::ip::state::IpNetworkState;
 use crate::kubernetes::pod::PodIdentityEvent;
 
 #[derive(Clone)]
-pub struct Server<I, P>
+pub struct Server<IP4, IP6>
 where
-    I: BpfMap<u32, Id>,
-    P: BpfMap<u128, Id>,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = Id>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = Id>,
 {
-    state: Arc<Mutex<State<I, P>>>,
+    state: IpNetworkState<IP4, IP6>,
 }
 
-impl<I, P> Server<I, P>
+impl<IP4, IP6> Server<IP4, IP6>
 where
-    I: BpfMap<u32, Id> + Send + 'static,
-    P: BpfMap<u128, Id> + Send + 'static,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = Id> + Send + 'static,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = Id> + Send + 'static,
 {
-    pub async fn from(state: State<I, P>, rx: Receiver<PodIdentityEvent>) -> Self {
-        let state = Arc::new(Mutex::new(state));
-        // TODO:
+    pub async fn from(state: IpNetworkState<IP4, IP6>, rx: Receiver<PodIdentityEvent>) -> Self {
         tokio::spawn(start_event_receiver(state.clone(), rx));
 
         Self { state }
@@ -37,41 +33,30 @@ where
 }
 
 #[tonic::async_trait]
-impl<I, P> IpApi for Server<I, P>
+impl<IP4, IP6> IpApi for Server<IP4, IP6>
 where
-    I: BpfMap<u32, Id> + Send + 'static,
-    P: BpfMap<u128, Id> + Send + 'static,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = Id> + Send + 'static,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = Id> + Send + 'static,
 {
     async fn list_ips(
         &self,
         _request: Request<ListIpsRequest>,
     ) -> Result<Response<ListIpsReply>, Status> {
-        let state = self.state.lock().await;
-        let ips = state
-            .ip_to_labels_id
-            .iter()
-            .map(|(ip, (labels, id))| IpId {
-                ip: ip.to_string(),
-                labels: labels.to_hashmap(),
-                id: *id as u32,
-            })
-            .collect();
-        drop(state);
+        let ips = self.state.get_ip_labels_id();
         let response = Response::new(ListIpsReply { ips });
         Ok(response)
     }
 }
 
-async fn start_event_receiver<I, P>(
-    state: Arc<Mutex<State<I, P>>>,
+async fn start_event_receiver<IP4, IP6>(
+    state: IpNetworkState<IP4, IP6>,
     mut rx: Receiver<PodIdentityEvent>,
 ) -> Result<()>
 where
-    I: BpfMap<u32, Id> + Send,
-    P: BpfMap<u128, Id> + Send,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = Id> + Send,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = Id> + Send,
 {
     while let Some(ev) = rx.recv().await {
-        let mut state = state.lock().await;
         match ev {
             PodIdentityEvent::Add(pod_identity) => {
                 for ip in pod_identity.ips {

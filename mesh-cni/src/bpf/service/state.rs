@@ -36,8 +36,8 @@ pub trait ServiceEndpointBpfMap {
 
 pub struct ServiceEndpoint<S, E, SK, EV>
 where
-    S: BpfMap<SK, ServiceValue>,
-    E: BpfMap<EndpointKey, EV>,
+    S: BpfMap,
+    E: BpfMap,
     SK: std::hash::Hash + std::cmp::Eq + Clone + Copy,
     EV: Clone + std::cmp::PartialEq + Copy,
 {
@@ -49,8 +49,8 @@ where
 
 impl<S, E, SK, EV> ServiceEndpoint<S, E, SK, EV>
 where
-    S: BpfMap<SK, ServiceValue>,
-    E: BpfMap<EndpointKey, EV>,
+    S: BpfMap,
+    E: BpfMap,
     SK: std::hash::Hash + std::cmp::Eq + Clone + Copy,
     EV: Clone + std::cmp::PartialEq + Copy,
 {
@@ -66,8 +66,8 @@ where
 
 impl<S, E, SK, EV> ServiceEndpointBpfMap for ServiceEndpoint<S, E, SK, EV>
 where
-    S: BpfMap<SK, ServiceValue>,
-    E: BpfMap<EndpointKey, EV>,
+    S: BpfMap<Key = SK, Value = ServiceValue>,
+    E: BpfMap<Key = EndpointKey, Value = EV>,
     SK: std::hash::Hash + std::cmp::Eq + Clone + Copy,
     EV: Clone + std::cmp::PartialEq + Copy,
 {

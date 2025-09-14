@@ -40,10 +40,10 @@ pub async fn run<S4, S6, E4, E6>(
     >,
 >
 where
-    S4: BpfMap<ServiceKeyV4, ServiceValue> + Send + 'static,
-    S6: BpfMap<ServiceKeyV6, ServiceValue> + Send + 'static,
-    E4: BpfMap<EndpointKey, EndpointValueV4> + Send + 'static,
-    E6: BpfMap<EndpointKey, EndpointValueV6> + Send + 'static,
+    S4: BpfMap<Key = ServiceKeyV4, Value = ServiceValue> + Send + 'static,
+    S6: BpfMap<Key = ServiceKeyV6, Value = ServiceValue> + Send + 'static,
+    E4: BpfMap<Key = EndpointKey, Value = EndpointValueV4> + Send + 'static,
+    E6: BpfMap<Key = EndpointKey, Value = EndpointValueV6> + Send + 'static,
 {
     let service_endpoint_v4 = ServiceEndpoint::new(service_map_v4, endpoint_map_v4);
     let service_endpoint_v6 = ServiceEndpoint::new(service_map_v6, endpoint_map_v6);

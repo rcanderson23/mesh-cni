@@ -4,7 +4,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
-use aya::maps::{HashMap, MapData};
+use aya::maps::{HashMap, LpmTrie, MapData};
 use mesh_cni_api::bpf::v1::bpf_server::BpfServer;
 use mesh_cni_common::Id;
 use mesh_cni_common::service::{
@@ -26,14 +26,14 @@ pub async fn start(args: AgentArgs, cancel: CancellationToken) -> Result<()> {
     let loader = bpf::loader::LoaderState::try_new()?;
 
     // TODO: bpf maps should be pinned and loaded from pinned location
-    let ipv4_map: HashMap<MapData, u32, Id> = loader
+    let ipv4_map: LpmTrie<MapData, u32, Id> = loader
         .take_map("IPV4_IDENTITY")
         .await
         .ok_or_else(|| Error::MapNotFound {
             name: "IPV4_IDENTITY".into(),
         })?
         .try_into()?;
-    let ipv6_map: HashMap<MapData, u128, Id> = loader
+    let ipv6_map: LpmTrie<MapData, u128, Id> = loader
         .take_map("IPV6_IDENTITY")
         .await
         .ok_or_else(|| Error::MapNotFound {

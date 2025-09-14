@@ -1,4 +1,5 @@
 use aya_ebpf::cty::c_long;
+use aya_ebpf::maps::lpm_trie::Key as LpmKey;
 use aya_ebpf::{bindings::TC_ACT_PIPE, programs::TcContext};
 use aya_log_ebpf::{error, info};
 use network_types::eth::{EthHdr, EtherType};
@@ -23,7 +24,9 @@ pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
     let src = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst = u32::from_be_bytes(ipv4hdr.dst_addr);
 
-    let (Some(src_id), Some(dst_id)) = (ipv4_id(src), ipv4_id(dst)) else {
+    let (Some(src_id), Some(dst_id)) =
+        (ipv4_id(LpmKey::new(32, src)), ipv4_id(LpmKey::new(32, dst)))
+    else {
         return Ok(TC_ACT_PIPE);
     };
 

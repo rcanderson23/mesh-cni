@@ -14,6 +14,7 @@ use tracing::warn;
 use crate::{Error, Result};
 
 const CGROUP_SYS_DIR: &str = "/sys/fs/cgroup";
+// const MESH_BPF_FS_DIR: &str = "/sys/fs/bpf/mesh";
 
 type IfaceStore =
     Arc<Mutex<BTreeMap<(String, String), (SchedClassifierLinkId, SchedClassifierLinkId)>>>;
@@ -47,7 +48,7 @@ impl State {
         //
         // ifaces.insert((iface.into(), "root".into()), (ingress_id, egress_id));
 
-        // TODO: pin programs to survive restart
+        // TODO: pin programs?
         //
         // let ingress = ebpf
         //     .map_mut("mesh_cni_ingress")

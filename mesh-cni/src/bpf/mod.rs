@@ -6,26 +6,31 @@ use std::borrow::BorrowMut;
 use std::hash::Hash;
 
 use aya::Pod;
-use aya::maps::{HashMap, MapData};
+use aya::maps::lpm_trie::Key as LpmKey;
+use aya::maps::{HashMap, LpmTrie, MapData};
 
 use crate::Result;
+use crate::bpf::ip::IpNetwork;
 
-pub trait BpfMap<K, V> {
-    fn update(&mut self, key: K, value: V) -> Result<()>;
-    fn delete(&mut self, key: &K) -> Result<()>;
-    fn get(&self, key: &K) -> Result<V>;
-    fn get_state(&self) -> Result<ahash::HashMap<K, V>>;
-}
-pub trait TestBpfMap {
+pub trait BpfMap {
     type Key;
     type Value;
+    type KeyOutput;
     fn update(&mut self, key: Self::Key, value: Self::Value) -> Result<()>;
     fn delete(&mut self, key: &Self::Key) -> Result<()>;
     fn get(&self, key: &Self::Key) -> Result<Self::Value>;
-    fn get_state(&self) -> Result<ahash::HashMap<Self::Key, Self::Value>>;
+    fn get_state(&self) -> Result<ahash::HashMap<Self::KeyOutput, Self::Value>>;
 }
 
-impl<T: BorrowMut<MapData>, K: Pod + Eq + Hash, V: Pod> BpfMap<K, V> for HashMap<T, K, V> {
+impl<T, K, V> BpfMap for HashMap<T, K, V>
+where
+    T: BorrowMut<MapData>,
+    K: Pod + Eq + Hash,
+    V: Pod,
+{
+    type Key = K;
+    type Value = V;
+    type KeyOutput = K;
     fn update(&mut self, key: K, value: V) -> Result<()> {
         Ok(self.insert(key, value, 0)?)
     }
@@ -48,8 +53,16 @@ impl<T: BorrowMut<MapData>, K: Pod + Eq + Hash, V: Pod> BpfMap<K, V> for HashMap
         Ok(map)
     }
 }
-impl<K: Pod + Eq + Hash, V: Pod> BpfMap<K, V> for ahash::HashMap<K, V> {
-    fn update(&mut self, key: K, value: V) -> Result<()> {
+
+impl<K, V> BpfMap for ahash::HashMap<K, V>
+where
+    K: Pod + Eq + Hash,
+    V: Pod,
+{
+    type Key = K;
+    type Value = V;
+    type KeyOutput = K;
+    fn update(&mut self, key: Self::Key, value: Self::Value) -> Result<()> {
         self.insert(key, value);
         Ok(())
     }
@@ -68,60 +81,67 @@ impl<K: Pod + Eq + Hash, V: Pod> BpfMap<K, V> for ahash::HashMap<K, V> {
     }
 }
 
-pub struct BpfState<M, K, V>
+impl<T, V> BpfMap for LpmTrie<T, u32, V>
 where
-    M: BpfMap<K, V>,
-    K: std::hash::Hash + std::cmp::Eq + Clone,
-    V: Clone + std::cmp::PartialEq,
+    T: BorrowMut<MapData>,
+    // K: Pod + Eq + Hash + From<LpmKey<>>,
+    V: Pod,
 {
-    cache: ahash::HashMap<K, V>,
-    bpf_map: M,
+    type Key = LpmKey<u32>;
+    type Value = V;
+    type KeyOutput = IpNetwork;
+    fn update(&mut self, key: Self::Key, value: Self::Value) -> Result<()> {
+        Ok(self.insert(&key, value, 0)?)
+    }
+    fn delete(&mut self, key: &Self::Key) -> Result<()> {
+        Ok(self.remove(key)?)
+    }
+    fn get(&self, key: &Self::Key) -> Result<Self::Value> {
+        Ok(<LpmTrie<T, u32, V>>::get(self, key, 0)?)
+    }
+    fn get_state(&self) -> Result<ahash::HashMap<Self::KeyOutput, Self::Value>> {
+        let mut map = ahash::HashMap::default();
+        for v in self.iter() {
+            match v {
+                Ok((k, v)) => {
+                    let k = IpNetwork::from(k);
+                    map.insert(k, v);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(map)
+    }
 }
-
-impl<M, K, V> BpfState<M, K, V>
+impl<T, V> BpfMap for LpmTrie<T, u128, V>
 where
-    M: BpfMap<K, V>,
-    K: std::hash::Hash + std::cmp::Eq + Clone,
-    V: Clone + std::cmp::PartialEq,
+    T: BorrowMut<MapData>,
+    // K: Pod + Eq + Hash + From<LpmKey<>>,
+    V: Pod,
 {
-    pub fn new(bpf_map: M) -> Self {
-        let cache = ahash::HashMap::default();
-        Self { cache, bpf_map }
+    type Key = LpmKey<u128>;
+    type Value = V;
+    type KeyOutput = IpNetwork;
+    fn update(&mut self, key: Self::Key, value: Self::Value) -> Result<()> {
+        Ok(self.insert(&key, value, 0)?)
     }
-
-    pub fn update(&mut self, key: K, value: V) -> Result<()> {
-        if let Some(current) = self.cache.get(&key)
-            && *current == value
-        {
-            return Ok(());
-        };
-        match self.bpf_map.update(key.clone(), value.clone()) {
-            Ok(_) => {
-                self.cache.insert(key, value);
-                Ok(())
+    fn delete(&mut self, key: &Self::Key) -> Result<()> {
+        Ok(self.remove(key)?)
+    }
+    fn get(&self, key: &Self::Key) -> Result<Self::Value> {
+        Ok(<LpmTrie<T, u128, V>>::get(self, key, 0)?)
+    }
+    fn get_state(&self) -> Result<ahash::HashMap<Self::KeyOutput, Self::Value>> {
+        let mut map = ahash::HashMap::default();
+        for v in self.iter() {
+            match v {
+                Ok((k, v)) => {
+                    let k = IpNetwork::from(k);
+                    map.insert(k, v);
+                }
+                Err(e) => return Err(e.into()),
             }
-            Err(e) => Err(e),
         }
-    }
-
-    pub fn delete(&mut self, key: &K) -> Result<()> {
-        match self.bpf_map.delete(key) {
-            Ok(_) => {
-                self.cache.remove(key);
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    pub fn get_from_cache(&self, key: &K) -> Option<&V> {
-        if let Some(val) = self.cache.get(key) {
-            Some(val)
-        } else {
-            None
-        }
-    }
-    pub fn get_from_map(&self, key: &K) -> Result<V> {
-        self.bpf_map.get(key)
+        Ok(map)
     }
 }
