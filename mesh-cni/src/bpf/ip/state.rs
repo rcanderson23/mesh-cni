@@ -18,6 +18,9 @@ where
     shared: Mutex<State<IP4, IP6>>,
 }
 
+// TODO: implement some runner that periodically checks for orphaned records
+// as the controller could miss/error on deletes and these values get stuck in
+// the map permanently
 struct State<IP4, IP6>
 where
     IP4: BpfMap,
@@ -73,7 +76,8 @@ where
         }
     }
     // TODO: check if this can error with notifications
-    pub async fn insert(&self, ip: IpAddr, labels: &Labels) -> Result<()> {
+    // LpmTrie expects big endian order for comparisons
+    pub fn insert(&self, ip: IpAddr, labels: &Labels) -> Result<()> {
         let mut state = self.state.shared.lock().unwrap();
         if let Some((current_labels, _id)) = state.ip_to_labels_id.get(&ip)
             && *current_labels == *labels
@@ -85,10 +89,10 @@ where
         match ip {
             IpAddr::V4(ipv4_addr) => state
                 .ipv4_state
-                .update(LpmKey::new(32, ipv4_addr.to_bits()), id)?,
+                .update(LpmKey::new(32, ipv4_addr.to_bits().to_be()), id)?,
             IpAddr::V6(ipv6_addr) => state
                 .ipv6_state
-                .update(LpmKey::new(128, ipv6_addr.to_bits()), id)?,
+                .update(LpmKey::new(128, ipv6_addr.to_bits().to_be()), id)?,
         };
         let _ = state.labels_to_id.insert(labels.clone(), id);
         let _ = state.ip_to_labels_id.insert(ip, (labels.to_owned(), id));
@@ -98,15 +102,16 @@ where
         Ok(())
     }
 
+    // LpmTrie expects big endian order for comparisons
     pub fn delete(&self, ip: IpAddr) -> Result<()> {
         let mut state = self.state.shared.lock().unwrap();
         match ip {
             IpAddr::V4(ipv4_addr) => state
                 .ipv4_state
-                .delete(&LpmKey::new(32, ipv4_addr.to_bits()))?,
+                .delete(&LpmKey::new(32, ipv4_addr.to_bits().to_be()))?,
             IpAddr::V6(ipv6_addr) => state
                 .ipv6_state
-                .delete(&LpmKey::new(128, ipv6_addr.to_bits()))?,
+                .delete(&LpmKey::new(128, ipv6_addr.to_bits().to_be()))?,
         }
         let labels_id = state.ip_to_labels_id.remove(&ip);
         if let Some((labels, _id)) = labels_id {

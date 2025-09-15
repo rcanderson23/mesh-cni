@@ -46,10 +46,6 @@ pub struct AgentArgs {
     #[arg(long, env = "NODE_NAME")]
     pub node_name: String,
 
-    /// Unique ID for the cluster among the clustermesh
-    #[arg(long, env = "CLUSTER_ID")]
-    pub cluster_id: ClusterId,
-
     /// CNI Bin directory
     #[arg(long, env = "CNI_BIN_DIR", default_value = "/opt/cni/bin")]
     pub cni_bin_dir: PathBuf,

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "mesh-cni.fullname" . }}-config
+  name: {{ include "mesh-cni.fullname" . }}-controller-config
   labels:
     {{- include "mesh-cni.controller.labels" . | nindent 4 }}
 data:

@@ -9,7 +9,6 @@ use tracing::{error, info};
 use crate::Result;
 use crate::bpf::BpfMap;
 use crate::bpf::ip::state::IpNetworkState;
-use crate::kubernetes::pod::PodIdentityEvent;
 
 #[derive(Clone)]
 pub struct Server<IP4, IP6>
@@ -25,9 +24,7 @@ where
     IP4: BpfMap<Key = LpmKey<u32>, Value = Id> + Send + 'static,
     IP6: BpfMap<Key = LpmKey<u128>, Value = Id> + Send + 'static,
 {
-    pub async fn from(state: IpNetworkState<IP4, IP6>, rx: Receiver<PodIdentityEvent>) -> Self {
-        tokio::spawn(start_event_receiver(state.clone(), rx));
-
+    pub fn new(state: IpNetworkState<IP4, IP6>) -> Self {
         Self { state }
     }
 }
@@ -46,33 +43,4 @@ where
         let response = Response::new(ListIpsReply { ips });
         Ok(response)
     }
-}
-
-async fn start_event_receiver<IP4, IP6>(
-    state: IpNetworkState<IP4, IP6>,
-    mut rx: Receiver<PodIdentityEvent>,
-) -> Result<()>
-where
-    IP4: BpfMap<Key = LpmKey<u32>, Value = Id> + Send,
-    IP6: BpfMap<Key = LpmKey<u128>, Value = Id> + Send,
-{
-    while let Some(ev) = rx.recv().await {
-        match ev {
-            PodIdentityEvent::Add(pod_identity) => {
-                for ip in pod_identity.ips {
-                    info!("inserting pod identity {}", ip);
-                    if let Err(e) = state.insert(ip, &pod_identity.labels).await {
-                        error!("{e}: failed to insert pod identity {}", ip);
-                    };
-                }
-            }
-            PodIdentityEvent::Delete(ip) => {
-                info!("deletig pod identity {}", ip);
-                if let Err(e) = state.delete(ip) {
-                    error!("{}: failed to delete pod identity {}", ip, e);
-                };
-            }
-        }
-    }
-    Ok(())
 }

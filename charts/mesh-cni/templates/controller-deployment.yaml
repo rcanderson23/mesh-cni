@@ -62,7 +62,7 @@ spec:
           {{- end }}
       volumes:
       - configMap:
-          name: mesh-cni-config
+          name: mesh-cni-controller-config
         name: config
       {{- with .Values.controller.extraVolumes }}
         {{- toYaml . | nindent 8 }}

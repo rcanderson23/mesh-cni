@@ -26,8 +26,16 @@ agent:
     # The name of the service account to use.
     # If not set and create is true, a name is generated using the fullname template
     name: ""
-  cluster:
-    id: 1
+
+  clustersConfig:
+    local:
+      name: cluster1
+      id: 1
+      endpoint: https://172.18.0.3:6443/
+    remote: []
+    # - name: cluster2
+    #   id: 2
+    #   context: cluster2
 
   cniBinDir: /host/opt/cni/bin
 

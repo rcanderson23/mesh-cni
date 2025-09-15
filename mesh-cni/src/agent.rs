@@ -1,5 +1,3 @@
-pub mod metrics;
-
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -18,11 +16,14 @@ use tonic::transport::Server;
 
 use crate::config::AgentArgs;
 use crate::http::shutdown;
+use crate::kubernetes::cluster::{Cluster, ClusterConfigs};
 use crate::{Error, Result, bpf};
 
 pub async fn start(args: AgentArgs, cancel: CancellationToken) -> Result<()> {
-    // TODO: configure this dynamically for all clusters configured in mesh
-    let kube_client = kube::Client::try_default().await?;
+    let configs = ClusterConfigs::try_new_configs(args.mesh_clusters_config).await?;
+    let mut local_cluster = Cluster::try_new(configs.local).await?;
+    let kube_client = local_cluster.take_client().unwrap();
+
     let loader = bpf::loader::LoaderState::try_new()?;
 
     // TODO: bpf maps should be pinned and loaded from pinned location
@@ -73,15 +74,21 @@ pub async fn start(args: AgentArgs, cancel: CancellationToken) -> Result<()> {
         })?
         .try_into()?;
 
-    let (ip_server, ip_handle) =
-        bpf::ip::run(ipv4_map, ipv6_map, kube_client.clone(), args.cluster_id).await?;
+    let ip_server = bpf::ip::run(
+        ipv4_map,
+        ipv6_map,
+        kube_client.clone(),
+        local_cluster.id,
+        cancel.clone(),
+    )
+    .await?;
     let service_server = bpf::service::run(
         service_map_v4,
         service_map_v6,
         endpoint_map_v4,
         endpoint_map_v6,
         kube_client,
-        args.cluster_id,
+        local_cluster.id,
         cancel.clone(),
     )
     .await?;
@@ -94,7 +101,6 @@ pub async fn start(args: AgentArgs, cancel: CancellationToken) -> Result<()> {
         .add_service(service_server);
     let routes = routes.to_owned().routes();
     tokio::spawn(serve(args.agent_socket_path, routes, cancel.child_token()));
-    tokio::spawn(ip_handle);
 
     // TODO: add graceful shutdown
     tokio::select! {

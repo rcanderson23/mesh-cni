@@ -78,6 +78,9 @@ pub enum Error {
     #[error("failed to create config from kubeconfig: {0}")]
     KubeConfig(#[from] kube::config::KubeconfigError),
 
+    #[error("failed to create incluster config: {0}")]
+    KubeInclusterConfig(#[from] kube::config::InClusterError),
+
     #[error("failed to parse clusters config: {0}")]
     YamlConversion(#[from] serde_yaml::Error),
 

@@ -1,7 +1,6 @@
 pub mod cluster;
 pub mod controllers;
 pub mod crds;
-pub mod pod;
 pub mod service;
 pub mod state;
 
@@ -47,19 +46,6 @@ impl Labels {
     }
 }
 
-fn selector_matches(
-    selectors: &BTreeMap<String, String>,
-    labels: &BTreeMap<String, String>,
-) -> bool {
-    for selector in selectors {
-        let value = labels.get(selector.0);
-        if value != Some(selector.1) {
-            return false;
-        }
-    }
-    true
-}
-
 pub async fn create_store_and_subscriber<K>(api: Api<K>) -> Result<(Store<K>, ReflectHandle<K>)>
 where
     K: Resource + Send + Clone + Debug + DeserializeOwned + Sync + 'static,
@@ -89,24 +75,4 @@ where
         .await
         .map_err(|e| Error::StoreCreation(e.to_string()))?;
     Ok((store, subscriber))
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_label_matcher() {
-        let mut selectors = BTreeMap::new();
-        let mut labels = BTreeMap::new();
-        selectors.insert("kubernetes.io/metadata.name".into(), "kube-system".into());
-        labels.insert("kubernetes.io/metadata.name".into(), "kube-system".into());
-        assert!(selector_matches(&selectors, &labels));
-
-        labels.insert("kubernetes.io/os".into(), "linux".into());
-        assert!(selector_matches(&selectors, &labels));
-
-        labels.insert("kubernetes.io/metadata.name".into(), "default".into());
-        assert!(!selector_matches(&selectors, &labels));
-    }
 }

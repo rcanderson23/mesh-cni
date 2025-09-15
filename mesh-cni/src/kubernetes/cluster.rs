@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use http::Uri;
 use kube::config::KubeConfigOptions;
 use serde::Deserialize;
 
@@ -16,17 +17,21 @@ pub struct Cluster {
 
 impl Cluster {
     pub async fn try_new(config: Config) -> Result<Self> {
-        let client = if config.context.is_some() {
-            let config = kube::Config::from_kubeconfig(&KubeConfigOptions {
+        let client_config = if config.context.is_some() {
+            kube::Config::from_kubeconfig(&KubeConfigOptions {
                 context: config.context,
                 ..Default::default()
             })
-            .await?;
-            kube::Client::try_from(config)?
+            .await?
         } else {
-            kube::Client::try_default().await?
+            let mut client_config = kube::Config::incluster()?;
+            if let Some(endpoint) = config.endpoint {
+                client_config.cluster_url = Uri::try_from(endpoint).unwrap();
+            }
+            client_config
         };
 
+        let client = kube::Client::try_from(client_config)?;
         Ok(Self {
             id: config.id,
             name: config.name,
@@ -43,7 +48,6 @@ impl Cluster {
 pub struct ClusterConfigs {
     pub local: Config,
 
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remote: Vec<Config>,
 }
 
@@ -51,7 +55,6 @@ impl ClusterConfigs {
     pub async fn try_new_configs(path: impl AsRef<Path>) -> Result<Self> {
         let config = tokio::fs::read_to_string(path).await?;
         let config = serde_yaml::from_str(&config)?;
-
         Ok(config)
     }
 }
@@ -62,6 +65,7 @@ pub struct Config {
 
     pub name: String,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+
+    pub endpoint: Option<String>,
 }

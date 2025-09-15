@@ -1,6 +1,7 @@
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::discovery::v1::{EndpointConditions, EndpointSlice};
+use kube::core::{Expression, Selector, SelectorExt};
 use kube::runtime::reflector::{ObjectRef, ReflectHandle, Store};
 use kube::{Api, ResourceExt};
 use mesh_cni_common::{KubeProtocol, service::ServiceKeyV4};
@@ -12,7 +13,7 @@ use tokio::select;
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info, warn};
 
-use crate::kubernetes::{ClusterId, create_store_and_subscriber, selector_matches};
+use crate::kubernetes::{ClusterId, create_store_and_subscriber};
 use crate::{Error, Result};
 
 pub(crate) const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
@@ -233,13 +234,12 @@ fn endpoint_slices_owned_by_service<T: KubeStore<EndpointSlice>>(
     store: &T,
     svc: &Service,
 ) -> Vec<Arc<EndpointSlice>> {
-    let mut selector = BTreeMap::new();
-    selector.insert(SERVICE_OWNER_LABEL.to_owned(), svc.name_any());
+    let selector: Selector = Expression::Equal(SERVICE_OWNER_LABEL.into(), svc.name_any()).into();
 
     let state = store.get_store_state();
     state
         .iter()
-        .filter(|s| selector_matches(&selector, s.labels()))
+        .filter(|s| selector.matches(s.labels()))
         .map(|s| s.to_owned())
         .collect()
 }

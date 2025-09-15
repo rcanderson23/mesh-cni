@@ -6,13 +6,12 @@ use tonic::Request;
 use tonic::transport::Channel;
 
 use crate::cli::IpCommands;
-use crate::client;
+use crate::client::MESH_CNI_SOCKET;
 
 pub(crate) async fn run(cmd: IpCommands) -> anyhow::Result<()> {
-    let ip_client = client::channel().await?;
-    let ip_client = mesh_cni_api::ip::v1::ip_client::IpClient::new(ip_client);
+    let client = IpClient::connect(MESH_CNI_SOCKET).await?;
     match cmd {
-        IpCommands::List => list(ip_client).await?,
+        IpCommands::List => list(client).await?,
     }
     Ok(())
 }

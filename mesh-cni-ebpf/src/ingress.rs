@@ -24,9 +24,11 @@ pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
     let src = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst = u32::from_be_bytes(ipv4hdr.dst_addr);
 
-    let (Some(src_id), Some(dst_id)) =
-        (ipv4_id(LpmKey::new(32, src)), ipv4_id(LpmKey::new(32, dst)))
-    else {
+    // LpmTrie expects big endian order for comparisons
+    let (Some(src_id), Some(dst_id)) = (
+        ipv4_id(LpmKey::new(32, src.to_be())),
+        ipv4_id(LpmKey::new(32, dst.to_be())),
+    ) else {
         return Ok(TC_ACT_PIPE);
     };
 
