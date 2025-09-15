@@ -6,7 +6,6 @@ use aya::maps::lpm_trie::Key as LpmKey;
 use kube::Client;
 use mesh_cni_api::ip::v1::ip_server::IpServer;
 use mesh_cni_common::Id;
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::Result;

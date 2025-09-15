@@ -2,9 +2,7 @@ use aya::maps::lpm_trie::Key as LpmKey;
 use mesh_cni_api::ip::v1::ip_server::Ip as IpApi;
 use mesh_cni_api::ip::v1::{ListIpsReply, ListIpsRequest};
 use mesh_cni_common::Id;
-use tokio::sync::mpsc::Receiver;
 use tonic::{Request, Response, Status};
-use tracing::{error, info};
 
 use crate::Result;
 use crate::bpf::BpfMap;

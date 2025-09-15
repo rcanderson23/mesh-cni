@@ -12,7 +12,6 @@ where
     IP4: BpfMap<Key = LpmKey<u32>, Value = Id>,
     IP6: BpfMap<Key = LpmKey<u128>, Value = Id>,
 {
-    pub client: kube::Client,
     pub ip_state: IpNetworkState<IP4, IP6>,
     pub pod_store: Store<Pod>,
     pub ns_store: Store<Namespace>,

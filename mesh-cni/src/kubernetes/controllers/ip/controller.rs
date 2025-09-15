@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::net::IpAddr;
 use std::str::FromStr;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use aya::maps::lpm_trie::Key as LpmKey;
 use k8s_openapi::api::core::v1::{Namespace, Pod};
@@ -18,9 +18,6 @@ use crate::kubernetes::controllers::DEFAULT_REQUEUE_DURATION;
 use crate::kubernetes::controllers::ip::context::Context;
 use crate::kubernetes::{ClusterId, LABEL_MESH_CLUSTER_ID};
 use crate::{Error, Result};
-
-const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
-const MANANGER: &str = "service-meshendpoint-controller";
 
 pub(crate) async fn reconcile_pod<IP4, IP6>(
     pod: Arc<Pod>,
@@ -96,7 +93,7 @@ where
 
 // TODO: fix error coditions and potentially make generic for all controllers
 // TODO: make it exponentially backoff similar to controller-runtime
-pub fn error_policy<K, IP4, IP6>(_k: Arc<K>, error: &Error, _ctx: Arc<Context<IP4, IP6>>) -> Action
+pub fn error_policy<K, IP4, IP6>(_k: Arc<K>, _error: &Error, _ctx: Arc<Context<IP4, IP6>>) -> Action
 where
     K: ResourceExt<DynamicType = ()>,
     K: DeserializeOwned + Clone + Sync + Debug + Send + 'static,

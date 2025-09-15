@@ -1,0 +1,26 @@
+name: Rust
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: install build-essentials
+      run: |
+        set -e
+        sudo apt-get update
+        sudo apt-get install build-essential -y
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy,rustfmt
+    - name: Build
+      run: cargo build
+    - name: Clippy
+      run: cargo clippy -- -D warnings
+    - name: Run tests
+      run: cargo test --verbose

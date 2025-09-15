@@ -6,7 +6,7 @@ use tonic::Request;
 use tonic::transport::Channel;
 
 use crate::cli::ServiceCommands;
-use crate::client::{self, MESH_CNI_SOCKET};
+use crate::client::MESH_CNI_SOCKET;
 
 pub(crate) async fn run(cmd: ServiceCommands) -> anyhow::Result<()> {
     let client = ServiceClient::connect(MESH_CNI_SOCKET).await?;
