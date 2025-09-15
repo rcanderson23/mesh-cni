@@ -14,7 +14,7 @@ jobs:
       run: |
         set -e
         sudo apt-get update
-        sudo apt-get install build-essential -y
+        sudo apt-get install build-essential aarch64-linux-gnu-gcc -y
     - uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy,rustfmt
