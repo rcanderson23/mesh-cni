@@ -5,7 +5,7 @@ use std::sync::Arc;
 use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::warn;
 
 use crate::config::ControllerArgs;
 use crate::kubernetes::cluster::{Cluster, ClusterConfigs};
@@ -57,20 +57,8 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
     tokio::spawn(service_controller);
 
     tokio::select! {
-        // h = service_controller => exit("service_controller", h),
         _ = cancel.cancelled() => {},
     }
 
     Ok(())
-}
-
-fn exit(task: &str, out: Result<()>) {
-    match out {
-        Ok(_) => {
-            info!("{task} exited")
-        }
-        Err(e) => {
-            error!("{task} failed with error: {e}")
-        }
-    }
 }

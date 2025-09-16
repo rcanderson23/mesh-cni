@@ -1,9 +1,6 @@
-use core::net::Ipv4Addr;
-
 use aya_ebpf::bindings::bpf_sock_addr;
 use aya_ebpf::helpers::r#gen::bpf_get_prandom_u32;
 use aya_ebpf::programs::SockAddrContext;
-use aya_log_ebpf::info;
 use mesh_cni_common::service::{EndpointKey, ServiceKeyV4};
 
 use crate::{ENDPOINTS_V4, SERVICES_V4};

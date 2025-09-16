@@ -9,7 +9,7 @@ pub struct Metrics {
 
 impl Default for Metrics {
     fn default() -> Self {
-        let mut registry = Registry::with_prefix("homelab_cni");
+        let registry = Registry::with_prefix("homelab_cni");
         Self {
             registry: Arc::new(registry),
         }

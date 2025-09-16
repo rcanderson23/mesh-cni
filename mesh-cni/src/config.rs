@@ -3,8 +3,6 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use crate::kubernetes::ClusterId;
-
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Cli {

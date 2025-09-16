@@ -41,7 +41,6 @@ where
     let (ns_store, ns_subscriber) =
         create_store_and_subscriber(Api::<Namespace>::all(client.clone())).await?;
     let context = Context {
-        client,
         ip_state,
         pod_store: pod_store.clone(),
         ns_store: ns_store.clone(),

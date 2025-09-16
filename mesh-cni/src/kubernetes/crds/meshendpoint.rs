@@ -9,7 +9,6 @@ pub mod v1alpha1 {
     use std::sync::Arc;
 
     use ahash::HashMap;
-    use k8s_openapi::Metadata;
     use k8s_openapi::api::core::v1::Service;
     use k8s_openapi::api::discovery::v1::{EndpointConditions, EndpointSlice};
     use kube::ResourceExt;
