@@ -19,7 +19,6 @@ jobs:
       matrix:
         platform:
           - linux/arm64
-
     steps:
       - uses: actions/checkout@v4
       - name: Prepare
