@@ -41,7 +41,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
-          push: true
+          push: github.ref == 'refs/heads/main'
           platforms: ${{ matrix.platform }}
           tags: |
             ghcr.io/${{ github.repository }}:latest
