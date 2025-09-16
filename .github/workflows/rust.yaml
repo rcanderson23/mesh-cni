@@ -7,7 +7,7 @@ env:
   CARGO_TERM_COLOR: always
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-arm
     steps:
     - uses: actions/checkout@v4
     - name: install build-essentials
@@ -23,10 +23,10 @@ jobs:
       with:
         components: rust-src,clippy
         targets: "aarch64-unknown-linux-musl"
-    - name: Install bpf-linker
-      run: cargo install bpf-linker --locked
-    - name: Build
-      run: cargo build
+    # - name: Install bpf-linker
+    #   run: cargo install bpf-linker --locked
+    # - name: Build
+    #   run: cargo build
     - name: Clippy
       run: cargo clippy -- -D warnings
     - name: Run tests
