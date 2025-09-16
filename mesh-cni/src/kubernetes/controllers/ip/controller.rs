@@ -77,7 +77,7 @@ where
         .pod_store
         .state()
         .iter()
-        .filter(|p| (p.namespace().as_ref() == Some(&name) && !pod_is_host_network(p)))
+        .filter(|p| p.namespace().as_ref() == Some(&name) && !pod_is_host_network(p))
         .map(|p| p.to_owned())
         .collect();
     for pod in pods {

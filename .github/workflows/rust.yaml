@@ -14,14 +14,17 @@ jobs:
       run: |
         set -e
         sudo apt-get update
-        sudo apt-get install build-essential aarch64-linux-gnu-gcc -y
+        sudo apt-get install build-essential gcc-aarch64-linux-gnu protobuf-compiler -y
     - uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy,rustfmt
         targets: "aarch64-unknown-linux-musl"
     - uses: dtolnay/rust-toolchain@nightly
       with:
+        components: rust-src,clippy
         targets: "aarch64-unknown-linux-musl"
+    - name: Install bpf-linker
+      run: cargo install bpf-linker --locked
     - name: Build
       run: cargo build
     - name: Clippy
