@@ -18,11 +18,11 @@ jobs:
     - uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy,rustfmt
-        targets: x86_64-unknown-linux-gnu
+        targets: aarch64-unknown-linux-musl,x86_64-unknown-linux-gnu
     - uses: dtolnay/rust-toolchain@nightly
       with:
         components: rust-src,clippy
-        targets: x86_64-unknown-linux-gnu
+        targets: aarch64-unknown-linux-musl,x86_64-unknown-linux-gnu
     - name: Install bpf-linker
       run: cargo install bpf-linker --locked
     - name: Clippy
