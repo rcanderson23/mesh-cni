@@ -13,7 +13,11 @@ use crate::kubernetes::controllers::service::start_service_controller;
 use crate::kubernetes::state::MultiClusterState;
 use crate::{Error, Result, kubernetes};
 
-pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()> {
+pub async fn start(
+    args: ControllerArgs,
+    ready: CancellationToken,
+    cancel: CancellationToken,
+) -> Result<()> {
     let configs = ClusterConfigs::try_new_configs(args.mesh_clusters_config).await?;
     let mut clusters = vec![];
     let mut local_cluster = Cluster::try_new(configs.local).await?;
@@ -56,6 +60,7 @@ pub async fn start(args: ControllerArgs, cancel: CancellationToken) -> Result<()
 
     tokio::spawn(service_controller);
 
+    ready.cancel();
     tokio::select! {
         _ = cancel.cancelled() => {},
     }

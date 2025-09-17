@@ -21,8 +21,7 @@ kind-down:
   kind delete cluster --name={{name}}
 
 install: 
-  helm upgrade --install {{name}} ./charts/mesh-cni -n kube-system --set=agent.image.tag=latest
-
+  helm upgrade --install {{name}} ./charts/mesh-cni -n kube-system --set=agent.image.tag=latest --kube-context=kind-{{name}}
 
 restart:
   kubectl rollout restart daemonset -n kube-system {{name}}-agent

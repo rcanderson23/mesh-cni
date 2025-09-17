@@ -9,16 +9,20 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     setup_subscriber(None);
+    let cancel = tokio_util::sync::CancellationToken::new();
+    // TODO: implement actual readiness/health checking instead of this hack
+    let ready = tokio_util::sync::CancellationToken::new();
     match cli.command {
         mesh_cni::config::Commands::Agent(agent_args) => {
             cni::ensure_cni_preconditions(&agent_args)?;
 
-            let cancel = tokio_util::sync::CancellationToken::new();
             let mut metrics_handle = tokio::spawn(http::serve_metrics(
                 agent_args.metrics_address,
+                ready.child_token(),
                 cancel.child_token(),
             ));
-            let mut agent_handle = tokio::spawn(agent::start(agent_args, cancel.child_token()));
+            let mut agent_handle =
+                tokio::spawn(agent::start(agent_args, ready, cancel.child_token()));
             let mut shutdown_handle = tokio::spawn(async move { shutdown_signal().await });
             // watch for shutdown and errors
             tokio::select! {
@@ -38,13 +42,16 @@ async fn main() -> Result<()> {
             info!("Exiting...");
         }
         mesh_cni::config::Commands::Controller(controller_args) => {
-            let cancel = tokio_util::sync::CancellationToken::new();
             let mut metrics_handle = tokio::spawn(http::serve_metrics(
                 controller_args.metrics_address,
+                ready.child_token(),
                 cancel.child_token(),
             ));
-            let mut controller_handle =
-                tokio::spawn(controller::start(controller_args, cancel.child_token()));
+            let mut controller_handle = tokio::spawn(controller::start(
+                controller_args,
+                ready,
+                cancel.child_token(),
+            ));
             let mut shutdown_handle = tokio::spawn(async move { shutdown_signal().await });
             // watch for shutdown and errors
             tokio::select! {

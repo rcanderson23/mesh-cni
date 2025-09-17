@@ -9,8 +9,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Result;
 
-pub async fn serve_metrics(addr: SocketAddr, cancel: CancellationToken) -> Result<()> {
-    let state = Arc::new(metrics::State::default());
+pub async fn serve_metrics(
+    addr: SocketAddr,
+    ready: CancellationToken,
+    cancel: CancellationToken,
+) -> Result<()> {
+    let state = Arc::new(metrics::State::new(ready));
 
     metrics::serve(addr, state, cancel).await
 }

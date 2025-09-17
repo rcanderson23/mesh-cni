@@ -19,7 +19,11 @@ use crate::http::shutdown;
 use crate::kubernetes::cluster::{Cluster, ClusterConfigs};
 use crate::{Error, Result, bpf};
 
-pub async fn start(args: AgentArgs, cancel: CancellationToken) -> Result<()> {
+pub async fn start(
+    args: AgentArgs,
+    ready: CancellationToken,
+    cancel: CancellationToken,
+) -> Result<()> {
     let configs = ClusterConfigs::try_new_configs(args.mesh_clusters_config).await?;
     let mut local_cluster = Cluster::try_new(configs.local).await?;
     let kube_client = local_cluster.take_client().unwrap();
@@ -102,6 +106,7 @@ pub async fn start(args: AgentArgs, cancel: CancellationToken) -> Result<()> {
     let routes = routes.to_owned().routes();
     tokio::spawn(serve(args.agent_socket_path, routes, cancel.child_token()));
 
+    ready.cancel();
     // TODO: add graceful shutdown
     tokio::select! {
         _ = cancel.cancelled() => {},

@@ -1,9 +1,11 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::extract::State as AxumState;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use http::StatusCode;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -15,17 +17,23 @@ use crate::metrics::Metrics;
 #[derive(Clone)]
 pub(crate) struct State {
     metrics: Arc<Metrics>,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            metrics: Arc::new(Metrics::default()),
-        }
-    }
+    ready: CancellationToken,
 }
 
 impl State {
+    pub fn new(token: CancellationToken) -> Self {
+        Self {
+            metrics: Arc::new(Metrics::default()),
+            ready: token,
+        }
+    }
+    pub fn ready(&self) -> Readiness {
+        if self.ready.is_cancelled() {
+            Readiness::Ready
+        } else {
+            Readiness::NotReady
+        }
+    }
     pub fn metrics(&self) -> String {
         let mut buffer = String::new();
         let registry = &*self.metrics.registry;
@@ -55,9 +63,35 @@ pub(crate) async fn serve(
 pub fn router(state: Arc<State>) -> Result<Router> {
     Ok(Router::new()
         .route("/metrics", get(metrics))
+        .route("/readyz", get(readyz))
         .with_state(state))
 }
 
 async fn metrics(AxumState(handler): AxumState<Arc<State>>) -> String {
     handler.metrics()
+}
+
+async fn readyz(AxumState(handler): AxumState<Arc<State>>) -> Readiness {
+    handler.ready()
+}
+
+pub(crate) enum Readiness {
+    Ready,
+    NotReady,
+}
+impl IntoResponse for Readiness {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Readiness::Ready => Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "text/plain")
+                .body(axum::body::Body::from("Ok"))
+                .unwrap(),
+            Readiness::NotReady => Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header("Content-Type", "text/plain")
+                .body(axum::body::Body::from("NotReady"))
+                .unwrap(),
+        }
+    }
 }
