@@ -4,3 +4,9 @@ networking:
   kubeProxyMode: none
 nodes:
 - role: control-plane
+  kubeadmConfigPatches:
+    - |
+      kind: JoinConfiguration
+      nodeRegistration:
+        kubeletExtraArgs:
+        register-with-taints: "mesh-cni.dev/startup=true:NoSchedule"

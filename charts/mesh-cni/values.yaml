@@ -31,7 +31,7 @@ agent:
     local:
       name: cluster1
       id: 1
-      endpoint: https://172.18.0.3:6443/
+      endpoint: https://172.18.0.2:6443/
     remote: []
     # - name: cluster2
     #   id: 2

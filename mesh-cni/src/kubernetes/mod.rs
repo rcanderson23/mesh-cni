@@ -1,6 +1,7 @@
 pub mod cluster;
 pub mod controllers;
 pub mod crds;
+pub mod node;
 pub mod service;
 pub mod state;
 
@@ -17,7 +18,7 @@ use tracing::{error, trace};
 
 use crate::{Error, Result};
 
-const LABEL_MESH_CLUSTER_ID: &str = "mesh.dev/cluster-id";
+const LABEL_MESH_CLUSTER_ID: &str = "mesh-cni.dev/cluster-id";
 
 pub type ClusterId = u32;
 

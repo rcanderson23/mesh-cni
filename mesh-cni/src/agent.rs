@@ -17,7 +17,7 @@ use tonic::transport::Server;
 use crate::config::AgentArgs;
 use crate::http::shutdown;
 use crate::kubernetes::cluster::{Cluster, ClusterConfigs};
-use crate::{Error, Result, bpf};
+use crate::{Error, Result, bpf, kubernetes};
 
 pub async fn start(
     args: AgentArgs,
@@ -91,7 +91,7 @@ pub async fn start(
         service_map_v6,
         endpoint_map_v4,
         endpoint_map_v6,
-        kube_client,
+        kube_client.clone(),
         local_cluster.id,
         cancel.clone(),
     )
@@ -106,6 +106,8 @@ pub async fn start(
     let routes = routes.to_owned().routes();
     tokio::spawn(serve(args.agent_socket_path, routes, cancel.child_token()));
 
+    // TODO: move to something less brittle
+    kubernetes::node::remove_startup_taint(kube_client, args.node_name).await?;
     ready.cancel();
     // TODO: add graceful shutdown
     tokio::select! {

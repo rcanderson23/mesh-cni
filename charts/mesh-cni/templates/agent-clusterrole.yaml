@@ -26,7 +26,6 @@ rules:
   resources:
   - endpoints
   - namespaces
-  - nodes
   - pods
   - services
   verbs:
@@ -41,3 +40,13 @@ rules:
   - list
   - watch
   - get
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+  - patch
+  - update

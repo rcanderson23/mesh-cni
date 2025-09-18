@@ -1,5 +1,3 @@
-pub mod crds;
-
 use std::sync::Arc;
 
 use k8s_openapi::api::core::v1::Service;
@@ -52,8 +50,6 @@ pub async fn start(
     let Some(local_client) = local_cluster.take_client() else {
         return Err(Error::Other("failed to get local cluster client".into()));
     };
-
-    crds::apply_crds(local_client.clone()).await?;
 
     let service_controller =
         start_service_controller(local_client, endpoint_slice_state, cancel.clone());
