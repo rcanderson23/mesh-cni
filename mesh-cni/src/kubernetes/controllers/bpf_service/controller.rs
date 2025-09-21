@@ -7,13 +7,14 @@ use kube::core::{Expression, Selector, SelectorExt};
 use kube::runtime::reflector::ObjectRef;
 use kube::{ResourceExt, runtime::controller::Action};
 use serde::de::DeserializeOwned;
-use tracing::{error, info};
+use tracing::{Span, error, field, info};
 
 use crate::bpf::service::ServiceEndpointBpfMap;
 use crate::kubernetes::controllers::bpf_service::MESH_SERVICE;
+use crate::kubernetes::controllers::metrics;
 use crate::kubernetes::crds::meshendpoint::v1alpha1::{MeshEndpoint, generate_mesh_endpoint_spec};
 use crate::kubernetes::state::MultiClusterStore;
-use crate::{Error, Result, kubernetes::controllers::bpf_service::state::State};
+use crate::{Error, Result, kubernetes::controllers::bpf_service::context::Context};
 
 use mesh_cni_common::service::{
     EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4, ServiceKeyV6,
@@ -29,9 +30,9 @@ where
 {
     fn generate_service_pairs(
         &self,
-        state: &State<SE4, SE6>,
+        state: &Context<SE4, SE6>,
     ) -> HashMap<ServiceKey, Vec<EndpointValue>>;
-    fn is_current(&self, state: &State<SE4, SE6>) -> bool;
+    fn is_current(&self, state: &Context<SE4, SE6>) -> bool;
 }
 
 impl<SE4, SE6> MeshControllerExt<SE4, SE6> for MeshEndpoint
@@ -41,11 +42,11 @@ where
 {
     fn generate_service_pairs(
         &self,
-        _state: &State<SE4, SE6>,
+        _state: &Context<SE4, SE6>,
     ) -> HashMap<ServiceKey, Vec<EndpointValue>> {
         self.generate_bpf_service_endpoints()
     }
-    fn is_current(&self, state: &State<SE4, SE6>) -> bool {
+    fn is_current(&self, state: &Context<SE4, SE6>) -> bool {
         let Some(cached) = state
             .mesh_endpoint_state
             .get(&ObjectRef::new(&self.name_any()).within(&self.namespace().unwrap_or_default()))
@@ -63,13 +64,13 @@ where
 {
     fn generate_service_pairs(
         &self,
-        state: &State<SE4, SE6>,
+        state: &Context<SE4, SE6>,
     ) -> HashMap<ServiceKey, Vec<EndpointValue>> {
         let spec = generate_mesh_endpoint_spec(&state.endpoint_slice_state, self);
         let mep = MeshEndpoint::new("dummy", spec);
         mep.generate_bpf_service_endpoints()
     }
-    fn is_current(&self, state: &State<SE4, SE6>) -> bool {
+    fn is_current(&self, state: &Context<SE4, SE6>) -> bool {
         let Some(cached) = state
             .service_state
             .get(&ObjectRef::new(&self.name_any()).within(&self.namespace().unwrap_or_default()))
@@ -90,7 +91,7 @@ where
 {
     fn generate_service_pairs(
         &self,
-        state: &State<SE4, SE6>,
+        state: &Context<SE4, SE6>,
     ) -> HashMap<ServiceKey, Vec<EndpointValue>> {
         let service = state.service_state.get_all_by_namespace_label(
             self.namespace().as_deref(),
@@ -103,7 +104,7 @@ where
         let mep = MeshEndpoint::new("dummy", spec);
         mep.generate_bpf_service_endpoints()
     }
-    fn is_current(&self, state: &State<SE4, SE6>) -> bool {
+    fn is_current(&self, state: &Context<SE4, SE6>) -> bool {
         let Some(cached) = state
             .endpoint_slice_state
             .get(&ObjectRef::new(&self.name_any()).within(&self.namespace().unwrap_or_default()))
@@ -116,7 +117,7 @@ where
     }
 }
 
-pub async fn reconcile<K, SE4, SE6>(k: Arc<K>, ctx: Arc<State<SE4, SE6>>) -> Result<Action>
+pub async fn reconcile<K, SE4, SE6>(k: Arc<K>, ctx: Arc<Context<SE4, SE6>>) -> Result<Action>
 where
     K: MeshControllerExt<SE4, SE6>,
     K: ResourceExt<DynamicType = ()>,
@@ -124,6 +125,11 @@ where
     SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
     SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
 {
+    let trace_id = metrics::get_trace_id();
+    if trace_id != opentelemetry::trace::TraceId::INVALID {
+        Span::current().record("trace_id", field::display(&trace_id));
+    }
+    let _timer = ctx.metrics.count_and_measure(k.as_ref(), &trace_id);
     let ns = k
         .namespace()
         .ok_or_else(|| Error::ReconcileMissingPrecondition("missing namespace".into()))?;
@@ -162,9 +168,9 @@ where
 
 // TODO: fix error coditions an{d potentially make generic for all controllers
 pub fn error_policy<K, SE4, SE6>(
-    _service: Arc<K>,
+    service: Arc<K>,
     error: &Error,
-    _ctx: Arc<State<SE4, SE6>>,
+    ctx: Arc<Context<SE4, SE6>>,
 ) -> Action
 where
     K: MeshControllerExt<SE4, SE6>,
@@ -174,5 +180,6 @@ where
     SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
 {
     error!("error occurred: {}", error);
+    ctx.metrics.count_failure(service.as_ref(), error);
     Action::requeue(Duration::from_secs(5 * 60))
 }

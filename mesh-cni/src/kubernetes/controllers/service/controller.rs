@@ -6,16 +6,23 @@ use kube::Api;
 use kube::api::{DeleteParams, Patch, PatchParams};
 use kube::runtime::reflector::ObjectRef;
 use kube::{ResourceExt, runtime::controller::Action};
-use tracing::{info, warn};
+use tracing::{Span, field, info, instrument, warn};
 
+use crate::kubernetes::controllers::metrics;
 use crate::kubernetes::crds::meshendpoint::v1alpha1::{MeshEndpoint, generate_mesh_endpoint_spec};
-use crate::{Error, Result, kubernetes::controllers::service::state::State};
+use crate::{Error, Result, kubernetes::controllers::service::context::Context};
 
 const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
 const MANANGER: &str = "service-meshendpoint-controller";
 
 // Services passed into here should already have been checked for mesh annotation
-pub async fn reconcile(service: Arc<Service>, ctx: Arc<State>) -> Result<Action> {
+#[instrument(skip(ctx, service), fields(trace_id))]
+pub async fn reconcile(service: Arc<Service>, ctx: Arc<Context>) -> Result<Action> {
+    let trace_id = metrics::get_trace_id();
+    if trace_id != opentelemetry::trace::TraceId::INVALID {
+        Span::current().record("trace_id", field::display(&trace_id));
+    }
+    let _timer = ctx.metrics.count_and_measure(service.as_ref(), &trace_id);
     let name = service.name_any();
     let Some(ns) = service.namespace() else {
         warn!("failed to find namespace on Service {}", name);
@@ -68,7 +75,8 @@ pub async fn reconcile(service: Arc<Service>, ctx: Arc<State>) -> Result<Action>
 }
 
 // TODO: fix error coditions and potentially make generic for all controllers
-pub fn error_policy(_service: Arc<Service>, _error: &Error, _ctx: Arc<State>) -> Action {
+pub fn error_policy(service: Arc<Service>, error: &Error, ctx: Arc<Context>) -> Action {
+    ctx.metrics.count_failure(service.as_ref(), error);
     Action::requeue(Duration::from_secs(5 * 60))
 }
 

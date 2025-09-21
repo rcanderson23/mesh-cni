@@ -46,7 +46,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 Agent Selector labels
 */}}
 {{- define "mesh-cni.agent.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "mesh-cni.name" . }}
+app.kubernetes.io/name: {{ include "mesh-cni.name" . }}-agent
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
@@ -77,7 +77,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 controller Selector labels
 */}}
 {{- define "mesh-cni.controller.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "mesh-cni.name" . }}
+app.kubernetes.io/name: {{ include "mesh-cni.name" . }}-controller
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 

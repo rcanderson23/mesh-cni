@@ -10,15 +10,16 @@ use kube::runtime::reflector::ObjectRef;
 use kube::{ResourceExt, runtime::controller::Action};
 use mesh_cni_common::Id;
 use serde::de::DeserializeOwned;
-use tracing::{info, warn};
+use tracing::{Span, field, info, instrument, warn};
 
 use crate::bpf::BpfMap;
 use crate::kubernetes::Labels;
-use crate::kubernetes::controllers::DEFAULT_REQUEUE_DURATION;
 use crate::kubernetes::controllers::ip::context::Context;
+use crate::kubernetes::controllers::{DEFAULT_REQUEUE_DURATION, metrics};
 use crate::kubernetes::{ClusterId, LABEL_MESH_CLUSTER_ID};
 use crate::{Error, Result};
 
+#[instrument(skip(ctx, pod), fields(trace_id))]
 pub(crate) async fn reconcile_pod<IP4, IP6>(
     pod: Arc<Pod>,
     ctx: Arc<Context<IP4, IP6>>,
@@ -27,6 +28,11 @@ where
     IP4: BpfMap<Key = LpmKey<u32>, Value = Id>,
     IP6: BpfMap<Key = LpmKey<u128>, Value = Id>,
 {
+    let trace_id = metrics::get_trace_id();
+    if trace_id != opentelemetry::trace::TraceId::INVALID {
+        Span::current().record("trace_id", field::display(&trace_id));
+    }
+    let _timer = ctx.metrics.count_and_measure(pod.as_ref(), &trace_id);
     let name = pod.name_any();
     let Some(ns) = pod.namespace() else {
         warn!("failed to find namespace on Pod {}", name);
@@ -63,6 +69,7 @@ where
     Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
 }
 
+#[instrument(skip(ctx, namespace), fields(trace_id))]
 pub(crate) async fn reconcile_namespace<IP4, IP6>(
     namespace: Arc<Namespace>,
     ctx: Arc<Context<IP4, IP6>>,
@@ -71,6 +78,11 @@ where
     IP4: BpfMap<Key = LpmKey<u32>, Value = Id>,
     IP6: BpfMap<Key = LpmKey<u128>, Value = Id>,
 {
+    let trace_id = metrics::get_trace_id();
+    if trace_id != opentelemetry::trace::TraceId::INVALID {
+        Span::current().record("trace_id", field::display(&trace_id));
+    }
+    let _timer = ctx.metrics.count_and_measure(namespace.as_ref(), &trace_id);
     let name = namespace.name_any();
     info!("started reconciling Namespace {}", name);
     let pods: Vec<Arc<Pod>> = ctx
@@ -93,13 +105,14 @@ where
 
 // TODO: fix error coditions and potentially make generic for all controllers
 // TODO: make it exponentially backoff similar to controller-runtime
-pub fn error_policy<K, IP4, IP6>(_k: Arc<K>, _error: &Error, _ctx: Arc<Context<IP4, IP6>>) -> Action
+pub fn error_policy<K, IP4, IP6>(k: Arc<K>, error: &Error, ctx: Arc<Context<IP4, IP6>>) -> Action
 where
     K: ResourceExt<DynamicType = ()>,
     K: DeserializeOwned + Clone + Sync + Debug + Send + 'static,
     IP4: BpfMap<Key = LpmKey<u32>, Value = Id>,
     IP6: BpfMap<Key = LpmKey<u128>, Value = Id>,
 {
+    ctx.metrics.count_failure(k.as_ref(), error);
     Action::requeue(DEFAULT_REQUEUE_DURATION)
 }
 

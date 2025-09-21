@@ -93,6 +93,11 @@ pub enum Error {
     #[error("failed to reconcile due to missing precondition: {0}")]
     ReconcileMissingPrecondition(String),
 }
+impl Error {
+    pub fn metric_label(&self) -> String {
+        format!("{self:?}").to_lowercase()
+    }
+}
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

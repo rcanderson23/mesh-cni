@@ -1,6 +1,6 @@
 use crate::Result;
 use k8s_openapi::api::core::v1::Node;
-use kube::api::{PatchParams, PostParams};
+use kube::api::PostParams;
 use kube::{Api, ResourceExt};
 
 const TAINT_MESH_STARTUP: &str = "mesh-cni.dev/startup";

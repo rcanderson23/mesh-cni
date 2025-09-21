@@ -16,15 +16,16 @@ use crate::{
     bpf::{BpfMap, ip::IpNetworkState},
     kubernetes::{
         ClusterId,
-        controllers::ip::{
-            context::Context,
-            controller::{error_policy, reconcile_namespace, reconcile_pod},
+        controllers::{
+            ip::{
+                context::Context,
+                controller::{error_policy, reconcile_namespace, reconcile_pod},
+            },
+            metrics::ControllerMetrics,
         },
         create_store_and_subscriber,
     },
 };
-
-pub trait IpController {}
 
 pub async fn start_ip_controllers<IP4, IP6>(
     client: Client,
@@ -40,7 +41,9 @@ where
         create_store_and_subscriber(Api::<Pod>::all(client.clone())).await?;
     let (ns_store, ns_subscriber) =
         create_store_and_subscriber(Api::<Namespace>::all(client.clone())).await?;
+    let metrics = ControllerMetrics::new("ip");
     let context = Context {
+        metrics,
         ip_state,
         pod_store: pod_store.clone(),
         ns_store: ns_store.clone(),

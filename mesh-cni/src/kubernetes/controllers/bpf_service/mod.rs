@@ -1,5 +1,5 @@
+mod context;
 mod controller;
-mod state;
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -25,7 +25,10 @@ use crate::{
     Result,
     bpf::service::{BpfServiceEndpointState, ServiceEndpointBpfMap},
     kubernetes::{
-        controllers::bpf_service::{controller::MeshControllerExt, state::State},
+        controllers::{
+            bpf_service::{context::Context, controller::MeshControllerExt},
+            metrics::ControllerMetrics,
+        },
         crds::meshendpoint::v1alpha1::MeshEndpoint,
     },
 };
@@ -50,7 +53,9 @@ where
     SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4> + Send + 'static,
     SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6> + Send + 'static,
 {
-    let state = State {
+    let metrics = ControllerMetrics::new("bpf_services");
+    let context = Context {
+        metrics,
         service_state: service_state.clone(),
         endpoint_slice_state,
         mesh_endpoint_state,
@@ -64,7 +69,7 @@ where
         .run(
             reconcile,
             error_policy::<Service, SE4, SE6>,
-            Arc::new(state),
+            Arc::new(context),
         )
         .for_each(|_| async move {})
         .await;
@@ -86,7 +91,9 @@ where
     SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4> + Send + 'static,
     SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6> + Send + 'static,
 {
-    let state = State {
+    let metrics = ControllerMetrics::new("bpf_meshendpoint");
+    let context = Context {
+        metrics,
         service_state,
         endpoint_slice_state,
         mesh_endpoint_state,
@@ -99,7 +106,7 @@ where
     info!("starting controller for {}", K::kind(&()));
     Controller::new(api, watcher_config)
         .graceful_shutdown_on(crate::kubernetes::controllers::utils::shutdown(cancel))
-        .run(reconcile, error_policy::<K, SE4, SE6>, Arc::new(state))
+        .run(reconcile, error_policy::<K, SE4, SE6>, Arc::new(context))
         .filter_map(|x| async move { std::result::Result::ok(x) })
         .for_each(|_| futures::future::ready(()))
         .await;

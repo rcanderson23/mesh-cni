@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::State as AxumState;
@@ -12,20 +12,15 @@ use tracing::info;
 
 use crate::Result;
 use crate::http::shutdown;
-use crate::metrics::Metrics;
 
 #[derive(Clone)]
 pub(crate) struct State {
-    metrics: Arc<Metrics>,
     ready: CancellationToken,
 }
 
 impl State {
     pub fn new(token: CancellationToken) -> Self {
-        Self {
-            metrics: Arc::new(Metrics::default()),
-            ready: token,
-        }
+        Self { ready: token }
     }
     pub fn ready(&self) -> Readiness {
         if self.ready.is_cancelled() {
@@ -36,8 +31,7 @@ impl State {
     }
     pub fn metrics(&self) -> String {
         let mut buffer = String::new();
-        let registry = &*self.metrics.registry;
-        // TODO: get rid of unwrap
+        let registry = &*crate::metrics::REGISTRY.read().unwrap();
         match prometheus_client::encoding::text::encode(&mut buffer, registry) {
             Ok(_) => buffer,
             Err(_) => "".into(),

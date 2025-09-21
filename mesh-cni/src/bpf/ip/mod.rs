@@ -12,7 +12,7 @@ use crate::Result;
 use crate::bpf::BpfMap;
 use crate::bpf::ip::server::Server;
 use crate::kubernetes::ClusterId;
-use crate::kubernetes::controllers::ip::start_ip_controllers;
+use crate::kubernetes::controllers::start_ip_controllers;
 
 pub async fn run<IP4, IP6>(
     ipv4_map: IP4,

@@ -1,17 +1,6 @@
-use std::sync::Arc;
+use std::sync::{LazyLock, RwLock};
 
 use prometheus_client::registry::Registry;
 
-#[derive(Clone)]
-pub struct Metrics {
-    pub registry: Arc<Registry>,
-}
-
-impl Default for Metrics {
-    fn default() -> Self {
-        let registry = Registry::with_prefix("homelab_cni");
-        Self {
-            registry: Arc::new(registry),
-        }
-    }
-}
+pub static REGISTRY: LazyLock<RwLock<Registry>> =
+    LazyLock::new(|| RwLock::new(Registry::with_prefix("mesh_cni")));
