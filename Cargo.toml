@@ -4,11 +4,11 @@ members = [
     "mesh-cni-api",
     "mesh-cni",
     "mesh-cni-cli",
-    "mesh-cni-common",
     "mesh-cni-ebpf",
+    "mesh-cni-ebpf-common",
     "mesh-cni-plugin",
 ]
-default-members = ["mesh-cni-plugin", "mesh-cni", "mesh-cni-common", "mesh-cni-api", "mesh-cni-cli"]
+default-members = ["mesh-cni-plugin", "mesh-cni", "mesh-cni-ebpf-common", "mesh-cni-api", "mesh-cni-cli"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"

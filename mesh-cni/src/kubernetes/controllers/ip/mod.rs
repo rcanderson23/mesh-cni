@@ -7,7 +7,7 @@ use aya::maps::lpm_trie::Key as LpmKey;
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{Api, Client, runtime::Controller};
-use mesh_cni_common::Id;
+use mesh_cni_ebpf_common::Id;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 

@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use aya::maps::{HashMap, LpmTrie, MapData};
 use mesh_cni_api::bpf::v1::bpf_server::BpfServer;
-use mesh_cni_common::Id;
-use mesh_cni_common::service::{
+use mesh_cni_ebpf_common::Id;
+use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
 };
 use tokio::net::UnixListener;

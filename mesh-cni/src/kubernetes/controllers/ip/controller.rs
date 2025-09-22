@@ -8,7 +8,7 @@ use aya::maps::lpm_trie::Key as LpmKey;
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::runtime::reflector::ObjectRef;
 use kube::{ResourceExt, runtime::controller::Action};
-use mesh_cni_common::Id;
+use mesh_cni_ebpf_common::Id;
 use serde::de::DeserializeOwned;
 use tracing::{Span, field, info, instrument, warn};
 

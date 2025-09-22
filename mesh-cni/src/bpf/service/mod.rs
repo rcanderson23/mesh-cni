@@ -10,7 +10,7 @@ use k8s_openapi::api::discovery::v1::EndpointSlice;
 
 use kube::{Api, Client};
 use mesh_cni_api::service::v1::service_server::ServiceServer;
-use mesh_cni_common::service::{
+use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
 };
 use tokio_util::sync::CancellationToken;

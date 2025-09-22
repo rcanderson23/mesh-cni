@@ -2,8 +2,8 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use ahash::HashMapExt;
-use mesh_cni_common::Id;
-use mesh_cni_common::service::{
+use mesh_cni_ebpf_common::Id;
+use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4,
     ServiceKeyV6, ServiceValue,
 };
@@ -343,7 +343,7 @@ mod test {
     use std::net::Ipv4Addr;
 
     use ahash::HashMap;
-    use mesh_cni_common::KubeProtocol;
+    use mesh_cni_ebpf_common::KubeProtocol;
 
     use super::*;
 
@@ -370,12 +370,12 @@ mod test {
         let endpoint_one = EndpointValueV4 {
             ip: Ipv4Addr::new(10, 0, 0, 1).to_bits(),
             port: 8080,
-            _protocol: mesh_cni_common::KubeProtocol::Tcp,
+            _protocol: mesh_cni_ebpf_common::KubeProtocol::Tcp,
         };
         let endpoint_two = EndpointValueV4 {
             ip: Ipv4Addr::new(10, 0, 0, 2).to_bits(),
             port: 8080,
-            _protocol: mesh_cni_common::KubeProtocol::Tcp,
+            _protocol: mesh_cni_ebpf_common::KubeProtocol::Tcp,
         };
         let mut endpoints = vec![&endpoint_one];
         let initial_id = 0;

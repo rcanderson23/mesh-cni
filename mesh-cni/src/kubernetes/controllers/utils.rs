@@ -1,4 +1,4 @@
-use mesh_cni_common::KubeProtocol;
+use mesh_cni_ebpf_common::KubeProtocol;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) async fn shutdown(cancel: CancellationToken) {

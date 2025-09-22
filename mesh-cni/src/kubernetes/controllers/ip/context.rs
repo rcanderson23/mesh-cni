@@ -1,7 +1,7 @@
 use aya::maps::lpm_trie::Key as LpmKey;
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::runtime::reflector::Store;
-use mesh_cni_common::Id;
+use mesh_cni_ebpf_common::Id;
 
 use crate::bpf::BpfMap;
 use crate::bpf::ip::IpNetworkState;

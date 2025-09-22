@@ -16,7 +16,7 @@ use crate::kubernetes::crds::meshendpoint::v1alpha1::{MeshEndpoint, generate_mes
 use crate::kubernetes::state::MultiClusterStore;
 use crate::{Error, Result, kubernetes::controllers::bpf_service::context::Context};
 
-use mesh_cni_common::service::{
+use mesh_cni_ebpf_common::service::{
     EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4, ServiceKeyV6,
 };
 

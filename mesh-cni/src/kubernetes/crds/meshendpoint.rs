@@ -13,8 +13,8 @@ pub mod v1alpha1 {
     use k8s_openapi::api::discovery::v1::{EndpointConditions, EndpointSlice};
     use kube::ResourceExt;
     use kube::core::Expression;
-    use mesh_cni_common::KubeProtocol;
-    use mesh_cni_common::service::{
+    use mesh_cni_ebpf_common::KubeProtocol;
+    use mesh_cni_ebpf_common::service::{
         EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4, ServiceKeyV6,
     };
     use tracing::warn;

@@ -4,7 +4,7 @@ use k8s_openapi::api::discovery::v1::{EndpointConditions, EndpointSlice};
 use kube::core::{Expression, Selector, SelectorExt};
 use kube::runtime::reflector::{ObjectRef, ReflectHandle, Store};
 use kube::{Api, ResourceExt};
-use mesh_cni_common::{KubeProtocol, service::ServiceKeyV4};
+use mesh_cni_ebpf_common::{KubeProtocol, service::ServiceKeyV4};
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::pin::pin;
@@ -391,7 +391,7 @@ mod test {
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
     use k8s_openapi::chrono::Utc;
     use kube::api::ObjectMeta;
-    use mesh_cni_common::service::ServiceKeyV4;
+    use mesh_cni_ebpf_common::service::ServiceKeyV4;
 
     use super::*;
 

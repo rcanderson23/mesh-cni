@@ -1830,7 +1830,7 @@ dependencies = [
  "kube",
  "libc",
  "mesh-cni-api",
- "mesh-cni-common",
+ "mesh-cni-ebpf-common",
  "mesh-cni-plugin",
  "netns-rs",
  "network-types",
@@ -1886,23 +1886,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-cni-common"
-version = "0.1.0"
-dependencies = [
- "aya",
- "network-types",
-]
-
-[[package]]
 name = "mesh-cni-ebpf"
 version = "0.1.0"
 dependencies = [
  "aya-ebpf",
  "aya-log-ebpf",
  "memoffset 0.9.1",
- "mesh-cni-common",
+ "mesh-cni-ebpf-common",
  "network-types",
  "which 8.0.0",
+]
+
+[[package]]
+name = "mesh-cni-ebpf-common"
+version = "0.1.0"
+dependencies = [
+ "aya",
+ "network-types",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 use aya::maps::lpm_trie::Key as LpmKey;
 use mesh_cni_api::ip::v1::ip_server::Ip as IpApi;
 use mesh_cni_api::ip::v1::{ListIpsReply, ListIpsRequest};
-use mesh_cni_common::Id;
+use mesh_cni_ebpf_common::Id;
 use tonic::{Request, Response, Status};
 
 use crate::Result;

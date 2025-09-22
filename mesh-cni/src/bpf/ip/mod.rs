@@ -5,7 +5,7 @@ pub use state::{IpNetwork, IpNetworkState, IpNetworkV4, IpNetworkV6};
 use aya::maps::lpm_trie::Key as LpmKey;
 use kube::Client;
 use mesh_cni_api::ip::v1::ip_server::IpServer;
-use mesh_cni_common::Id;
+use mesh_cni_ebpf_common::Id;
 use tokio_util::sync::CancellationToken;
 
 use crate::Result;

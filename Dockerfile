@@ -1,5 +1,5 @@
 # when changing image be aware of GLIB version matching in build and running images
-FROM rust:1.89-bookworm AS builder
+FROM rust:1.90-bookworm AS builder
 
 RUN apt-get update && \
   apt-get -y install ca-certificates \
@@ -19,7 +19,7 @@ COPY mesh-cni-plugin mesh-cni-plugin
 COPY mesh-cni-api mesh-cni-api
 COPY mesh-cni-cli mesh-cni-cli
 COPY mesh-cni mesh-cni
-COPY mesh-cni-common mesh-cni-common
+COPY mesh-cni-ebpf-common mesh-cni-ebpf-common
 COPY mesh-cni-ebpf mesh-cni-ebpf
 COPY justfile justfile
 

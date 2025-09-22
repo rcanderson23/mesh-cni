@@ -7,8 +7,8 @@ pub mod service;
 use aya_ebpf::macros::map;
 use aya_ebpf::maps::lpm_trie::Key as LpmKey;
 use aya_ebpf::maps::{HashMap, LpmTrie};
-use mesh_cni_common::Id;
-use mesh_cni_common::service::{
+use mesh_cni_ebpf_common::Id;
+use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
 };
 

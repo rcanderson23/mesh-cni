@@ -18,7 +18,7 @@ use kube::{
 use serde::de::DeserializeOwned;
 use tokio_util::sync::CancellationToken;
 
-use mesh_cni_common::service::{EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6};
+use mesh_cni_ebpf_common::service::{EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6};
 use tracing::info;
 
 use crate::{

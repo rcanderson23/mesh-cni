@@ -2,7 +2,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use mesh_cni_api::service::v1::service_server::Service as ServiceApi;
 use mesh_cni_api::service::v1::{ListServicesReply, ListServicesRequest, ServiceWithEndpoints};
-use mesh_cni_common::service::{
+use mesh_cni_ebpf_common::service::{
     EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6,
 };
 use tonic::{Request, Response, Status};
@@ -45,7 +45,7 @@ where
         let mut services = vec![];
         for (k, v) in cached_state.iter() {
             let (service_endpoint, protocol, endpoints) = match k {
-                mesh_cni_common::service::ServiceKey::V4(service_key_v4) => {
+                mesh_cni_ebpf_common::service::ServiceKey::V4(service_key_v4) => {
                     let service_ip = Ipv4Addr::from_bits(service_key_v4.ip);
                     let service_port = service_key_v4.port;
                     let service_endpoint = format!("{}:{}", service_ip, service_port);
@@ -63,7 +63,7 @@ where
 
                     (service_endpoint, protocol, endpoints)
                 }
-                mesh_cni_common::service::ServiceKey::V6(service_key_v6) => {
+                mesh_cni_ebpf_common::service::ServiceKey::V6(service_key_v6) => {
                     let service_ip = Ipv6Addr::from_bits(service_key_v6.ip);
                     let service_port = service_key_v6.port;
                     let service_endpoint = format!("{}:{}", service_ip, service_port);

@@ -1,7 +1,7 @@
 use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use kube::runtime::reflector::Store;
-use mesh_cni_common::service::{EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6};
+use mesh_cni_ebpf_common::service::{EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6};
 
 use crate::bpf::service::{BpfServiceEndpointState, ServiceEndpointBpfMap};
 use crate::kubernetes::controllers::metrics::ControllerMetrics;

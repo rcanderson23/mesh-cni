@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-mesh-cni-common = { path = "../mesh-cni-common" }
+mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common" }
 
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
