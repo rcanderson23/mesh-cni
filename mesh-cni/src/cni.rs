@@ -1,10 +1,13 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use mesh_cni_plugin::config::PluginConfig;
+use mesh_cni_plugin::CNI_VERSION;
+use mesh_cni_plugin::config::{Config, PluginConfig};
+use serde_json::Value;
 use tracing::info;
 
 use crate::Result;
@@ -16,9 +19,13 @@ const CONFLIST_NAME: &str = "05-mesh.conflist";
 pub fn ensure_cni_preconditions(args: &AgentArgs) -> Result<()> {
     ensure_cni_log_dir(&args.cni_plugin_log_dir)?;
     ensure_cni_bin(&args.cni_bin_dir)?;
-    let existing_conf = get_existing_conflist(&args.cni_conf_dir)?;
-    let existing_conf = update_cni_conf(&existing_conf)?;
-    ensure_cni_conf(&args.cni_conf_dir, &existing_conf)?;
+    let conf = if args.chained {
+        let existing_conf = get_existing_conflist(&args.cni_conf_dir)?;
+        update_cni_conf(&existing_conf)?
+    } else {
+        default_cni_config()?
+    };
+    ensure_cni_conf(&args.cni_conf_dir, &conf)?;
     Ok(())
 }
 
@@ -77,13 +84,8 @@ fn get_existing_conflist(cni_conf_dir: impl AsRef<Path>) -> Result<Vec<u8>> {
     info!("checking for conf");
     let conf = files
         .iter()
-        .filter_map(|f| {
-            if Path::new(&f.path()).extension() == Some(OsStr::new("conf")) {
-                Some(f.path())
-            } else {
-                None
-            }
-        })
+        .filter(|f| f.path().extension() == Some(OsStr::new("conf")))
+        .map(|f| f.path())
         .next();
     if let Some(conf) = conf {
         let conf = fs::read(conf)?;
@@ -108,12 +110,27 @@ fn ensure_cni_bin(dst: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
+fn default_cni_config() -> Result<Vec<u8>> {
+    let conf = Config {
+        cni_version: CNI_VERSION,
+        cni_versions: vec![CNI_VERSION],
+        name: "mesh-cni".into(),
+        disable_check: None,
+        disable_gc: None,
+        load_only_inlined_plugins: None,
+        plugins: Vec::new(),
+    };
+    serde_json::to_vec_pretty(&conf).map_err(|e| e.into())
+}
+
 // updates the existing cni config to include mesh-cni plugin
 fn update_cni_conf(conf: &[u8]) -> Result<Vec<u8>> {
     let mut conf: mesh_cni_plugin::config::Config = serde_json::from_slice(conf)?;
+    let mut options = HashMap::new();
+    options.insert("chained".into(), Value::Bool(true));
     conf.plugins.push(PluginConfig {
         r#type: "mesh-cni".into(),
-        options: Default::default(),
+        options,
     });
 
     serde_json::to_vec_pretty(&conf).map_err(|e| e.into())

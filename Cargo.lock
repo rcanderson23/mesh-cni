@@ -1860,6 +1860,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "prost 0.14.1",
+ "serde",
  "tabled",
  "tonic 0.14.1",
  "tonic-prost",

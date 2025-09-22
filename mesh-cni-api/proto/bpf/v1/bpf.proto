@@ -2,15 +2,31 @@ syntax = "proto3";
 
 package grpc.bpf.v1;
 
+import "cni/v1/types.proto";
+
 service Bpf {
     rpc AddContainer(AddContainerRequest) returns (AddContainerReply) {}
 }
 
-message AddContainerReply {}
+message AddContainerReply {
+  repeated grpc.cni.v1.Interface interfaces = 1;
+  repeated grpc.cni.v1.IP ips = 2;
+  repeated grpc.cni.v1.Route routes = 3;
+  grpc.cni.v1.DNS dns = 4; 
+
+}
 
 message AddContainerRequest {
-    string iface = 1;
-    string net_namespace = 2;
-    string container_id = 3;
+  // Interface name to be created
+  string iface = 1;
+
+  // Path to the network namespace
+  string net_namespace = 2;
+
+  // Path to the cgroup of the container
+  string container_id = 3;
+
+  // Determines if the CNI is configured to be chained
+  bool chained = 4;
 }
 

@@ -56,16 +56,16 @@ pub struct Success {
     pub cni_version: Version,
 
     #[serde(default)]
-    pub interfaces: Vec<Interface>,
+    pub interfaces: Vec<mesh_cni_api::cni::v1::Interface>,
 
     #[serde(default)]
-    pub ips: Vec<Ip>,
+    pub ips: Vec<mesh_cni_api::cni::v1::Ip>,
 
     #[serde(default)]
-    pub routes: Vec<Route>,
+    pub routes: Vec<mesh_cni_api::cni::v1::Route>,
 
     #[serde(default)]
-    pub dns: Option<Dns>,
+    pub dns: Option<mesh_cni_api::cni::v1::Dns>,
 
     #[serde(flatten)]
     pub custom: HashMap<String, Value>,

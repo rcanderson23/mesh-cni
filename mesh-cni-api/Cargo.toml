@@ -10,6 +10,7 @@ tabled = { workspace = true }
 tonic = { workspace = true }
 prost = { workspace = true }
 tonic-prost = { workspace = true }
+serde = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }

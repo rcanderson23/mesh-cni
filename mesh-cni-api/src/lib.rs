@@ -5,6 +5,12 @@ pub mod bpf {
     }
 }
 
+pub mod cni {
+    pub mod v1 {
+        tonic::include_proto!("grpc.cni.v1");
+    }
+}
+
 pub mod ip {
     pub mod v1 {
         tonic::include_proto!("grpc.ip.v1");

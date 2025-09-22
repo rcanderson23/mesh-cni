@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package grpc.cni.v1;
+
+message Interface {
+  // name of the interface (eg eth0)
+  string name = 1;
+
+  // mac address of iface
+  optional string mac = 2; 
+
+  // MTU on the interface
+  optional uint32 mtu = 3;
+
+  // path to the network namespace, empty if host
+  optional string sandbox = 4;
+
+  // path to socket file corresponding to interface
+  optional string socket_path = 5;
+
+  // Platformm specific identifier
+  optional string pciID = 6;
+}
+
+message IP {
+  // IP addr in cidr notation (eg "192.168.0.5/24")
+  string address = 1;
+
+  // Default gateway for the subnet
+  string gateway = 2;
+
+  // Index of interface list
+  optional uint32 iface = 3;
+}
+
+message Route {
+  // Destination of the route in cidr notation
+  string dst = 1;
+
+  // Next hop.
+  optional string gw = 2;
+
+  // MTU along the path to the destination
+  optional uint32 mtu = 3;
+
+  // The maximal segment size to advertise to these destinations for tcp connections.
+  optional uint32 advmss = 4;
+
+  // The priority of the route
+  optional uint32 priority = 5;
+
+  // The table to add the route to
+  optional uint32 table = 6;
+
+  // The scope of destinations covered by the route prefix
+  // (global (0), link(253), host(254))
+  optional uint32 scope = 7;
+}
+
+message DNS {
+  // List of priority-ordered DNS server, must contain IPv4 or IPv6 address.
+  repeated string nameservers = 1;
+
+  // Local domain used for short hostname lookup.
+  optional string domain = 2;
+
+  // List of priority-ordered search domains
+  repeated string search = 3;
+
+  // List of options that can be passed to the resolver
+  repeated string options = 4;
+}

@@ -36,6 +36,7 @@ agent:
     # - name: cluster2
     #   id: 2
     #   context: cluster2
+  chained: true
 
   cniBinDir: /host/opt/cni/bin
 

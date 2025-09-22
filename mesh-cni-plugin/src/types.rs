@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use ipnetwork::IpNetwork;
 use semver::Version;
@@ -38,7 +39,7 @@ pub struct Interface {
     pub mac: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mtu: Option<u16>,
+    pub mtu: Option<u32>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<PathBuf>,
@@ -49,6 +50,24 @@ pub struct Interface {
     #[serde(default, rename = "pciID", skip_serializing_if = "Option::is_none")]
     pub pci_id: Option<String>,
 }
+
+// impl From<mesh_cni_api::bpf::v1::Interface> for Interface {
+//     fn from(value: mesh_cni_api::bpf::v1::Interface) -> Self {
+//         let sandbox = if let Some(sandbox) = value.sandbox {
+//             Some(PathBuf::from_str(&sandbox).unwrap_or_default())
+//         } else {
+//             None
+//         };
+//         Self {
+//             name: value.name,
+//             mac: value.mac,
+//             mtu: value.mtu,
+//             sandbox,
+//             socket_path: value.socket_path,
+//             pci_id: value.pci_id,
+//         }
+//     }
+// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,6 +80,18 @@ pub struct Ip {
     pub gateway: IpAddr,
     pub interface: Option<usize>,
 }
+
+// impl TryFrom<mesh_cni_api::bpf::v1::Ip> for Ip {
+//     fn try_from(value: mesh_cni_api::bpf::v1::Ip) -> Result<Self, Error> {
+//         type Error = crate::Error
+//         let Some(address) = value.address.split_once("/").ok_or_else(||crate::Error::Parse("failed to split address at cidr"))
+//         Self {
+//             address: value.address,
+//             gateway: value.gateway,
+//             interface: value.iface,
+//         }
+//     }
+// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

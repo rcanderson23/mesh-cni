@@ -71,6 +71,10 @@ pub struct AgentArgs {
         default_value = "/var/run/mesh/mesh.sock"
     )]
     pub agent_socket_path: PathBuf,
+
+    /// Determines if CNI should be configured as chained
+    #[arg(long, env = "CHAINED", default_value = "false")]
+    pub chained: bool,
 }
 
 #[derive(Parser, Debug, Clone)]

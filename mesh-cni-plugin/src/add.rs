@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use mesh_cni_api::bpf::v1::{AddContainerReply, AddContainerRequest, bpf_client::BpfClient};
 use serde::Deserialize;
 use tracing::{error, info};
@@ -13,10 +15,42 @@ pub fn add(args: &Args, input: Input) -> Response {
         input, &args.container_id
     );
     let Some(prev) = input.previous_result else {
-        return Error::NoPreviousResult(
-            "no previous result found, this CNI must be chained".into(),
-        )
-        .into_response(CNI_VERSION);
+        let Ok(net_namespace) = args.net_ns.clone().unwrap().into_os_string().into_string() else {
+            return Error::InvalidRequiredEnvVariables(
+                "failed to convert network namespace to string".into(),
+            )
+            .into_response(CNI_VERSION);
+        };
+        let req = AddContainerRequest {
+            iface: args.ifname.clone(),
+            net_namespace,
+            container_id: args.container_id.clone(),
+            chained: false,
+        };
+        let resp = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(request(req));
+        let r = match resp {
+            Ok(r) => {
+                info!("received reply {:?}", &r);
+                r
+            }
+            Err(e) => {
+                error!(%e, "failed request to mesh socket");
+                return Error::Ebpf(e.to_string()).into_response(CNI_VERSION);
+            }
+        };
+        let interfaces = r.interfaces.iter().map(|i| i.to_owned()).collect();
+        let success = Success {
+            cni_version: CNI_VERSION,
+            interfaces,
+            ips: r.ips,
+            routes: r.routes,
+            dns: r.dns,
+            custom: HashMap::new(),
+        };
+        info!("add response {:?}", success);
+        return Response::Success(success);
     };
 
     let prev = match Success::deserialize(prev) {
@@ -33,27 +67,16 @@ pub fn add(args: &Args, input: Input) -> Response {
     }
 
     for interface in &prev.interfaces {
-        if interface.sandbox.is_none() {
+        let Some(net_namespace) = interface.sandbox.clone() else {
             continue;
-        }
+        };
 
         let iface = interface.name.clone();
-        let Ok(net_namespace) = interface
-            .sandbox
-            .clone()
-            .unwrap()
-            .into_os_string()
-            .into_string()
-        else {
-            return Error::InvalidRequiredEnvVariables(
-                "failed to convert network namespace to string".into(),
-            )
-            .into_response(CNI_VERSION);
-        };
         let req = AddContainerRequest {
             iface,
             net_namespace,
             container_id: args.container_id.clone(),
+            chained: true,
         };
         let resp = tokio::runtime::Runtime::new()
             .unwrap()

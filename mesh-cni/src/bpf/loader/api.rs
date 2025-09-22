@@ -88,7 +88,12 @@ impl BpfApi for LoaderState {
                 ));
             }
         };
-        Ok(Response::new(AddContainerReply {}))
+        Ok(Response::new(AddContainerReply {
+            interfaces: Vec::new(),
+            ips: Vec::new(),
+            routes: Vec::new(),
+            dns: None,
+        }))
     }
 }
 

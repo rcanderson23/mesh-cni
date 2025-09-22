@@ -44,6 +44,9 @@ spec:
           - --cni-plugin-log-dir={{ .Values.agent.cniPluginLogDir }}
           - --agent-socket-path={{ .Values.agent.socketPath }}
           - --mesh-clusters-config=/etc/mesh-cni/clusters-config.yaml
+          {{- if .Values.agent.chained }}
+          - --chained
+          {{- end }}
           env:
           - name: NODE_NAME
             valueFrom:
