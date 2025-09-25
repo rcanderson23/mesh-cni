@@ -7,7 +7,7 @@ env:
   CARGO_TERM_COLOR: always
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: mesh-cni-runners
     steps:
     - uses: actions/checkout@v4
     - name: install build-essentials
