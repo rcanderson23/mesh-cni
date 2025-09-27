@@ -53,7 +53,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: false
-          platforms: linux/amd64 #,linux/arm64
+          #platforms: linux/amd64 #,linux/arm64
+          platforms: linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}:latest
       - name: Build and push tag
