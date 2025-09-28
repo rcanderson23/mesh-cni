@@ -11,8 +11,3 @@ nodes:
       - effect: NoSchedule
         key: mesh-cni.dev/startup
         value: "true"
-  # - |
-  #   kind: JoinConfiguration
-  #   nodeRegistration:
-  #     kubeletExtraArgs:
-  #       register-with-taints: "mesh-cni.dev/startup=true:NoSchedule"
