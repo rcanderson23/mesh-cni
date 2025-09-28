@@ -5,8 +5,14 @@ networking:
 nodes:
 - role: control-plane
   kubeadmConfigPatches:
-    - |
-      kind: JoinConfiguration
-      nodeRegistration:
-        kubeletExtraArgs:
-        register-with-taints: "mesh-cni.dev/startup=true:NoSchedule"
+  - |
+    kind: KubeletConfiguration
+    registerWithTaints:
+      - effect: NoSchedule
+        key: mesh-cni.dev/startup
+        value: "true"
+  # - |
+  #   kind: JoinConfiguration
+  #   nodeRegistration:
+  #     kubeletExtraArgs:
+  #       register-with-taints: "mesh-cni.dev/startup=true:NoSchedule"

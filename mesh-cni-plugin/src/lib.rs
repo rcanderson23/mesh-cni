@@ -16,13 +16,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::Error;
 
-pub const CNI_VERSION: Version = Version::new(1, 1, 0);
-pub const SUPPORTED_CNI_VERSION: [Version; 4] = [
-    Version::new(0, 3, 1),
-    Version::new(0, 4, 1),
-    Version::new(1, 0, 0),
-    Version::new(1, 1, 0),
-];
+pub const CNI_VERSION: Version = Version::new(0, 4, 0);
+pub const SUPPORTED_CNI_VERSION: [Version; 1] = [Version::new(0, 4, 0)];
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

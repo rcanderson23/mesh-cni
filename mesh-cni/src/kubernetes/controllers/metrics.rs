@@ -1,11 +1,11 @@
 use std::borrow::Cow;
 
-use kube::{ResourceExt, runtime::controller};
+use kube::ResourceExt;
 use opentelemetry::trace::TraceId;
 use prometheus_client::{
     encoding::EncodeLabelSet,
     metrics::{counter::Counter, exemplar::HistogramWithExemplars, family::Family},
-    registry::{Registry, Unit},
+    registry::Unit,
 };
 use tokio::time::Instant;
 

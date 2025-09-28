@@ -9,6 +9,7 @@ fn main() -> anyhow::Result<()> {
             "cni.v1.IP",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
+        .field_attribute("cni.v1.IP.gateway", "#[serde(default)]")
         .message_attribute("cni.v1.IP", "#[serde(rename_all = \"camelCase\" )]")
         .type_attribute(
             "cni.v1.DNS",

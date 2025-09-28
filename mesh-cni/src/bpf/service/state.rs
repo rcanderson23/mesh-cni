@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
-use ahash::HashMapExt;
+use ahash::{HashMap, HashMapExt};
 use mesh_cni_ebpf_common::Id;
 use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4,
@@ -31,7 +31,9 @@ pub trait ServiceEndpointBpfMap {
     ) -> Result<()>;
     fn delete_endpoints(&mut self, service_value: &ServiceValue, range: Range<u16>) -> Result<()>;
     fn get_service_cache(&self) -> &ahash::HashMap<Self::SKey, ServiceValue>;
+    fn get_service_map(&self) -> Result<ahash::HashMap<Self::SKey, ServiceValue>>;
     fn get_endpoint_cache(&self) -> &ahash::HashMap<EndpointKey, Self::EValue>;
+    fn get_endpoint_map(&self) -> Result<ahash::HashMap<EndpointKey, Self::EValue>>;
 }
 
 pub struct ServiceEndpoint<S, E, SK, EV>
@@ -66,8 +68,8 @@ where
 
 impl<S, E, SK, EV> ServiceEndpointBpfMap for ServiceEndpoint<S, E, SK, EV>
 where
-    S: BpfMap<Key = SK, Value = ServiceValue>,
-    E: BpfMap<Key = EndpointKey, Value = EV>,
+    S: BpfMap<Key = SK, Value = ServiceValue, KeyOutput = SK>,
+    E: BpfMap<Key = EndpointKey, Value = EV, KeyOutput = EndpointKey>,
     SK: std::hash::Hash + std::cmp::Eq + Clone + Copy,
     EV: Clone + std::cmp::PartialEq + Copy,
 {
@@ -178,8 +180,27 @@ where
         &self.service_cache
     }
 
+    fn get_service_map(&self) -> Result<ahash::HashMap<Self::SKey, ServiceValue>> {
+        let mut map = HashMap::default();
+        let state = self.service_map.get_state()?;
+
+        for (k, v) in state.iter() {
+            map.insert(*k, *v);
+        }
+        Ok(map)
+    }
+
     fn get_endpoint_cache(&self) -> &ahash::HashMap<EndpointKey, Self::EValue> {
         &self.endpoint_cache
+    }
+
+    fn get_endpoint_map(&self) -> Result<ahash::HashMap<EndpointKey, Self::EValue>> {
+        let mut map = HashMap::default();
+        let state = self.endpoint_map.get_state()?;
+        for (k, v) in state.iter() {
+            map.insert(*k, *v);
+        }
+        Ok(map)
     }
 }
 
@@ -334,6 +355,51 @@ where
             }
             map.insert(ServiceKey::V6(k.to_owned()), endpoints);
         }
+        Ok(map)
+    }
+
+    // TODO: refactor with state from cache into one func
+    pub(crate) fn state_from_map(&self) -> Result<ahash::HashMap<ServiceKey, Vec<EndpointValue>>> {
+        let mut map = ahash::HashMap::default();
+        let guard = self.shared.state.lock().unwrap();
+        let service_map_v4 = guard.service_endpoint_v4.get_service_map()?;
+        let endpoint_map_v4 = guard.service_endpoint_v4.get_endpoint_map()?;
+
+        for (k, v) in service_map_v4 {
+            let mut endpoints = vec![];
+            let count = v.count;
+            for idx in 0..count {
+                let Some(endpoint_value) = endpoint_map_v4.get(&EndpointKey {
+                    id: v.id,
+                    position: idx,
+                }) else {
+                    warn!("did not find endpoints with id {} and idx {}", v.id, idx);
+                    continue;
+                };
+                endpoints.push(EndpointValue::V4(endpoint_value.to_owned()));
+            }
+            map.insert(ServiceKey::V4(k.to_owned()), endpoints);
+        }
+
+        let service_map_v6 = guard.service_endpoint_v6.get_service_map()?;
+        let endpoint_map_v6 = guard.service_endpoint_v6.get_endpoint_map()?;
+
+        for (k, v) in service_map_v6 {
+            let mut endpoints = vec![];
+            let count = v.count;
+            for idx in 0..count {
+                let Some(endpoint_value) = endpoint_map_v6.get(&EndpointKey {
+                    id: v.id,
+                    position: idx,
+                }) else {
+                    warn!("did not find endpoints with id {} and idx {}", v.id, idx);
+                    continue;
+                };
+                endpoints.push(EndpointValue::V6(endpoint_value.to_owned()));
+            }
+            map.insert(ServiceKey::V6(k.to_owned()), endpoints);
+        }
+
         Ok(map)
     }
 }

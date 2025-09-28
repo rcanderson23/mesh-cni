@@ -27,5 +27,9 @@ pub enum IpCommands {
 #[derive(Clone, Subcommand, Debug)]
 pub enum ServiceCommands {
     /// List the Service and their associated IDs
-    List,
+    List {
+        #[arg(long)]
+        /// When set, pulls data from the bpf map instead of the cache
+        from_map: bool,
+    },
 }

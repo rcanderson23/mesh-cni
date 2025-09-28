@@ -35,7 +35,8 @@ use crate::{
 
 use controller::{error_policy, reconcile};
 
-pub const MESH_SERVICE: &str = "mesh-cni.dev/multi-cluster";
+pub const MESH_SERVICE: &str = "io.cilium/global-service";
+// pub const MESH_SERVICE: &str = "mesh-cni.dev/multi-cluster";
 
 pub async fn start_bpf_service_controller<SE4, SE6>(
     service_state: KubeStore<Service>,

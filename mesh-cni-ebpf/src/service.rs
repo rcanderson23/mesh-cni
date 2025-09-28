@@ -1,7 +1,10 @@
 use aya_ebpf::bindings::bpf_sock_addr;
 use aya_ebpf::helpers::r#gen::bpf_get_prandom_u32;
 use aya_ebpf::programs::SockAddrContext;
+use aya_log_ebpf::{debug, info};
 use mesh_cni_ebpf_common::service::{EndpointKey, ServiceKeyV4};
+
+use core::net::Ipv4Addr;
 
 use crate::{ENDPOINTS_V4, SERVICES_V4};
 
@@ -49,7 +52,10 @@ pub fn try_mesh_cni_group_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
     let service_value = unsafe {
         match SERVICES_V4.get(&service_key) {
             Some(value) => value,
-            None => return Ok(1),
+            None => {
+                debug!(&ctx, "did not find value for service key");
+                return Ok(1);
+            }
         }
     };
     if service_value.count == 0 {
@@ -70,17 +76,26 @@ pub fn try_mesh_cni_group_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
     unsafe {
         (*ptr).user_ip4 = endpoints_value.ip.to_be();
         (*ptr).user_port = endpoints_value.port.to_be() as u32;
+        info!(
+            &ctx,
+            "found matching service, replacing {}:{} with {}:{}",
+            Ipv4Addr::from(service_key.ip),
+            service_key.port,
+            Ipv4Addr::from(endpoints_value.ip),
+            endpoints_value.port
+        );
     }
 
     Ok(1)
 }
 
 #[inline]
-fn build_service_key(_ctx: &SockAddrContext, ptr: *mut bpf_sock_addr) -> Result<ServiceKeyV4, i32> {
+fn build_service_key(ctx: &SockAddrContext, ptr: *mut bpf_sock_addr) -> Result<ServiceKeyV4, i32> {
     let (ip, port, protocol) = unsafe {
         let ip = u32::from_be((*ptr).user_ip4);
         let port = u16::from_be((*ptr).user_port as u16);
         let protocol = (*ptr).protocol.try_into().map_err(|_| 1)?;
+        debug!(ctx, "built service key {}:{}", Ipv4Addr::from(ip), port,);
         (ip, port, protocol)
     };
 

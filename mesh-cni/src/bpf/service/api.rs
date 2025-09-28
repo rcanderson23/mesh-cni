@@ -36,14 +36,20 @@ where
 {
     async fn list_services(
         &self,
-        _request: Request<ListServicesRequest>,
+        request: Request<ListServicesRequest>,
     ) -> Result<Response<ListServicesReply>, Status> {
-        let cached_state = self
-            .state
-            .state_from_cache()
-            .map_err(|e| Status::new(tonic::Code::Internal, e.to_string()))?;
+        let request = request.into_inner();
+        let state = if request.from_map {
+            self.state
+                .state_from_map()
+                .map_err(|e| Status::new(tonic::Code::Internal, e.to_string()))?
+        } else {
+            self.state
+                .state_from_cache()
+                .map_err(|e| Status::new(tonic::Code::Internal, e.to_string()))?
+        };
         let mut services = vec![];
-        for (k, v) in cached_state.iter() {
+        for (k, v) in state.iter() {
             let (service_endpoint, protocol, endpoints) = match k {
                 mesh_cni_ebpf_common::service::ServiceKey::V4(service_key_v4) => {
                     let service_ip = Ipv4Addr::from_bits(service_key_v4.ip);

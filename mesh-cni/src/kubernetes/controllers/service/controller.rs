@@ -4,15 +4,16 @@ use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use kube::Api;
 use kube::api::{DeleteParams, Patch, PatchParams};
+use kube::core::{Expression, Selector, SelectorExt};
 use kube::runtime::reflector::ObjectRef;
 use kube::{ResourceExt, runtime::controller::Action};
 use tracing::{Span, field, info, instrument, warn};
 
+use crate::kubernetes::controllers::bpf_service::MESH_SERVICE;
 use crate::kubernetes::controllers::metrics;
 use crate::kubernetes::crds::meshendpoint::v1alpha1::{MeshEndpoint, generate_mesh_endpoint_spec};
 use crate::{Error, Result, kubernetes::controllers::service::context::Context};
 
-const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
 const MANANGER: &str = "service-meshendpoint-controller";
 
 // Services passed into here should already have been checked for mesh annotation
@@ -31,7 +32,8 @@ pub async fn reconcile(service: Arc<Service>, ctx: Arc<Context>) -> Result<Actio
     };
     info!("started reconciling Service {}/{}", ns, name);
 
-    if service.labels().get(SERVICE_OWNER_LABEL).is_none() {
+    let selector: Selector = Expression::NotEqual(MESH_SERVICE.into(), "true".into()).into();
+    if selector.matches(service.annotations()) {
         if let Some(mesh) = ctx
             .mesh_endpoint_state
             .get(&ObjectRef::new(&name).within(&ns))
@@ -49,7 +51,7 @@ pub async fn reconcile(service: Arc<Service>, ctx: Arc<Context>) -> Result<Actio
         return Ok(Action::await_change());
     }
 
-    let spec = generate_mesh_endpoint_spec(ctx.endpoint_slice_state.as_ref(), &service);
+    let spec = generate_mesh_endpoint_spec(&ctx.endpoint_slice_state, &service);
     // check cached copy to save a network request
     //
     let cached = ctx
@@ -62,7 +64,6 @@ pub async fn reconcile(service: Arc<Service>, ctx: Arc<Context>) -> Result<Actio
         return Ok(Action::await_change());
     }
 
-    info!("creating mesh endpoint");
     let mut mesh_endpoint = MeshEndpoint::new(&name, spec);
     mesh_endpoint.metadata.owner_references = Some(owner_references(&service));
     let api: Api<MeshEndpoint> = Api::namespaced(ctx.client.clone(), &ns);
@@ -70,6 +71,7 @@ pub async fn reconcile(service: Arc<Service>, ctx: Arc<Context>) -> Result<Actio
 
     api.patch(&name, &ssaply, &Patch::Apply(mesh_endpoint))
         .await?;
+    info!("created mesh endpoint {}/{}", ns, name);
 
     Ok(Action::await_change())
 }
@@ -99,6 +101,7 @@ mod test {
     use crate::kubernetes::crds::meshendpoint::v1alpha1::{
         BackendPortMapping, MeshEndpointSpec, generate_mesh_endpoint_spec,
     };
+    use crate::kubernetes::service::SERVICE_OWNER_LABEL;
     use crate::kubernetes::state::MultiClusterStore;
     use ahash::HashMap;
     use k8s_openapi::api::core::v1::{ServicePort, ServiceSpec};

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use ipnetwork::IpNetwork;
 use semver::Version;
