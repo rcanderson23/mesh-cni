@@ -11,7 +11,7 @@ pub async fn remove_startup_taint(client: kube::Client, node_name: String) -> Re
     if let Some(ref mut spec) = this_node.spec
         && let Some(ref mut taints) = spec.taints
     {
-        taints.retain(|t| t.key != TAINT_MESH_STARTUP || t.key != TAINT_CILIUM_STARTUP);
+        taints.retain(|t| !(t.key == TAINT_MESH_STARTUP || t.key == TAINT_CILIUM_STARTUP));
         spec.taints = Some(taints.to_vec());
         node_api
             .replace(&this_node.name_any(), &PostParams::default(), &this_node)
