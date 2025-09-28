@@ -35,7 +35,7 @@ where
     <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + core::hash::Hash + Clone,
 {
     state: HashMap<String, Store<K>>,
-    rx: Option<Receiver<ClusterEvent<K>>>,
+    rx: Option<Receiver<Arc<K>>>,
 }
 
 impl<K> MultiClusterState<K>
@@ -68,8 +68,7 @@ where
             };
             state.insert(cluster.name.clone(), store);
 
-            // TODO: handle this?
-            tokio::spawn(start_cluster_event_loop(cluster, subscriber, tx.clone()));
+            tokio::spawn(start_cluster_event_loop(subscriber, tx.clone()));
         }
 
         Ok(Self {
@@ -77,7 +76,7 @@ where
             rx: Some(rx),
         })
     }
-    pub fn take_receiver(&mut self) -> Option<Receiver<ClusterEvent<K>>> {
+    pub fn take_receiver(&mut self) -> Option<Receiver<Arc<K>>> {
         self.rx.take()
     }
 }
@@ -165,11 +164,7 @@ where
     }
 }
 
-async fn start_cluster_event_loop<K>(
-    cluster: Cluster,
-    subscriber: ReflectHandle<K>,
-    tx: Sender<ClusterEvent<K>>,
-) -> Result<()>
+async fn start_cluster_event_loop<K>(subscriber: ReflectHandle<K>, tx: Sender<Arc<K>>) -> Result<()>
 where
     K: Resource
         + Send
@@ -181,17 +176,9 @@ where
         + 'static,
     <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + core::hash::Hash + Clone,
 {
-    let cluster = Arc::new(cluster);
     let mut stream = pin!(subscriber);
     while let Some(resource) = stream.next().await {
-        if tx
-            .send(ClusterEvent {
-                cluster: cluster.clone(),
-                resource,
-            })
-            .await
-            .is_err()
-        {
+        if tx.send(resource).await.is_err() {
             error!("failed to send event as reciever has been dropped");
             break;
         }

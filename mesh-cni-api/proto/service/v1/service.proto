@@ -3,14 +3,16 @@ syntax = "proto3";
 package grpc.service.v1;
 
 service Service {
-    rpc ListServices(ListServicesRequest) returns (ListServicesReply) {}
+    rpc ListServices(ListServicesRequest) returns (ListServicesReply) {};
 }
 
 message ListServicesReply {
   repeated ServiceWithEndpoints services = 1;
 }
 
-message ListServicesRequest {}
+message ListServicesRequest {
+  bool from_map = 1;
+}
 
 message ServiceWithEndpoints {
   string service_endpoint = 1;

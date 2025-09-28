@@ -72,6 +72,10 @@ pub fn add(args: &Args, input: Input) -> Response {
         };
 
         let iface = interface.name.clone();
+        // TODO: hack, maybe validate that network namespace is an actual path
+        if iface.contains("dummy") {
+            continue;
+        }
         let req = AddContainerRequest {
             iface,
             net_namespace,

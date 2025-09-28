@@ -5,10 +5,7 @@ use std::{collections::HashMap, process::ExitCode};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    Result,
-    types::{Dns, Interface, Ip, Route},
-};
+use crate::Result;
 
 #[derive(Serialize, Deserialize)]
 pub enum Response {

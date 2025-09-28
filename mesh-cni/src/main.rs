@@ -76,11 +76,12 @@ async fn main() -> Result<()> {
 }
 
 // TODO: setup telemetry endpoint option
+// TODO: setup dynamic log levels endpoint
 fn setup_subscriber(_telemetry_endpoint: Option<&str>) {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "mesh_cni=info,mesh_cni_ebpf=debug".into()),
+                .unwrap_or_else(|_| "mesh_cni=info,mesh_cni_ebpf=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

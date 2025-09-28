@@ -3,7 +3,7 @@ use std::thread;
 use std::thread::JoinHandle;
 
 use aya::Ebpf;
-use aya::programs::tc::{self, SchedClassifierLinkId};
+use aya::programs::tc::{self};
 use aya::programs::{SchedClassifier, TcAttachType};
 use mesh_cni_api::bpf::v1::{AddContainerReply, AddContainerRequest};
 use tonic::{Request, Response, Status};
@@ -26,55 +26,46 @@ impl BpfApi for LoaderState {
     ) -> Result<Response<AddContainerReply>, Status> {
         let request = request.into_inner();
         info!("received add request {:?}", request);
-        let iface = request.iface.clone();
-        let netns_name = request.net_namespace.clone();
+        let _iface = request.iface.clone();
+        let _netns_name = request.net_namespace.clone();
         let ebpf = self.ebpf.clone();
         // entering a network namespace affects the entire thread so care shoudld be taken
         // doing this in an async context. For now just spawn a separate thread
         // to avoid any weird bugs related to network namespace entering/exiting
-        let t: JoinHandle<Result<(SchedClassifierLinkId, SchedClassifierLinkId)>> =
-            thread::spawn(move || {
-                let iface = request.iface;
-                let netns_name = request.net_namespace;
-                let netns_name = PathBuf::from(netns_name);
-                let netns_name = netns_name
-                    .file_name()
-                    .ok_or_else(|| Error::InvalidSandbox("failed to get netns name".into()))?;
+        let t: JoinHandle<Result<()>> = thread::spawn(move || {
+            let iface = request.iface;
+            let netns_name = request.net_namespace;
+            let netns_name = PathBuf::from(netns_name);
+            let netns_name = netns_name
+                .file_name()
+                .ok_or_else(|| Error::InvalidSandbox("failed to get netns name".into()))?;
 
-                let net_ns_name = netns_name.to_str().ok_or_else(|| {
-                    Error::InvalidSandbox(format!("failed to get netns {}", netns_name.display()))
-                })?;
+            let net_ns_name = netns_name.to_str().ok_or_else(|| {
+                Error::InvalidSandbox(format!("failed to get netns {}", netns_name.display()))
+            })?;
 
-                let path = format!("{}/{}", NET_NS_DIR, net_ns_name);
-                info!("getting netns from {}", path);
-                let netns = netns_rs::get_from_path(path)?;
-                info!("entering network namespace {}", netns);
+            let path = format!("{}/{}", NET_NS_DIR, net_ns_name);
+            info!("getting netns from {}", path);
+            let netns = netns_rs::get_from_path(path)?;
+            info!("entering network namespace {}", netns);
 
-                let ebpf = ebpf.blocking_lock_owned();
-                let mut ebpf = ebpf;
-                netns.enter()?;
-                let _ = tc::qdisc_add_clsact(&iface);
-                info!(
-                    "adding tc progams to {} in network namespace {}",
-                    iface, netns
-                );
-                let ingress_id = attach_tc_bpf_program(
-                    &mut ebpf,
-                    &iface,
-                    INGRESS_TC_NAME,
-                    TcAttachType::Ingress,
-                )?;
-                let egress_id =
-                    attach_tc_bpf_program(&mut ebpf, &iface, EGRESS_TC_NAME, TcAttachType::Egress)?;
+            let ebpf = ebpf.blocking_lock_owned();
+            let mut ebpf = ebpf;
+            netns.enter()?;
+            let _ = tc::qdisc_add_clsact(&iface);
+            info!(
+                "adding tc progams to {} in network namespace {}",
+                iface, netns
+            );
+            // call detach on delete?
+            attach_tc_bpf_program(&mut ebpf, &iface, INGRESS_TC_NAME, TcAttachType::Ingress)?;
+            attach_tc_bpf_program(&mut ebpf, &iface, EGRESS_TC_NAME, TcAttachType::Egress)?;
 
-                Ok((ingress_id, egress_id))
-            });
+            Ok(())
+        });
         match t.join() {
             Ok(r) => match r {
-                Ok((ingress_id, egress_id)) => {
-                    self.insert_iface(iface, netns_name, ingress_id, egress_id)
-                        .await;
-                }
+                Ok(_) => {}
                 // TODO: probably could be _more_ correct here with the status code
                 Err(e) => {
                     error!(%e, "failed attach bpf programs to interface");
@@ -102,7 +93,7 @@ fn attach_tc_bpf_program(
     iface: &str,
     name: &str,
     attach_type: TcAttachType,
-) -> Result<SchedClassifierLinkId> {
+) -> Result<()> {
     let program: &mut SchedClassifier = ebpf
         .program_mut(name)
         .ok_or_else(|| Error::EbpfProgramError(format!("failed to load program {name}")))?
@@ -112,5 +103,10 @@ fn attach_tc_bpf_program(
     {
         return Err(e.into());
     };
-    Ok(program.attach(iface, attach_type)?)
+    if let Err(e) = program.attach(iface, attach_type)
+        && !matches!(e, aya::programs::ProgramError::AlreadyAttached)
+    {
+        return Err(e.into());
+    }
+    Ok(())
 }

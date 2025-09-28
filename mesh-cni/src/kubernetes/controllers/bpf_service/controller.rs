@@ -20,7 +20,7 @@ use mesh_cni_ebpf_common::service::{
     EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4, ServiceKeyV6,
 };
 
-const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
+pub const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
 // const MANANGER: &str = "service-meshendpoint-controller";
 
 pub trait MeshControllerExt<SE4, SE6>
