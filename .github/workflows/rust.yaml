@@ -14,7 +14,14 @@ jobs:
       run: |
         set -e
         sudo apt-get update
-        sudo apt-get install build-essential gcc-x86-64-linux-gnu gcc-aarch64-linux-gnu protobuf-compiler -y
+        sudo apt-get install build-essential gcc-x86-64-linux-gnu gcc-aarch64-linux-gnu -y
+    - name: install protoc
+      run: |
+        PB_REL="https://github.com/protocolbuffers/protobuf/releases"
+        curl -LO $PB_REL/download/v30.2/protoc-30.2-linux-x86_64.zip
+        unzip protoc-30.2-linux-x86_64.zip -d $HOME/.local
+        export PATH="$PATH:$HOME/.local/bin"
+
     - uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy,rustfmt
