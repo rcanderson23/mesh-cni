@@ -9,7 +9,6 @@ RUN apt-get update && \
 
 RUN rustup install stable && \
   rustup toolchain install nightly --component rust-src && \
-  cargo install just --locked && \
   cargo install bpf-linker
 WORKDIR /app
 
@@ -21,9 +20,8 @@ COPY mesh-cni-cli mesh-cni-cli
 COPY mesh-cni mesh-cni
 COPY mesh-cni-ebpf-common mesh-cni-ebpf-common
 COPY mesh-cni-ebpf mesh-cni-ebpf
-COPY justfile justfile
 
-RUN just build
+RUN cargo build --release
 
 FROM public.ecr.aws/eks-distro/kubernetes-sigs/aws-iam-authenticator:v0.7.4-eks-1-34-latest AS aws-iam
 

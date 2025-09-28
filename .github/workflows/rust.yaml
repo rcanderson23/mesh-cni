@@ -7,13 +7,14 @@ env:
   CARGO_TERM_COLOR: always
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: mesh-cni-runners
     steps:
     - uses: actions/checkout@v4
     - name: install build-essentials
       run: |
         set -e
         sudo apt-get update
+        # FIXME: protobuf-compiler is old and fails with optional proto3 even though it has been stabilized
         sudo apt-get install build-essential gcc-x86-64-linux-gnu gcc-aarch64-linux-gnu protobuf-compiler -y
     - uses: dtolnay/rust-toolchain@stable
       with:
