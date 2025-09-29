@@ -50,7 +50,10 @@ pub fn try_mesh_cni_group_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
 
     let service_key = build_service_key(&ctx, ptr)?;
     let service_value = unsafe {
-        match SERVICES_V4.get(&service_key) {
+        // TODO: investigate this behavior further.
+        // Best to copy to avoid aliasing/junk with deletes/updates happening concurrently
+        // however there may be better ways to handle this
+        match SERVICES_V4.get(&service_key).copied() {
             Some(value) => value,
             None => {
                 debug!(&ctx, "did not find value for service key");

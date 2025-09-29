@@ -1,4 +1,4 @@
-use crate::{Id, KubeProtocol};
+use crate::Id;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ServiceKey {
@@ -11,7 +11,7 @@ pub enum ServiceKey {
 pub struct ServiceKeyV4 {
     pub ip: u32,
     pub port: u16,
-    pub protocol: KubeProtocol,
+    pub protocol: u8,
 }
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for ServiceKeyV4 {}
@@ -21,7 +21,7 @@ unsafe impl aya::Pod for ServiceKeyV4 {}
 pub struct ServiceKeyV6 {
     pub ip: u128,
     pub port: u16,
-    pub protocol: KubeProtocol,
+    pub protocol: u8,
 }
 
 #[cfg(feature = "user")]
@@ -56,7 +56,7 @@ pub enum EndpointValue {
 pub struct EndpointValueV4 {
     pub ip: u32,
     pub port: u16,
-    pub _protocol: KubeProtocol,
+    pub _protocol: u8,
 }
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for EndpointValueV4 {}
@@ -66,7 +66,7 @@ unsafe impl aya::Pod for EndpointValueV4 {}
 pub struct EndpointValueV6 {
     pub ip: u128,
     pub port: u16,
-    pub _protocol: KubeProtocol,
+    pub _protocol: u8,
 }
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for EndpointValueV6 {}

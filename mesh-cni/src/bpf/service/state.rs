@@ -431,17 +431,17 @@ mod test {
         let service_key = ServiceKeyV4 {
             ip: Ipv4Addr::new(192, 168, 0, 1).to_bits(),
             port: 80,
-            protocol: KubeProtocol::Tcp,
+            protocol: KubeProtocol::Tcp as u8,
         };
         let endpoint_one = EndpointValueV4 {
             ip: Ipv4Addr::new(10, 0, 0, 1).to_bits(),
             port: 8080,
-            _protocol: mesh_cni_ebpf_common::KubeProtocol::Tcp,
+            _protocol: KubeProtocol::Tcp as u8,
         };
         let endpoint_two = EndpointValueV4 {
             ip: Ipv4Addr::new(10, 0, 0, 2).to_bits(),
             port: 8080,
-            _protocol: mesh_cni_ebpf_common::KubeProtocol::Tcp,
+            _protocol: KubeProtocol::Tcp as u8,
         };
         let mut endpoints = vec![&endpoint_one];
         let initial_id = 0;

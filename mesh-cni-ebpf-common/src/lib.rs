@@ -51,13 +51,13 @@ impl From<Ip> for IpAddr {
     }
 }
 
-#[repr(C)]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
 pub enum KubeProtocol {
     #[default]
-    Tcp,
-    Udp,
-    Sctp,
+    Tcp = 6,
+    Udp = 17,
+    Sctp = 132,
 }
 
 impl TryFrom<&str> for KubeProtocol {

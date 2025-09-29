@@ -54,7 +54,7 @@ pub mod v1alpha1 {
             let mut result: HashMap<ServiceKey, Vec<EndpointValue>> = HashMap::default();
             for service_ip in &self.spec.service_ips {
                 for mapping in &self.spec.backend_port_mappings {
-                    let protocol = kube_proto_from_str(&Some(mapping.protocol.clone()));
+                    let protocol = kube_proto_from_str(&Some(mapping.protocol.clone())) as u8;
 
                     let (service_key, endpoint_value) = match (service_ip, mapping.ip) {
                         (IpAddr::V4(svc_v4), IpAddr::V4(ep_v4)) => (
