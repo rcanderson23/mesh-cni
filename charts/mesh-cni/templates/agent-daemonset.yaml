@@ -60,6 +60,7 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           securityContext:
+            privileged: true
             {{- toYaml .Values.agent.securityContext | nindent 12 }}
           image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
@@ -76,6 +77,7 @@ spec:
           volumeMounts:
           - mountPath: /sys/fs/bpf
             name: bpf 
+            mountPropagation: HostToContainer
           - mountPath: /sys/fs/cgroup
             name: cgroup
           - mountPath: /var/run/mesh/netns
@@ -94,6 +96,22 @@ spec:
           {{- with .Values.agent.volumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      initContainers:
+      - name: bpffs
+        command:
+        - bash
+        - -c
+        - |
+          mount -t bpf bpffs /sys/fs/bpf
+        securityContext:
+          privileged: true
+        # FIXME: incorporate bpffs mounting into owned container image
+        image: ubuntu:jammy
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - mountPath: /sys/fs/bpf
+          name: bpf 
+          mountPropagation: HostToContainer
       volumes:
       - hostPath:
           path: /sys/fs/bpf

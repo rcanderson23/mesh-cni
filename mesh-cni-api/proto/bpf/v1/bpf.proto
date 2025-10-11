@@ -5,10 +5,10 @@ package grpc.bpf.v1;
 import "cni/v1/types.proto";
 
 service Bpf {
-    rpc AddContainer(AddContainerRequest) returns (AddContainerReply) {}
+    rpc AddPod(AddPodRequest) returns (AddPodReply) {}
 }
 
-message AddContainerReply {
+message AddPodReply {
   repeated grpc.cni.v1.Interface interfaces = 1;
   repeated grpc.cni.v1.IP ips = 2;
   repeated grpc.cni.v1.Route routes = 3;
@@ -16,12 +16,12 @@ message AddContainerReply {
 
 }
 
-message AddContainerRequest {
+message AddPodRequest {
   // Interface name to be created
   string iface = 1;
 
   // Path to the network namespace
-  string net_namespace = 2;
+  optional string net_namespace = 2;
 
   // Path to the cgroup of the container
   string container_id = 3;

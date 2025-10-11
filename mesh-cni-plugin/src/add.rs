@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mesh_cni_api::bpf::v1::{AddContainerReply, AddContainerRequest, bpf_client::BpfClient};
+use mesh_cni_api::bpf::v1::{AddPodReply, AddPodRequest, bpf_client::BpfClient};
 use serde::Deserialize;
 use tracing::{error, info};
 
@@ -21,9 +21,9 @@ pub fn add(args: &Args, input: Input) -> Response {
             )
             .into_response(CNI_VERSION);
         };
-        let req = AddContainerRequest {
+        let req = AddPodRequest {
             iface: args.ifname.clone(),
-            net_namespace,
+            net_namespace: Some(net_namespace),
             container_id: args.container_id.clone(),
             chained: false,
         };
@@ -67,18 +67,14 @@ pub fn add(args: &Args, input: Input) -> Response {
     }
 
     for interface in &prev.interfaces {
-        let Some(net_namespace) = interface.sandbox.clone() else {
+        if interface.sandbox.is_some() {
             continue;
         };
 
         let iface = interface.name.clone();
-        // TODO: hack, maybe validate that network namespace is an actual path
-        if iface.contains("dummy") {
-            continue;
-        }
-        let req = AddContainerRequest {
+        let req = AddPodRequest {
             iface,
-            net_namespace,
+            net_namespace: None,
             container_id: args.container_id.clone(),
             chained: true,
         };
@@ -108,9 +104,9 @@ pub fn add(args: &Args, input: Input) -> Response {
     Response::Success(success)
 }
 
-async fn request(req: AddContainerRequest) -> Result<AddContainerReply, Error> {
+async fn request(req: AddPodRequest) -> Result<AddPodReply, Error> {
     let path = "unix:///var/run/mesh/mesh.sock";
     let mut client = BpfClient::connect(path).await?;
-    let resp = client.add_container(req).await?;
+    let resp = client.add_pod(req).await?;
     Ok(resp.into_inner())
 }
