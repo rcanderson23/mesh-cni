@@ -5,7 +5,7 @@ use aya_ebpf::macros::cgroup_sock_addr;
 use aya_ebpf::programs::SockAddrContext;
 use aya_ebpf::{macros::classifier, programs::TcContext};
 use mesh_cni_ebpf::ingress::try_mesh_cni_ingress;
-use mesh_cni_ebpf::service::try_mesh_cni_group_connect4;
+use mesh_cni_ebpf::service::try_mesh_cni_cgroup_connect4;
 
 #[classifier]
 pub fn mesh_cni_ingress(ctx: TcContext) -> i32 {
@@ -17,7 +17,7 @@ pub fn mesh_cni_ingress(ctx: TcContext) -> i32 {
 
 #[cgroup_sock_addr(connect4)]
 pub fn mesh_cni_cgroup_connect4(ctx: SockAddrContext) -> i32 {
-    match try_mesh_cni_group_connect4(ctx) {
+    match try_mesh_cni_cgroup_connect4(ctx) {
         Ok(ret) => ret,
         Err(ret) => ret,
     }

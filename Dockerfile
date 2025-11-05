@@ -1,5 +1,5 @@
 # when changing image be aware of GLIB version matching in build and running images
-FROM rust:1.90-bookworm AS builder
+FROM rust:1.90-trixie AS builder
 
 RUN apt-get update && \
   apt-get -y install ca-certificates \
@@ -25,7 +25,7 @@ RUN cargo build --release
 
 FROM public.ecr.aws/eks-distro/kubernetes-sigs/aws-iam-authenticator:v0.7.4-eks-1-34-latest AS aws-iam
 
-FROM gcr.io/distroless/cc-debian12
+FROM debian:trixie-slim
 
 WORKDIR /app
 ENV PATH="$PATH:/app"

@@ -6,8 +6,10 @@ use mesh_cni_ebpf_common::service::{
     EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6,
 };
 use tonic::{Request, Response, Status};
+use tracing::{error, info};
 
 use crate::bpf::service::state::{ServiceEndpointBpfMap, ServiceEndpointState};
+use crate::bpf::service::{load_endpoint_maps, load_service_maps};
 
 #[derive(Clone)]
 pub struct Server<SE4, SE6>
@@ -40,6 +42,34 @@ where
     ) -> Result<Response<ListServicesReply>, Status> {
         let request = request.into_inner();
         let state = if request.from_map {
+            let (service_ipv4, _) = load_service_maps().unwrap();
+            let (endpoint_ipv4, _) = load_endpoint_maps().unwrap();
+            info!("dumping map");
+            for kv in service_ipv4.iter() {
+                match kv {
+                    Ok((k, v)) => info!(
+                        "IP:{} Port: {} ID: {} Count: {} ",
+                        Ipv4Addr::from_bits(k.ip),
+                        k.port,
+                        v.id,
+                        v.count
+                    ),
+                    Err(e) => error!("{e}"),
+                }
+            }
+            for kv in endpoint_ipv4.iter() {
+                match kv {
+                    Ok((k, v)) => info!(
+                        "IP: {} Port: {} Position: {} ID: {}",
+                        Ipv4Addr::from_bits(v.ip),
+                        v.port,
+                        k.position,
+                        k.id
+                    ),
+                    Err(e) => error!("{e}"),
+                }
+            }
+            info!("finished dumping map");
             self.state
                 .state_from_map()
                 .map_err(|e| Status::new(tonic::Code::Internal, e.to_string()))?

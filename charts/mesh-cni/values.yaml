@@ -70,7 +70,7 @@ agent:
       drop:
       - ALL
     readOnlyRootFilesystem: true
-    privileged: false
+    privileged: true
   
   metrics:
     port: 9090

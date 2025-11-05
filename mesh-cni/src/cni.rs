@@ -13,12 +13,11 @@ use tracing::info;
 use crate::Result;
 use crate::config::AgentArgs;
 
-const CNI_PATH: &str = "./mesh-cni-plugin";
 const CONFLIST_NAME: &str = "05-mesh.conflist";
 
 pub fn ensure_cni_preconditions(args: &AgentArgs) -> Result<()> {
     ensure_cni_log_dir(&args.cni_plugin_log_dir)?;
-    ensure_cni_bin(&args.cni_bin_dir)?;
+    ensure_cni_bin(&args.cni_bin_dir, &args.cni_plugin_bin)?;
     let conf = if args.chained {
         let existing_conf = get_existing_conflist(&args.cni_conf_dir)?;
         update_cni_conf(&existing_conf)?
@@ -98,12 +97,12 @@ fn get_existing_conflist(cni_conf_dir: impl AsRef<Path>) -> Result<Vec<u8>> {
     .into())
 }
 
-fn ensure_cni_bin(dst: impl AsRef<Path>) -> Result<()> {
+fn ensure_cni_bin(dst: impl AsRef<Path>, bin_path: impl AsRef<Path>) -> Result<()> {
     info!("copying plugin to cni bin");
     let mut path = PathBuf::new();
     path.push(dst);
     path.push("mesh-cni");
-    fs::copy(CNI_PATH, &path)?;
+    fs::copy(bin_path, &path)?;
     let permissions = fs::Permissions::from_mode(0o755);
     fs::set_permissions(path, permissions)?;
 

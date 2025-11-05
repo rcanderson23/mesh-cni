@@ -8,9 +8,63 @@ use std::hash::Hash;
 use aya::Pod;
 use aya::maps::lpm_trie::Key as LpmKey;
 use aya::maps::{HashMap, LpmTrie, MapData};
+use mesh_cni_ebpf_common::Id;
 
 use crate::Result;
 use crate::bpf::ip::IpNetwork;
+
+pub(crate) const BPF_PROGRAM_INGRESS_TC: BpfNamePath = BpfNamePath::Program("mesh_cni_ingress");
+pub const BPF_PROGRAM_CGROUP_CONNECT_V4: BpfNamePath =
+    BpfNamePath::Program("mesh_cni_cgroup_connect4");
+pub const BPF_LINK_CGROUP_CONNECT_V4_PATH: &str = "/sys/fs/bpf/mesh/links/mesh_cni_cgroup_connect4";
+
+pub type IdentityMapV4 = LpmTrie<MapData, u32, Id>;
+pub type IdentityMapV6 = LpmTrie<MapData, u128, Id>;
+
+pub const BPF_MAP_IDENTITY_V4: BpfNamePath = BpfNamePath::Map("identity_v4");
+pub const BPF_MAP_IDENTITY_V6: BpfNamePath = BpfNamePath::Map("identity_v6");
+pub const BPF_MAP_SERVICES_V4: BpfNamePath = BpfNamePath::Map("services_v4");
+pub const BPF_MAP_SERVICES_V6: BpfNamePath = BpfNamePath::Map("services_v6");
+pub const BPF_MAP_ENDPOINTS_V4: BpfNamePath = BpfNamePath::Map("endpoints_v4");
+pub const BPF_MAP_ENDPOINTS_V6: BpfNamePath = BpfNamePath::Map("endpoints_v6");
+
+pub const BPF_MESH_FS_DIR: &str = "/sys/fs/bpf/mesh";
+pub const BPF_MESH_MAPS_DIR: &str = "/sys/fs/bpf/mesh/maps";
+pub const BPF_MESH_PROG_DIR: &str = "/sys/fs/bpf/mesh/programs";
+pub const BPF_MESH_LINKS_DIR: &str = "/sys/fs/bpf/mesh/links";
+
+pub(crate) const MAPS_LIST: [BpfNamePath; 6] = [
+    BPF_MAP_IDENTITY_V4,
+    BPF_MAP_IDENTITY_V6,
+    BPF_MAP_SERVICES_V4,
+    BPF_MAP_SERVICES_V6,
+    BPF_MAP_ENDPOINTS_V4,
+    BPF_MAP_ENDPOINTS_V6,
+];
+
+pub(crate) const PROG_LIST: [BpfNamePath; 2] =
+    [BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_INGRESS_TC];
+
+pub enum BpfNamePath {
+    Map(&'static str),
+    Program(&'static str),
+}
+
+impl BpfNamePath {
+    pub fn name(&self) -> &'static str {
+        match &self {
+            BpfNamePath::Map(n) => n,
+            BpfNamePath::Program(n) => n,
+        }
+    }
+
+    pub fn path(&self) -> String {
+        match &self {
+            BpfNamePath::Map(n) => format!("{BPF_MESH_MAPS_DIR}/{n}"),
+            BpfNamePath::Program(n) => format!("{BPF_MESH_PROG_DIR}/{n}"),
+        }
+    }
+}
 
 pub trait BpfMap {
     type Key;

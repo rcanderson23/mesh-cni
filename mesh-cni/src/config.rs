@@ -56,6 +56,10 @@ pub struct AgentArgs {
     #[arg(long, env = "CNI_PLUGIN_LOG_PATH", default_value = "/var/log/mesh-cni")]
     pub cni_plugin_log_dir: PathBuf,
 
+    /// CNI plugin bin path
+    #[arg(long, env = "CNI_PLUGIN_BIN", default_value = "/app/mesh-cni-plugin")]
+    pub cni_plugin_bin: PathBuf,
+
     /// Cluster configs path
     #[arg(
         long,

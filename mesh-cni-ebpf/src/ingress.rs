@@ -6,9 +6,7 @@ use network_types::eth::{EthHdr, EtherType};
 use network_types::ip::Ipv4Hdr;
 use network_types::tcp::TcpHdr;
 
-use crate::ipv4_id;
-
-// static SYN_BIT: usize = 31;
+use crate::id_v4;
 
 #[inline]
 pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
@@ -26,8 +24,8 @@ pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
 
     // LpmTrie expects big endian order for comparisons
     let (Some(src_id), Some(dst_id)) = (
-        ipv4_id(LpmKey::new(32, src.to_be())),
-        ipv4_id(LpmKey::new(32, dst.to_be())),
+        id_v4(LpmKey::new(32, src.to_be())),
+        id_v4(LpmKey::new(32, dst.to_be())),
     ) else {
         return Ok(TC_ACT_PIPE);
     };

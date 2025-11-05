@@ -1,5 +1,5 @@
 use aya_ebpf::bindings::bpf_sock_addr;
-use aya_ebpf::helpers::r#gen::bpf_get_prandom_u32;
+use aya_ebpf::helpers::generated::bpf_get_prandom_u32;
 use aya_ebpf::programs::SockAddrContext;
 use aya_log_ebpf::{debug, info};
 use mesh_cni_ebpf_common::service::{EndpointKey, ServiceKeyV4};
@@ -41,7 +41,7 @@ const _AF_INET6: u16 = 10;
 ///
 /// Return codes [0(deny),1(allow)]
 #[inline]
-pub fn try_mesh_cni_group_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
+pub fn try_mesh_cni_cgroup_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
     let ptr = ctx.sock_addr;
 
     if unsafe { *ptr }.user_family != AF_INET as u32 {
@@ -53,7 +53,7 @@ pub fn try_mesh_cni_group_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
         // TODO: investigate this behavior further.
         // Best to copy to avoid aliasing/junk with deletes/updates happening concurrently
         // however there may be better ways to handle this
-        match SERVICES_V4.get(&service_key).copied() {
+        match SERVICES_V4.get(service_key).copied() {
             Some(value) => value,
             None => {
                 debug!(&ctx, "did not find value for service key");
@@ -67,7 +67,7 @@ pub fn try_mesh_cni_group_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
     let position = get_position(service_value.count);
 
     let endpoints_value = unsafe {
-        match ENDPOINTS_V4.get(&EndpointKey {
+        match ENDPOINTS_V4.get(EndpointKey {
             id: service_value.id,
             position,
         }) {

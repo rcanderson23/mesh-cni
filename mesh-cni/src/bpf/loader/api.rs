@@ -5,8 +5,8 @@ use tonic::{Code, Request, Response, Status};
 use tracing::{error, info};
 
 use crate::Result;
+use crate::bpf::BPF_PROGRAM_INGRESS_TC;
 use crate::bpf::loader::LoaderState;
-use crate::bpf::loader::state::BPF_PROGRAM_INGRESS_PATH;
 
 use mesh_cni_api::bpf::v1::bpf_server::Bpf as BpfApi;
 
@@ -18,14 +18,12 @@ impl BpfApi for LoaderState {
         &self,
         request: Request<AddPodRequest>,
     ) -> Result<Response<AddPodReply>, Status> {
-        // TODO: state can probably be removed entirely by pinning program and
-        // loading from bpffs on request which would allow for a single load call
         let request = request.into_inner();
         info!("received add request {:?}", request);
         let _ = tc::qdisc_add_clsact(&request.iface);
         info!("adding tc ingress progam to {}", &request.iface);
         let mut ingress_prog =
-            SchedClassifier::from_pin(BPF_PROGRAM_INGRESS_PATH).map_err(|e| {
+            SchedClassifier::from_pin(BPF_PROGRAM_INGRESS_TC.path()).map_err(|e| {
                 error!(%e, "failed to load ingress program from pin");
                 tonic::Status::new(Code::Internal, e.to_string())
             })?;

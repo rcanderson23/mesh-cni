@@ -92,6 +92,9 @@ pub enum Error {
 
     #[error("failed to reconcile due to missing precondition: {0}")]
     ReconcileMissingPrecondition(String),
+
+    #[error("pinned object {path} already exists")]
+    PinExists { path: String },
 }
 impl Error {
     pub fn metric_label(&self) -> String {
