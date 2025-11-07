@@ -34,6 +34,22 @@ spec:
       serviceAccountName: {{ include "mesh-cni.agent.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.agent.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: mount-bpf
+          command:
+          - /bin/bash
+          - -c
+          - --
+          args:
+          - 'mount | grep "/sys/fs/bpf type bpf" || mount -t bpf bpffs /sys/fs/bpf'
+          securityContext:
+            privileged: true
+          image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          volumeMounts:
+          - mountPath: /sys/fs/bpf
+            name: bpf 
+            mountPropagation: Bidirectional
       containers:
         - name: {{ .Chart.Name }}
           args:
