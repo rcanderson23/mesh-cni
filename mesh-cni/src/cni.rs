@@ -4,22 +4,39 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use mesh_cni_plugin::CNI_VERSION;
 use mesh_cni_plugin::config::{Config, PluginConfig};
 use serde_json::Value;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::Result;
 use crate::config::AgentArgs;
 
 const CONFLIST_NAME: &str = "05-mesh.conflist";
 
-pub fn ensure_cni_preconditions(args: &AgentArgs) -> Result<()> {
+pub async fn ensure_cni_preconditions(args: &AgentArgs) -> Result<()> {
     ensure_cni_log_dir(&args.cni_plugin_log_dir)?;
     ensure_cni_bin(&args.cni_bin_dir, &args.cni_plugin_bin)?;
     let conf = if args.chained {
-        let existing_conf = get_existing_conflist(&args.cni_conf_dir)?;
+        // first startup can have issues where the main CNI has not written its
+        // conf yet so retry a few times before completely failing
+        let mut attempts = 0;
+        let max_attempts = 3;
+        let existing_conf = loop {
+            match get_existing_conflist(&args.cni_conf_dir) {
+                Ok(c) => break c,
+                Err(e) => {
+                    if attempts >= max_attempts {
+                        return Err(e);
+                    }
+                    attempts += 1;
+                    warn!(%e, "failed to get existing conflist, retrying");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            }
+        };
         update_cni_conf(&existing_conf)?
     } else {
         default_cni_config()?

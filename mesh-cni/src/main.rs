@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
     let ready = tokio_util::sync::CancellationToken::new();
     match cli.command {
         mesh_cni::config::Commands::Agent(agent_args) => {
-            cni::ensure_cni_preconditions(&agent_args)?;
+            cni::ensure_cni_preconditions(&agent_args).await?;
 
             let mut metrics_handle = tokio::spawn(http::serve_metrics(
                 agent_args.metrics_address,
