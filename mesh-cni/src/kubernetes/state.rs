@@ -13,7 +13,7 @@ use tracing::{error, warn};
 
 use crate::Result;
 use crate::kubernetes::cluster::Cluster;
-use crate::kubernetes::create_store_and_subscriber;
+use mesh_cni_k8s_utils::create_store_and_subscriber;
 
 pub trait MultiClusterStore<K>
 where

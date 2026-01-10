@@ -28,7 +28,9 @@ use crate::bpf::service::api::Server;
 use crate::bpf::service::state::ServiceEndpoint;
 use crate::kubernetes::controllers::bpf_service::start_bpf_meshendpoint_controller;
 use crate::kubernetes::controllers::bpf_service::start_bpf_service_controller;
-use crate::kubernetes::{ClusterId, create_store_and_subscriber};
+use mesh_cni_k8s_utils::create_store_and_subscriber;
+
+use crate::kubernetes::ClusterId;
 
 type ServiceEndpointV4 = ServiceEndpoint<
     HashMap<MapData, ServiceKeyV4, ServiceValue>,

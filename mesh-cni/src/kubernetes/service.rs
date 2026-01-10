@@ -13,7 +13,9 @@ use tokio::select;
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info, warn};
 
-use crate::kubernetes::{ClusterId, create_store_and_subscriber};
+use mesh_cni_k8s_utils::create_store_and_subscriber;
+
+use crate::kubernetes::ClusterId;
 use crate::{Error, Result};
 
 pub(crate) const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";

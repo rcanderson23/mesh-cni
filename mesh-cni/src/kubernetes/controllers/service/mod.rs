@@ -13,6 +13,8 @@ use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
+use mesh_cni_k8s_utils::create_store_and_subscriber;
+
 use crate::{
     Result,
     kubernetes::{
@@ -24,7 +26,6 @@ use crate::{
             },
         },
         crds::meshendpoint::v1alpha1::MeshEndpoint,
-        create_store_and_subscriber,
         state::MultiClusterState,
     },
 };

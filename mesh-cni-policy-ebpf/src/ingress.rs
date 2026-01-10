@@ -12,9 +12,12 @@ use crate::id_v4;
 pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
     let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
 
-    match ethhdr.ether_type {
-        EtherType::Ipv4 => {}
-        _ => return Ok(TC_ACT_PIPE),
+    let Ok(ether_type) = ethhdr.ether_type() else {
+        return Ok(TC_ACT_PIPE);
+    };
+
+    if !matches!(ether_type, EtherType::Ipv4) {
+        return Ok(TC_ACT_PIPE);
     }
 
     let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;

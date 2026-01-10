@@ -1,8 +1,9 @@
 #![no_std]
 
-pub mod service;
+pub mod ingress;
 
 use aya_ebpf::macros::map;
+use aya_ebpf::maps::lpm_trie::Key as LpmKey;
 use aya_ebpf::maps::{HashMap, LpmTrie};
 use mesh_cni_ebpf_common::Id;
 use mesh_cni_ebpf_common::service::{
@@ -26,3 +27,13 @@ static ENDPOINTS_V4: HashMap<EndpointKey, EndpointValueV4> = HashMap::with_max_e
 
 #[map(name = "endpoints_v6")]
 static ENDPOINTS_V6: HashMap<EndpointKey, EndpointValueV6> = HashMap::with_max_entries(65535, 0);
+
+#[inline]
+fn id_v4(ip: LpmKey<u32>) -> Option<Id> {
+    IDENTITY_V4.get(&ip).copied()
+}
+
+#[inline]
+fn _id_v6(ip: LpmKey<u128>) -> Option<Id> {
+    IDENTITY_V6.get(&ip).copied()
+}
