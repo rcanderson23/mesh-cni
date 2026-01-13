@@ -3,12 +3,12 @@ use std::io;
 
 use aya::Ebpf;
 use aya::programs::links::FdLink;
-use aya::programs::{CgroupAttachMode, CgroupSockAddr, SchedClassifier};
+use aya::programs::{CgroupAttachMode, CgroupSockAddr};
 use tracing::{error, info, warn};
 
 use crate::bpf::{
     BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_FS_DIR, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR,
-    BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_INGRESS_TC, MAPS_LIST, PROG_LIST,
+    BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, MAPS_LIST, PROG_LIST,
 };
 use crate::{Error, Result};
 
@@ -29,11 +29,11 @@ impl State {
                 warn!(%e, "failed to init logger for cgroup");
             };
 
-            let ingress = SchedClassifier::from_pin(BPF_PROGRAM_INGRESS_TC.path())?;
-            let info = ingress.info()?;
-            if let Err(e) = aya_log::EbpfLogger::init_from_id(info.id()) {
-                warn!(%e, "failed to init logger for tc");
-            };
+            // let ingress = SchedClassifier::from_pin(BPF_PROGRAM_INGRESS_TC.path())?;
+            // let info = ingress.info()?;
+            // if let Err(e) = aya_log::EbpfLogger::init_from_id(info.id()) {
+            //     warn!(%e, "failed to init logger for tc");
+            // };
 
             return Ok(Self);
         }
@@ -45,8 +45,8 @@ impl State {
         )))?;
         if fs::exists(BPF_PROGRAM_CGROUP_CONNECT_V4.path())? {};
 
-        info!("ensuring ingress program loaded and pinned");
-        ensure_ingress_program(&mut ebpf)?;
+        // info!("ensuring ingress program loaded and pinned");
+        // ensure_ingress_program(&mut ebpf)?;
 
         info!("ensuring cgroupsockaddr program loaded and pinned");
         attach_cgroup_connect_bpf_program(&mut ebpf)?;
@@ -118,33 +118,33 @@ fn reset_pins() -> Result<()> {
     Ok(())
 }
 
-fn ensure_ingress_program(ebpf: &mut Ebpf) -> Result<()> {
-    if fs::exists(BPF_PROGRAM_INGRESS_TC.path())? {
-        return Ok(());
-    }
-    let ingress: &mut SchedClassifier = ebpf
-        .program_mut(BPF_PROGRAM_INGRESS_TC.name())
-        .ok_or_else(|| {
-            Error::EbpfProgramError(format!(
-                "failed to get program {}",
-                BPF_PROGRAM_INGRESS_TC.name()
-            ))
-        })?
-        .try_into()?;
-
-    if let Err(e) = ingress.load()
-        && !matches!(e, aya::programs::ProgramError::AlreadyLoaded)
-    {
-        return Err(e.into());
-    };
-
-    if !fs::exists(BPF_PROGRAM_INGRESS_TC.path())? {
-        info!("pinning ingress program to bpffs");
-        ingress.pin(BPF_PROGRAM_INGRESS_TC.path())?;
-    }
-
-    Ok(())
-}
+// fn ensure_ingress_program(ebpf: &mut Ebpf) -> Result<()> {
+//     if fs::exists(BPF_PROGRAM_INGRESS_TC.path())? {
+//         return Ok(());
+//     }
+//     let ingress: &mut SchedClassifier = ebpf
+//         .program_mut(BPF_PROGRAM_INGRESS_TC.name())
+//         .ok_or_else(|| {
+//             Error::EbpfProgramError(format!(
+//                 "failed to get program {}",
+//                 BPF_PROGRAM_INGRESS_TC.name()
+//             ))
+//         })?
+//         .try_into()?;
+//
+//     if let Err(e) = ingress.load()
+//         && !matches!(e, aya::programs::ProgramError::AlreadyLoaded)
+//     {
+//         return Err(e.into());
+//     };
+//
+//     if !fs::exists(BPF_PROGRAM_INGRESS_TC.path())? {
+//         info!("pinning ingress program to bpffs");
+//         ingress.pin(BPF_PROGRAM_INGRESS_TC.path())?;
+//     }
+//
+//     Ok(())
+// }
 
 fn attach_cgroup_connect_bpf_program(ebpf: &mut Ebpf) -> Result<()> {
     let program: &mut CgroupSockAddr = ebpf

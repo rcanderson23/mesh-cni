@@ -1,34 +1,37 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use k8s_openapi::api::core::v1::{Namespace, Pod};
-use k8s_openapi::api::networking::v1::NetworkPolicy;
 use kube::{Api, Client, runtime::Controller};
+use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
 
 use mesh_cni_k8s_utils::create_store_and_subscriber;
 
-use crate::Result;
-use crate::context::{Context, NetworkPolicyAnalyzer};
+use crate::context::Context;
 use crate::controller::{error_policy, reconcile_namespace, reconcile_pod, reconcile_policy};
+use crate::{Error, Result};
 
 pub async fn start_policy_controllers<NPA>(
     client: Client,
-    analyzer: NPA,
     cancel: CancellationToken,
-) -> Result<()>
-where
-    NPA: NetworkPolicyAnalyzer + Send + Sync + 'static,
-{
-    let (pod_store, pod_subscriber) =
-        create_store_and_subscriber(Api::<Pod>::all(client.clone())).await?;
-    let (policy_store, policy_subscriber) =
-        create_store_and_subscriber(Api::<NetworkPolicy>::all(client.clone())).await?;
-    let (namespace_store, namespace_subscriber) =
-        create_store_and_subscriber(Api::<Namespace>::all(client.clone())).await?;
+) -> Result<()> {
+    let store_init = timeout(Duration::from_secs(30), async {
+        tokio::try_join!(
+            create_store_and_subscriber(Api::all(client.clone())),
+            create_store_and_subscriber(Api::all(client.clone())),
+            create_store_and_subscriber(Api::all(client.clone())),
+        )
+    })
+    .await
+    .map_err(|_| Error::Timeout("store initialization".into()))??;
+
+    let (
+        (pod_store, pod_subscriber),
+        (policy_store, policy_subscriber),
+        (namespace_store, namespace_subscriber),
+    ) = store_init;
 
     let context = Arc::new(Context {
-        analyzer,
         pod_store: pod_store.clone(),
         policy_store: policy_store.clone(),
         namespace_store: namespace_store.clone(),

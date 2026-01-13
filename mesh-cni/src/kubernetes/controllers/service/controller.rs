@@ -67,9 +67,10 @@ pub async fn reconcile(service: Arc<Service>, ctx: Arc<Context>) -> Result<Actio
     let mut mesh_endpoint = MeshEndpoint::new(&name, spec);
     mesh_endpoint.metadata.owner_references = Some(owner_references(&service));
     let api: Api<MeshEndpoint> = Api::namespaced(ctx.client.clone(), &ns);
-    let ssaply = PatchParams::apply(MANANGER).force();
+    let ssapply = PatchParams::apply(MANANGER).force();
 
-    api.patch(&name, &ssaply, &Patch::Apply(mesh_endpoint))
+    dbg!(&mesh_endpoint);
+    api.patch(&name, &ssapply, &Patch::Apply(mesh_endpoint))
         .await?;
     info!("created mesh endpoint {}/{}", ns, name);
 

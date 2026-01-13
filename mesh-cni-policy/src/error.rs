@@ -10,13 +10,10 @@ pub enum Error {
 
     #[error("failed to create store: {0}")]
     StoreCreation(String),
-}
 
-impl From<mesh_cni_k8s_utils::Error> for Error {
-    fn from(err: mesh_cni_k8s_utils::Error) -> Self {
-        match err {
-            mesh_cni_k8s_utils::Error::StoreCreation(msg) => Self::StoreCreation(msg),
-            mesh_cni_k8s_utils::Error::KubeError(e) => Self::KubeError(e),
-        }
-    }
+    #[error("timed out: {0}")]
+    Timeout(String),
+
+    #[error("utils error: {0}")]
+    UtilsError(#[from] mesh_cni_k8s_utils::Error),
 }

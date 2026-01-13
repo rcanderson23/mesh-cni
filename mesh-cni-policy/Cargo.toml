@@ -5,14 +5,16 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
+
 ahash = { workspace = true }
 futures = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true}
-mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
-npa = { workspace = true}
+serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [build-dependencies]

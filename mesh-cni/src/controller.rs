@@ -1,4 +1,5 @@
 use k8s_openapi::api::discovery::v1::EndpointSlice;
+use mesh_cni_identity::start_identity_controllers;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -37,14 +38,19 @@ pub async fn start(
     };
 
     let service_controller =
-        start_service_controller(local_client, endpoint_slice_state, cancel.clone());
+        start_service_controller(local_client.clone(), endpoint_slice_state, cancel.clone());
 
     let service_handle = tokio::spawn(service_controller);
+
+    let identity_controller = start_identity_controllers(local_client, cancel.clone());
+
+    let identity_handle = tokio::spawn(identity_controller);
 
     ready.cancel();
     tokio::select! {
         _ = cancel.cancelled() => {},
         _ = service_handle => {}
+        _ = identity_handle => {}
     }
 
     Ok(())

@@ -10,6 +10,7 @@ mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
 mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common", features = ["user"] }
 mesh-cni-plugin = { path = "../mesh-cni-plugin"}
 mesh-cni-api = { path = "../mesh-cni-api"}
+mesh-cni-identity = { path = "../mesh-cni-identity"}
 
 ahash = { workspace = true }
 async-stream = { workspace = true }
@@ -25,7 +26,7 @@ http = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 libc = { workspace = true }
-k8s-openapi = { workspace = true }
+k8s-openapi = { workspace = true, features = ["v1_34"] }
 kube = { workspace = true}
 netns-rs = { workspace = true }
 network-types = { workspace = true }
