@@ -8,6 +8,9 @@ default:
 fmt:
   cargo fmt
 
+lint:
+  cargo clippy
+
 container:
   docker buildx build --tag {{container_image}}:latest . --load
 

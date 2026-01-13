@@ -1,0 +1,30 @@
+[package]
+name = "mesh-cni-identity"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils/"}
+
+futures = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+serde_json = { workspace = true }
+sha2 = {version = "0.10.9"}
+rand = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+
+[lib]
+name = "mesh_cni_identity"
+path = "src/lib.rs"
+
+[dev-dependencies]
+http = { workspace = true }
+k8s-openapi = { workspace = true, features = ["v1_34"] }

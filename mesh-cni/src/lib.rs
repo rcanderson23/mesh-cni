@@ -95,7 +95,11 @@ pub enum Error {
 
     #[error("pinned object {path} already exists")]
     PinExists { path: String },
+
+    #[error("mesh identity: {0}")]
+    MeshIdentityError(#[from] mesh_cni_identity::Error),
 }
+
 impl Error {
     pub fn metric_label(&self) -> String {
         format!("{self:?}").to_lowercase()

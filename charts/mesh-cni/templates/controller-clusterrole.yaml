@@ -48,6 +48,7 @@ rules:
   - mesh-cni.dev
   resources:
   - meshendpoints
+  - identities
   verbs:
   - list
   - watch

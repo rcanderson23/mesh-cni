@@ -1,0 +1,37 @@
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
+
+use futures::StreamExt;
+use kube::{
+    Api, Client,
+    runtime::{Controller, watcher::Config},
+};
+use tokio_util::sync::CancellationToken;
+
+use crate::Result;
+use crate::context::Context;
+use crate::controller::{error_policy, reconcile};
+use crate::crds::cluster::v1alpha1::Cluster;
+
+pub async fn start_cluster_controller(client: Client, cancel: CancellationToken) -> Result<()> {
+    let api: Api<Cluster> = Api::all(client.clone());
+    let context = Arc::new(Context {
+        client,
+        cluster_api: api.clone(),
+        controllers: Arc::new(Mutex::new(BTreeMap::default())),
+    });
+
+    Controller::new(api, Config::default().any_semantic())
+        .graceful_shutdown_on(shutdown(cancel))
+        .run(reconcile, error_policy, context)
+        .filter_map(|x| async move { std::result::Result::ok(x) })
+        .for_each(|_| futures::future::ready(()))
+        .await;
+    Ok(())
+}
+
+async fn shutdown(cancel: CancellationToken) {
+    cancel.cancelled().await;
+}

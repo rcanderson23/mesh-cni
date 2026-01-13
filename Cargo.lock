@@ -1704,6 +1704,7 @@ dependencies = [
  "libc",
  "mesh-cni-api",
  "mesh-cni-ebpf-common",
+ "mesh-cni-identity",
  "mesh-cni-k8s-utils",
  "mesh-cni-plugin",
  "netns-rs",
@@ -1760,6 +1761,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-cni-cluster"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "mesh-cni-ebpf"
 version = "0.1.0"
 dependencies = [
@@ -1777,6 +1795,27 @@ version = "0.1.0"
 dependencies = [
  "aya",
  "network-types",
+]
+
+[[package]]
+name = "mesh-cni-identity"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "http",
+ "k8s-openapi",
+ "kube",
+ "mesh-cni-k8s-utils",
+ "rand",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -1820,9 +1859,10 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "mesh-cni-k8s-utils",
- "npa",
+ "serde",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -1907,19 +1947,6 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
-]
-
-[[package]]
-name = "npa"
-version = "0.1.0"
-dependencies = [
- "futures",
- "ipnet",
- "k8s-openapi",
- "kube",
- "thiserror 2.0.17",
- "tokio",
- "tracing",
 ]
 
 [[package]]

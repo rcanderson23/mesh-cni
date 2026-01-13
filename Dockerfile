@@ -1,5 +1,5 @@
 # when changing image be aware of GLIB version matching in build and running images
-FROM rust:1.90-trixie AS builder
+FROM rust:1.92-trixie AS builder
 
 RUN apt-get update && \
   apt-get -y install ca-certificates \
@@ -19,7 +19,11 @@ COPY mesh-cni-api mesh-cni-api
 COPY mesh-cni-cli mesh-cni-cli
 COPY mesh-cni mesh-cni
 COPY mesh-cni-ebpf-common mesh-cni-ebpf-common
+COPY mesh-cni-identity mesh-cni-identity
+COPY mesh-cni-policy mesh-cni-policy
+COPY mesh-cni-policy-ebpf mesh-cni-policy-ebpf
 COPY mesh-cni-ebpf mesh-cni-ebpf
+COPY mesh-cni-k8s-utils mesh-cni-k8s-utils
 
 RUN cargo build --release
 

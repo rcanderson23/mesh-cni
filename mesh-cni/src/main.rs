@@ -70,7 +70,10 @@ async fn main() -> Result<()> {
             };
             info!("Exiting...");
         }
-        mesh_cni::config::Commands::Crdgen => mesh_cni::kubernetes::crds::crd_gen()?,
+        mesh_cni::config::Commands::Crdgen => {
+            mesh_cni::kubernetes::crds::crd_gen()?;
+            mesh_cni_identity::crd_gen()?
+        }
     }
     Ok(())
 }
