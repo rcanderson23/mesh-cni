@@ -6,6 +6,7 @@ members = [
     "mesh-cni-cli",
     "mesh-cni-ebpf",
     "mesh-cni-ebpf-common",
+    "mesh-cni-cluster",
     "mesh-cni-identity",
     "mesh-cni-k8s-utils",
     "mesh-cni-plugin",

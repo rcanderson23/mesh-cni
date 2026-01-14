@@ -1761,6 +1761,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-cni-cluster"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "mesh-cni-ebpf"
 version = "0.1.0"
 dependencies = [
