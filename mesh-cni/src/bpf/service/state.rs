@@ -7,6 +7,7 @@ use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4,
     ServiceKeyV6, ServiceValue,
 };
+use mesh_cni_service_bpf_controller::{Error as BpfControllerError, ServiceBpfState};
 use tracing::warn;
 
 use crate::bpf::BpfMap;
@@ -401,6 +402,22 @@ where
         }
 
         Ok(map)
+    }
+}
+
+impl<SE4, SE6> ServiceBpfState for ServiceEndpointState<SE4, SE6>
+where
+    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
+    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+{
+    fn update(&self, key: ServiceKey, value: Vec<EndpointValue>) -> std::result::Result<(), BpfControllerError> {
+        ServiceEndpointState::update(self, key, value)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn remove(&self, key: &ServiceKey) -> std::result::Result<(), BpfControllerError> {
+        ServiceEndpointState::remove(self, key)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
     }
 }
 

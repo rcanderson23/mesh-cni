@@ -26,8 +26,9 @@ use crate::bpf::BPF_MAP_SERVICES_V4;
 use crate::bpf::BPF_MAP_SERVICES_V6;
 use crate::bpf::service::api::Server;
 use crate::bpf::service::state::ServiceEndpoint;
-use crate::kubernetes::controllers::bpf_service::start_bpf_meshendpoint_controller;
-use crate::kubernetes::controllers::bpf_service::start_bpf_service_controller;
+use mesh_cni_service_bpf_controller::{
+    start_bpf_meshendpoint_controller, start_bpf_service_controller,
+};
 use mesh_cni_k8s_utils::create_store_and_subscriber;
 
 use crate::kubernetes::ClusterId;

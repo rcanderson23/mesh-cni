@@ -1,7 +1,5 @@
 use tokio::time::Duration;
 
-pub mod bpf_service;
-
 mod ip;
 pub use ip::start_ip_controllers;
 mod metrics;

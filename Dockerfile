@@ -26,6 +26,7 @@ COPY mesh-cni-ebpf mesh-cni-ebpf
 COPY mesh-cni-k8s-utils mesh-cni-k8s-utils
 COPY mesh-cni-crds mesh-cni-crds
 COPY mesh-cni-service-controller mesh-cni-service-controller
+COPY mesh-cni-service-bpf-controller mesh-cni-service-bpf-controller
 COPY mesh-cni-cluster-controller mesh-cni-cluster-controller
 
 RUN cargo build --release

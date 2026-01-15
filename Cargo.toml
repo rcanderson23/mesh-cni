@@ -13,7 +13,7 @@ members = [
     "mesh-cni-policy-controller",
     "mesh-cni-policy-ebpf",
     "mesh-cni-service-controller",
-    "mesh-cni-crds",
+    "mesh-cni-crds", "mesh-cni-service-bpf-controller",
 ]
 default-members = [
     "mesh-cni-api",

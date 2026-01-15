@@ -1708,6 +1708,7 @@ dependencies = [
  "mesh-cni-identity-controller",
  "mesh-cni-k8s-utils",
  "mesh-cni-plugin",
+ "mesh-cni-service-bpf-controller",
  "mesh-cni-service-controller",
  "netns-rs",
  "network-types",
@@ -1896,6 +1897,26 @@ dependencies = [
  "mesh-cni-ebpf-common",
  "network-types",
  "which 8.0.0",
+]
+
+[[package]]
+name = "mesh-cni-service-bpf-controller"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "mesh-cni-crds",
+ "mesh-cni-ebpf-common",
+ "opentelemetry",
+ "prometheus-client",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-opentelemetry",
 ]
 
 [[package]]

@@ -1,0 +1,21 @@
+[package]
+name = "mesh-cni-service-bpf-controller"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+ahash = { workspace = true }
+futures = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+mesh-cni-crds = { path = "../mesh-cni-crds" }
+mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common", features = ["user"] }
+opentelemetry = { workspace = true }
+prometheus-client = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
