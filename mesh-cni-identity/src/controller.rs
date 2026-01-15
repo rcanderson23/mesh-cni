@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 use crate::context::Context;
-use crate::crds::identity::v1alpha1::{Identity, IdentitySpec};
+use mesh_cni_crds::v1alpha1::identity::{Identity, IdentitySpec};
 use crate::{Error, Result};
 
 const MANANGER: &str = "identity-controller";

@@ -1,6 +1,5 @@
 pub mod cluster;
 pub mod controllers;
-pub mod crds;
 pub mod node;
 pub mod service;
 pub mod state;

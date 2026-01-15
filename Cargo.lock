@@ -1703,10 +1703,12 @@ dependencies = [
  "kube",
  "libc",
  "mesh-cni-api",
+ "mesh-cni-crds",
  "mesh-cni-ebpf-common",
  "mesh-cni-identity",
  "mesh-cni-k8s-utils",
  "mesh-cni-plugin",
+ "mesh-cni-service",
  "netns-rs",
  "network-types",
  "opentelemetry",
@@ -1767,6 +1769,7 @@ dependencies = [
  "futures",
  "k8s-openapi",
  "kube",
+ "mesh-cni-crds",
  "schemars",
  "serde",
  "serde_json",
@@ -1774,6 +1777,22 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "mesh-cni-crds"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "k8s-openapi",
+ "kube",
+ "mesh-cni-ebpf-common",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.17",
  "tracing",
 ]
 
@@ -1805,6 +1824,7 @@ dependencies = [
  "http",
  "k8s-openapi",
  "kube",
+ "mesh-cni-crds",
  "mesh-cni-k8s-utils",
  "rand",
  "schemars",
@@ -1876,6 +1896,27 @@ dependencies = [
  "mesh-cni-ebpf-common",
  "network-types",
  "which 8.0.0",
+]
+
+[[package]]
+name = "mesh-cni-service"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "mesh-cni-crds",
+ "mesh-cni-k8s-utils",
+ "opentelemetry",
+ "prometheus-client",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-opentelemetry",
 ]
 
 [[package]]

@@ -5,7 +5,7 @@ use mesh_cni_ebpf_common::service::{EndpointValueV4, EndpointValueV6, ServiceKey
 
 use crate::bpf::service::{BpfServiceEndpointState, ServiceEndpointBpfMap};
 use crate::kubernetes::controllers::metrics::ControllerMetrics;
-use crate::kubernetes::crds::meshendpoint::v1alpha1::MeshEndpoint;
+use mesh_cni_crds::v1alpha1::meshendpoint::MeshEndpoint;
 
 pub struct Context<SE4, SE6>
 where

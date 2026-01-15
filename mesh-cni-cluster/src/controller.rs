@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use tracing::info;
 
 use crate::context::Context;
-use crate::crds::cluster::v1alpha1::Cluster;
+use mesh_cni_crds::v1alpha1::cluster::Cluster;
 use crate::{Error, Result};
 
 const CLUSTER_FINALIZER: &str = "clusters.mesh-cni.dev/cleanup";

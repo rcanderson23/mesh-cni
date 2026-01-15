@@ -18,18 +18,16 @@ use kube::{
 use serde::de::DeserializeOwned;
 use tokio_util::sync::CancellationToken;
 
+use mesh_cni_crds::v1alpha1::meshendpoint::MeshEndpoint;
 use mesh_cni_ebpf_common::service::{EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6};
 use tracing::info;
 
 use crate::{
     Result,
     bpf::service::{BpfServiceEndpointState, ServiceEndpointBpfMap},
-    kubernetes::{
-        controllers::{
-            bpf_service::{context::Context, controller::MeshControllerExt},
-            metrics::ControllerMetrics,
-        },
-        crds::meshendpoint::v1alpha1::MeshEndpoint,
+    kubernetes::controllers::{
+        bpf_service::{context::Context, controller::MeshControllerExt},
+        metrics::ControllerMetrics,
     },
 };
 

@@ -11,6 +11,8 @@ mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common", features = ["user"] }
 mesh-cni-plugin = { path = "../mesh-cni-plugin"}
 mesh-cni-api = { path = "../mesh-cni-api"}
 mesh-cni-identity = { path = "../mesh-cni-identity"}
+mesh-cni-service = { path = "../mesh-cni-service" }
+mesh-cni-crds = { path = "../mesh-cni-crds" }
 
 ahash = { workspace = true }
 async-stream = { workspace = true }

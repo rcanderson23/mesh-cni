@@ -12,9 +12,8 @@ use tracing::{Span, error, field, info};
 use crate::bpf::service::ServiceEndpointBpfMap;
 use crate::kubernetes::controllers::bpf_service::MESH_SERVICE;
 use crate::kubernetes::controllers::metrics;
-use crate::kubernetes::crds::meshendpoint::v1alpha1::{MeshEndpoint, generate_mesh_endpoint_spec};
-use crate::kubernetes::state::MultiClusterStore;
 use crate::{Error, Result, kubernetes::controllers::bpf_service::context::Context};
+use mesh_cni_crds::v1alpha1::meshendpoint::{MeshEndpoint, generate_mesh_endpoint_spec};
 
 use mesh_cni_ebpf_common::service::{
     EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4, ServiceKeyV6,
@@ -93,10 +92,15 @@ where
         &self,
         state: &Context<SE4, SE6>,
     ) -> HashMap<ServiceKey, Vec<EndpointValue>> {
-        let service = state.service_state.get_all_by_namespace_label(
-            self.namespace().as_deref(),
-            &Expression::Equal(SERVICE_OWNER_LABEL.into(), self.name_any()).into(),
-        );
+        let selector: Selector =
+            Expression::Equal(SERVICE_OWNER_LABEL.into(), self.name_any()).into();
+        let service: Vec<Arc<Service>> = state
+            .service_state
+            .state()
+            .iter()
+            .filter(|s| self.namespace() == s.namespace() && selector.matches(s.labels()))
+            .cloned()
+            .collect();
         let Some(service) = service.first() else {
             return HashMap::default();
         };

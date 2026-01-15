@@ -11,7 +11,7 @@ members = [
     "mesh-cni-k8s-utils",
     "mesh-cni-plugin",
     "mesh-cni-policy",
-    "mesh-cni-policy-ebpf",
+    "mesh-cni-policy-ebpf", "mesh-cni-service", "mesh-cni-crds",
 ]
 default-members = [
     "mesh-cni-api",

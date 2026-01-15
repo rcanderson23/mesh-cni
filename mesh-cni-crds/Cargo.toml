@@ -1,0 +1,25 @@
+[package]
+name = "mesh-cni-crds"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+k8s-openapi = { workspace = true, features = ["v1_34"] }
+kube = { workspace = true }
+mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common", features = ["user"] }
+ahash = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[lib]
+name = "mesh_cni_crds"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mesh-cni"
+path = "src/main.rs"

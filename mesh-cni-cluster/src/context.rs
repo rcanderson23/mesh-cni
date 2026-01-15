@@ -5,7 +5,7 @@ use kube::{Api, Client};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use crate::crds::cluster::v1alpha1::Cluster;
+use mesh_cni_crds::v1alpha1::cluster::Cluster;
 
 pub struct Context {
     pub client: Client,

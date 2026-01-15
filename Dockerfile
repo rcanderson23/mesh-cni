@@ -24,6 +24,9 @@ COPY mesh-cni-policy mesh-cni-policy
 COPY mesh-cni-policy-ebpf mesh-cni-policy-ebpf
 COPY mesh-cni-ebpf mesh-cni-ebpf
 COPY mesh-cni-k8s-utils mesh-cni-k8s-utils
+COPY mesh-cni-crds mesh-cni-crds
+COPY mesh-cni-service mesh-cni-service
+COPY mesh-cni-cluster mesh-cni-cluster
 
 RUN cargo build --release
 

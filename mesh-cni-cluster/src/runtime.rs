@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 use crate::Result;
 use crate::context::Context;
 use crate::controller::{error_policy, reconcile};
-use crate::crds::cluster::v1alpha1::Cluster;
+use mesh_cni_crds::v1alpha1::cluster::Cluster;
 
 pub async fn start_cluster_controller(client: Client, cancel: CancellationToken) -> Result<()> {
     let api: Api<Cluster> = Api::all(client.clone());

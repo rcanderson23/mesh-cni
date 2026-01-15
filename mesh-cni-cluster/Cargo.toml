@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+mesh-cni-crds = { path = "../mesh-cni-crds" }
 futures = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }

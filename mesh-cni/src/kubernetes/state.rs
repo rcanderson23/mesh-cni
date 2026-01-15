@@ -4,9 +4,8 @@ use std::sync::Arc;
 use ahash::{HashMap, HashMapExt};
 use futures::StreamExt;
 use k8s_openapi::Metadata;
-use kube::core::{Selector, SelectorExt};
-use kube::runtime::reflector::{ObjectRef, ReflectHandle, Store};
-use kube::{Resource, ResourceExt};
+use kube::Resource;
+use kube::runtime::reflector::{ReflectHandle, Store};
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, warn};
@@ -14,20 +13,6 @@ use tracing::{error, warn};
 use crate::Result;
 use crate::kubernetes::cluster::Cluster;
 use mesh_cni_k8s_utils::create_store_and_subscriber;
-
-pub trait MultiClusterStore<K>
-where
-    K: k8s_openapi::Metadata + kube::Resource + Clone,
-    K::DynamicType: std::hash::Hash + std::cmp::Eq + Clone,
-{
-    fn get_from_cluster(&self, obj_ref: &ObjectRef<K>, cluster_name: &str) -> Option<Arc<K>>;
-    fn get_all(&self, obj_ref: &ObjectRef<K>) -> Vec<Arc<K>>;
-    fn get_all_by_namespace_label(
-        &self,
-        namespace: Option<&str>,
-        selector: &Selector,
-    ) -> Vec<Arc<K>>;
-}
 
 pub struct MultiClusterState<K>
 where
@@ -78,89 +63,6 @@ where
     }
     pub fn take_receiver(&mut self) -> Option<Receiver<Arc<K>>> {
         self.rx.take()
-    }
-}
-
-impl<K> MultiClusterStore<K> for MultiClusterState<K>
-where
-    K: Resource
-        + Send
-        + Clone
-        + core::fmt::Debug
-        + DeserializeOwned
-        + k8s_openapi::Metadata
-        + Sync
-        + 'static,
-    <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + core::hash::Hash + Clone,
-{
-    fn get_from_cluster(&self, obj_ref: &ObjectRef<K>, cluster_name: &str) -> Option<Arc<K>> {
-        let store = self.state.get(cluster_name)?;
-        store.get(obj_ref)
-    }
-
-    fn get_all(&self, obj_ref: &ObjectRef<K>) -> Vec<Arc<K>> {
-        let mut result = vec![];
-        for (_, store) in self.state.iter() {
-            let Some(o) = store.get(obj_ref) else {
-                continue;
-            };
-            result.push(o);
-        }
-        result
-    }
-
-    fn get_all_by_namespace_label(
-        &self,
-        namespace: Option<&str>,
-        selector: &Selector,
-    ) -> Vec<Arc<K>> {
-        let mut result = Vec::new();
-        for state in self.state.values() {
-            for k in state.state().iter() {
-                if selector.matches(k.labels()) && k.namespace().as_deref() == namespace {
-                    result.push(k.clone());
-                }
-            }
-        }
-        result
-    }
-}
-
-impl<K> MultiClusterStore<K> for Store<K>
-where
-    K: Resource
-        + Send
-        + Clone
-        + core::fmt::Debug
-        + DeserializeOwned
-        + k8s_openapi::Metadata
-        + Sync
-        + 'static,
-    <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + core::hash::Hash + Clone,
-{
-    fn get_from_cluster(&self, obj_ref: &ObjectRef<K>, _cluster_name: &str) -> Option<Arc<K>> {
-        self.get(obj_ref)
-    }
-
-    fn get_all(&self, obj_ref: &ObjectRef<K>) -> Vec<Arc<K>> {
-        let Some(resource) = self.get(obj_ref) else {
-            return Vec::new();
-        };
-        vec![resource]
-    }
-
-    fn get_all_by_namespace_label(
-        &self,
-        namespace: Option<&str>,
-        selector: &Selector,
-    ) -> Vec<Arc<K>> {
-        let mut result = Vec::new();
-        for item in self.state().iter() {
-            if item.namespace().as_deref() == namespace && selector.matches(item.labels()) {
-                result.push(item.clone());
-            }
-        }
-        result
     }
 }
 

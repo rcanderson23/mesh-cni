@@ -2,7 +2,7 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::Client;
 use kube::runtime::reflector::Store;
 
-use crate::crds::identity::v1alpha1::Identity;
+use mesh_cni_crds::v1alpha1::identity::Identity;
 
 pub struct Context {
     pub client: Client,
