@@ -1,7 +1,6 @@
 pub mod cluster;
 pub mod controllers;
 pub mod node;
-pub mod service;
 pub mod state;
 
 use std::collections::BTreeMap;
