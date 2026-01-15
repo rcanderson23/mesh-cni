@@ -60,6 +60,7 @@ impl MeshEndpoint {
                             ip: svc_v4.to_bits(),
                             port: mapping.service_port,
                             protocol,
+                            _pad: 0,
                         }),
                         EndpointValue::V4(EndpointValueV4 {
                             ip: ep_v4.to_bits(),
@@ -72,6 +73,7 @@ impl MeshEndpoint {
                             ip: svc_v6.to_bits(),
                             port: mapping.service_port,
                             protocol,
+                            _pad: 0,
                         }),
                         EndpointValue::V6(EndpointValueV6 {
                             ip: ep_v6.to_bits(),

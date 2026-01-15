@@ -266,6 +266,7 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
                             ip: ipv4_addr.into(),
                             port: np.port,
                             protocol: np.protocol as u8,
+                            _pad: 0,
                         }));
                     }
                     // TODO: Add Ipv6
@@ -300,6 +301,7 @@ fn generate_endpoint_events<T: KubeStore<EndpointSlice>>(
                         ip: ipv4_addr.into(),
                         port: np.port,
                         protocol: np.protocol as u8,
+                        _pad: 0,
                     };
                     let ready_destinations = destinations_map.remove(&np.name).unwrap_or_default();
                     events.push(EndpointEvent::Update(ServiceIdentity {
@@ -360,7 +362,7 @@ fn destinations_from_ep_slice(slice: &EndpointSlice) -> BTreeMap<String, Vec<Ser
         let destinations: Vec<ServiceKeyV4> = addrs.iter().filter_map(|addr| match addr.parse::<IpAddr>(){
             Ok(ip) => {
                 match ip{
-                    IpAddr::V4(ipv4_addr) => Some(ServiceKeyV4{ip: ipv4_addr.into(), port, protocol}),
+                    IpAddr::V4(ipv4_addr) => Some(ServiceKeyV4{ip: ipv4_addr.into(), port, protocol, _pad: 0}),
                     // TODO: Add ipv6 support
                     IpAddr::V6(_) => None,
                 }
@@ -481,11 +483,13 @@ mod test {
                     ip: Ipv4Addr::new(10, 96, 0, 25).into(),
                     port: 8080,
                     protocol: KubeProtocol::Tcp as u8,
+                    _pad: 0,
                 },
                 ready_destinations: vec![ServiceKeyV4 {
                     ip: Ipv4Addr::new(192, 168, 1, 1).into(),
                     port: 80,
                     protocol: KubeProtocol::Tcp as u8,
+                    _pad: 0,
                 }],
                 cluster_id: 1,
             })]
@@ -498,6 +502,7 @@ mod test {
                 ip: Ipv4Addr::new(10, 96, 0, 25).into(),
                 port: 8080,
                 protocol: KubeProtocol::Tcp as u8,
+                _pad: 0,
             })]
         );
     }
@@ -530,6 +535,7 @@ mod test {
                 ip: Ipv4Addr::new(192, 168, 1, 1).into(),
                 port: 80,
                 protocol: KubeProtocol::Tcp as u8,
+                _pad: 0,
             }],
         );
         assert_eq!(destinations_from_ep_slice(&slice), map);

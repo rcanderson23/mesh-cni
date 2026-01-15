@@ -98,6 +98,9 @@ pub enum Error {
 
     #[error("mesh identity: {0}")]
     MeshIdentityError(#[from] mesh_cni_identity_controller::Error),
+
+    #[error("ebpf log error: {0}")]
+    EbpfLogError(#[from] aya_log::Error),
 }
 
 impl Error {

@@ -55,15 +55,15 @@ spec:
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           volumeMounts:
-          - mountPath: /etc/mesh-cni/
-            name: config
+          # - mountPath: /etc/mesh-cni/
+          #   name: config
           {{- with .Values.controller.volumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
-      - configMap:
-          name: mesh-cni-controller-config
-        name: config
+      # - configMap:
+      #     name: mesh-cni-controller-config
+      #   name: config
       {{- with .Values.controller.extraVolumes }}
         {{- toYaml . | nindent 8 }}
       {{- end }}

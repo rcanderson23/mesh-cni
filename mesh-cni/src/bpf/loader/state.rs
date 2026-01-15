@@ -20,20 +20,7 @@ pub struct State;
 impl State {
     pub fn try_new() -> Result<State> {
         if pins_exist()? {
-            let cgroup_prog = CgroupSockAddr::from_pin(
-                BPF_PROGRAM_CGROUP_CONNECT_V4.path(),
-                aya::programs::CgroupSockAddrAttachType::Connect4,
-            )?;
-            let info = cgroup_prog.info()?;
-            if let Err(e) = aya_log::EbpfLogger::init_from_id(info.id()) {
-                warn!(%e, "failed to init logger for cgroup");
-            };
-
-            // let ingress = SchedClassifier::from_pin(BPF_PROGRAM_INGRESS_TC.path())?;
-            // let info = ingress.info()?;
-            // if let Err(e) = aya_log::EbpfLogger::init_from_id(info.id()) {
-            //     warn!(%e, "failed to init logger for tc");
-            // };
+            start_ebpf_logger()?;
 
             return Ok(Self);
         }
@@ -53,10 +40,7 @@ impl State {
 
         pin_maps(&mut ebpf)?;
 
-        info!("initializing bpf logger");
-        if let Err(e) = aya_log::EbpfLogger::init(&mut ebpf) {
-            warn!(%e, "failed to init ebpf logger");
-        }
+        start_ebpf_logger()?;
         Ok(Self)
     }
 }
@@ -145,6 +129,37 @@ fn reset_pins() -> Result<()> {
 //
 //     Ok(())
 // }
+//
+fn start_ebpf_logger() -> Result<()> {
+    let cgroup_prog = CgroupSockAddr::from_pin(
+        BPF_PROGRAM_CGROUP_CONNECT_V4.path(),
+        aya::programs::CgroupSockAddrAttachType::Connect4,
+    )?;
+    let info = cgroup_prog.info()?;
+    start_ebpf_logger_from_prog_id(info.id())?;
+
+    // let ingress = SchedClassifier::from_pin(BPF_PROGRAM_INGRESS_TC.path())?;
+    // let info = ingress.info()?;
+    // if let Err(e) = aya_log::EbpfLogger::init_from_id(info.id()) {
+    //     warn!(%e, "failed to init logger for tc");
+    // };
+
+    Ok(())
+}
+
+fn start_ebpf_logger_from_prog_id(program_id: u32) -> Result<()> {
+    let logger = aya_log::EbpfLogger::init_from_id(program_id)?;
+    let mut logger =
+        tokio::io::unix::AsyncFd::with_interest(logger, tokio::io::Interest::READABLE)?;
+    tokio::spawn(async move {
+        loop {
+            let mut guard = logger.readable_mut().await.unwrap();
+            guard.get_inner_mut().flush();
+            guard.clear_ready();
+        }
+    });
+    Ok(())
+}
 
 fn attach_cgroup_connect_bpf_program(ebpf: &mut Ebpf) -> Result<()> {
     let program: &mut CgroupSockAddr = ebpf

@@ -12,6 +12,7 @@ pub struct ServiceKeyV4 {
     pub ip: u32,
     pub port: u16,
     pub protocol: u8,
+    pub _pad: u8,
 }
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for ServiceKeyV4 {}
@@ -22,6 +23,7 @@ pub struct ServiceKeyV6 {
     pub ip: u128,
     pub port: u16,
     pub protocol: u8,
+    pub _pad: u8,
 }
 
 #[cfg(feature = "user")]
@@ -41,6 +43,7 @@ unsafe impl aya::Pod for ServiceValue {}
 pub struct EndpointKey {
     pub id: u16,
     pub position: u16,
+    pub _pad: u32,
 }
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for EndpointKey {}

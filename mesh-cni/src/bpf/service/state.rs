@@ -137,6 +137,7 @@ where
                 id,
                 position: u16::try_from(position)
                     .map_err(|e| Error::ConversionError(e.to_string()))?,
+                _pad: 0,
             };
 
             self.endpoint_map.update(endpoint_key, **endpoint)?;
@@ -158,6 +159,7 @@ where
             let endpoint_key = EndpointKey {
                 id: service_value.id,
                 position,
+                _pad: 0,
             };
             self.endpoint_map.update(endpoint_key, **ep)?;
             self.endpoint_cache.insert(endpoint_key, **ep);
@@ -170,6 +172,7 @@ where
             let endpoint_key = EndpointKey {
                 id: service_value.id,
                 position: idx,
+                _pad: 0,
             };
             self.endpoint_map.delete(&endpoint_key)?;
             self.endpoint_cache.remove(&endpoint_key);
@@ -331,6 +334,7 @@ where
                 let Some(endpoint_value) = cached_endpoints_v4.get(&EndpointKey {
                     id: v.id,
                     position: idx,
+                    _pad: 0,
                 }) else {
                     warn!("did not find endpoints with id {} and idx {}", v.id, idx);
                     continue;
@@ -348,6 +352,7 @@ where
                 let Some(endpoint_value) = cached_endpoints_v6.get(&EndpointKey {
                     id: v.id,
                     position: idx,
+                    _pad: 0,
                 }) else {
                     warn!("did not find endpoints with id {} and idx {}", v.id, idx);
                     continue;
@@ -373,6 +378,7 @@ where
                 let Some(endpoint_value) = endpoint_map_v4.get(&EndpointKey {
                     id: v.id,
                     position: idx,
+                    _pad: 0,
                 }) else {
                     warn!("did not find endpoints with id {} and idx {}", v.id, idx);
                     continue;
@@ -392,6 +398,7 @@ where
                 let Some(endpoint_value) = endpoint_map_v6.get(&EndpointKey {
                     id: v.id,
                     position: idx,
+                    _pad: 0,
                 }) else {
                     warn!("did not find endpoints with id {} and idx {}", v.id, idx);
                     continue;
@@ -410,7 +417,11 @@ where
     SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
     SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
 {
-    fn update(&self, key: ServiceKey, value: Vec<EndpointValue>) -> std::result::Result<(), BpfControllerError> {
+    fn update(
+        &self,
+        key: ServiceKey,
+        value: Vec<EndpointValue>,
+    ) -> std::result::Result<(), BpfControllerError> {
         ServiceEndpointState::update(self, key, value)
             .map_err(|e| BpfControllerError::BpfState(e.to_string()))
     }
@@ -449,6 +460,7 @@ mod test {
             ip: Ipv4Addr::new(192, 168, 0, 1).to_bits(),
             port: 80,
             protocol: KubeProtocol::Tcp as u8,
+            _pad: 0,
         };
         let endpoint_one = EndpointValueV4 {
             ip: Ipv4Addr::new(10, 0, 0, 1).to_bits(),

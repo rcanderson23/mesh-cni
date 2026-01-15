@@ -4,6 +4,7 @@ use futures::StreamExt;
 use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use kube::core::{Expression, Selector};
+use kube::runtime::Controller;
 use kube::runtime::reflector::{ReflectHandle, Store as KubeStore};
 use kube::{Api, ResourceExt};
 use serde::de::DeserializeOwned;
@@ -35,12 +36,12 @@ where
         service_bpf_state,
     };
 
-    info!("starting Services controller");
-    kube::runtime::Controller::for_shared_stream(service_stream, service_state)
+    info!("Starting Services controller");
+    Controller::for_shared_stream(service_stream, service_state)
         .graceful_shutdown_on(shutdown(cancel))
         .owns_shared_stream(endpoint_slice_stream)
         .run(reconcile, error_policy::<Service, B>, Arc::new(context))
-        .for_each(|_| async move {})
+        .for_each(|_| futures::future::ready(()))
         .await;
     Ok(())
 }
@@ -70,7 +71,7 @@ where
     let watcher_config = kube::runtime::watcher::Config::default().labels_from(&selector);
 
     info!("starting controller for {}", K::kind(&()));
-    kube::runtime::Controller::new(api, watcher_config)
+    Controller::new(api, watcher_config)
         .graceful_shutdown_on(shutdown(cancel))
         .run(reconcile, error_policy::<K, B>, Arc::new(context))
         .filter_map(|x| async move { std::result::Result::ok(x) })

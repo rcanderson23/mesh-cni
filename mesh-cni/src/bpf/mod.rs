@@ -42,8 +42,7 @@ pub(crate) const MAPS_LIST: [BpfNamePath; 6] = [
     BPF_MAP_ENDPOINTS_V6,
 ];
 
-pub(crate) const PROG_LIST: [BpfNamePath; 2] =
-    [BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_INGRESS_TC];
+pub(crate) const PROG_LIST: [BpfNamePath; 1] = [BPF_PROGRAM_CGROUP_CONNECT_V4];
 
 pub enum BpfNamePath {
     Map(&'static str),
