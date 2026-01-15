@@ -4,14 +4,12 @@ use kube::runtime::reflector::Store;
 
 use mesh_cni_crds::v1alpha1::meshendpoint::MeshEndpoint;
 
-use crate::metrics::ControllerMetrics;
 use crate::ServiceBpfState;
 
 pub struct Context<B>
 where
     B: ServiceBpfState + Clone + Send + Sync + 'static,
 {
-    pub metrics: ControllerMetrics,
     pub service_state: Store<Service>,
     pub endpoint_slice_state: Store<EndpointSlice>,
     pub mesh_endpoint_state: Store<MeshEndpoint>,
