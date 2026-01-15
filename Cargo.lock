@@ -1705,10 +1705,10 @@ dependencies = [
  "mesh-cni-api",
  "mesh-cni-crds",
  "mesh-cni-ebpf-common",
- "mesh-cni-identity",
+ "mesh-cni-identity-controller",
  "mesh-cni-k8s-utils",
  "mesh-cni-plugin",
- "mesh-cni-service",
+ "mesh-cni-service-controller",
  "netns-rs",
  "network-types",
  "opentelemetry",
@@ -1763,7 +1763,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-cni-cluster"
+name = "mesh-cni-cluster-controller"
 version = "0.1.0"
 dependencies = [
  "futures",
@@ -1817,7 +1817,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-cni-identity"
+name = "mesh-cni-identity-controller"
 version = "0.1.0"
 dependencies = [
  "futures",
@@ -1871,7 +1871,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-cni-policy"
+name = "mesh-cni-policy-controller"
 version = "0.1.0"
 dependencies = [
  "ahash",
@@ -1899,7 +1899,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-cni-service"
+name = "mesh-cni-service-controller"
 version = "0.1.0"
 dependencies = [
  "ahash",

@@ -97,7 +97,7 @@ pub enum Error {
     PinExists { path: String },
 
     #[error("mesh identity: {0}")]
-    MeshIdentityError(#[from] mesh_cni_identity::Error),
+    MeshIdentityError(#[from] mesh_cni_identity_controller::Error),
 }
 
 impl Error {

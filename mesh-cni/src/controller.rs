@@ -1,4 +1,4 @@
-use mesh_cni_identity::start_identity_controllers;
+use mesh_cni_identity_controller::start_identity_controllers;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::ControllerArgs;

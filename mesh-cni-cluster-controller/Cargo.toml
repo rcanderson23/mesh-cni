@@ -1,24 +1,23 @@
 [package]
-name = "mesh-cni-policy"
+name = "mesh-cni-cluster-controller"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
-
-ahash = { workspace = true }
+mesh-cni-crds = { path = "../mesh-cni-crds" }
 futures = { workspace = true }
 k8s-openapi = { workspace = true }
-kube = { workspace = true}
+kube = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
+serde_yaml = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 
-[build-dependencies]
-
 [lib]
-name = "mesh_cni_policy"
+name = "mesh_cni_cluster_controller"
 path = "src/lib.rs"

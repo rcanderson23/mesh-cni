@@ -6,22 +6,24 @@ members = [
     "mesh-cni-cli",
     "mesh-cni-ebpf",
     "mesh-cni-ebpf-common",
-    "mesh-cni-cluster",
-    "mesh-cni-identity",
+    "mesh-cni-cluster-controller",
+    "mesh-cni-identity-controller",
     "mesh-cni-k8s-utils",
     "mesh-cni-plugin",
-    "mesh-cni-policy",
-    "mesh-cni-policy-ebpf", "mesh-cni-service", "mesh-cni-crds",
+    "mesh-cni-policy-controller",
+    "mesh-cni-policy-ebpf",
+    "mesh-cni-service-controller",
+    "mesh-cni-crds",
 ]
 default-members = [
     "mesh-cni-api",
     "mesh-cni",
     "mesh-cni-cli",
     "mesh-cni-ebpf-common",
-    "mesh-cni-identity",
+    "mesh-cni-identity-controller",
     "mesh-cni-k8s-utils",
     "mesh-cni-plugin",
-    "mesh-cni-policy",
+    "mesh-cni-policy-controller",
 ]
 
 [workspace.package]

@@ -19,14 +19,14 @@ COPY mesh-cni-api mesh-cni-api
 COPY mesh-cni-cli mesh-cni-cli
 COPY mesh-cni mesh-cni
 COPY mesh-cni-ebpf-common mesh-cni-ebpf-common
-COPY mesh-cni-identity mesh-cni-identity
-COPY mesh-cni-policy mesh-cni-policy
+COPY mesh-cni-identity-controller mesh-cni-identity-controller
+COPY mesh-cni-policy-controller mesh-cni-policy-controller
 COPY mesh-cni-policy-ebpf mesh-cni-policy-ebpf
 COPY mesh-cni-ebpf mesh-cni-ebpf
 COPY mesh-cni-k8s-utils mesh-cni-k8s-utils
 COPY mesh-cni-crds mesh-cni-crds
-COPY mesh-cni-service mesh-cni-service
-COPY mesh-cni-cluster mesh-cni-cluster
+COPY mesh-cni-service-controller mesh-cni-service-controller
+COPY mesh-cni-cluster-controller mesh-cni-cluster-controller
 
 RUN cargo build --release
 
@@ -41,4 +41,3 @@ COPY --from=builder /app/target/release/mesh-cni /app/target/release/mesh-cni-pl
 COPY --from=aws-iam /aws-iam-authenticator /app/
 
 ENTRYPOINT [ "/app/mesh-cni" ]
-
