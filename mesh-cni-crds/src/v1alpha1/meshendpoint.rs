@@ -56,12 +56,7 @@ impl MeshEndpoint {
 
                 let (service_key, endpoint_value) = match (service_ip, mapping.ip) {
                     (IpAddr::V4(svc_v4), IpAddr::V4(ep_v4)) => (
-                        ServiceKey::V4(ServiceKeyV4 {
-                            ip: svc_v4.to_bits(),
-                            port: mapping.service_port,
-                            protocol,
-                            _pad: 0,
-                        }),
+                        ServiceKey::v4(svc_v4.to_bits(), mapping.service_port, protocol),
                         EndpointValue::V4(EndpointValueV4 {
                             ip: ep_v4.to_bits(),
                             port: mapping.backend_port,
@@ -69,12 +64,7 @@ impl MeshEndpoint {
                         }),
                     ),
                     (IpAddr::V6(svc_v6), IpAddr::V6(ep_v6)) => (
-                        ServiceKey::V6(ServiceKeyV6 {
-                            ip: svc_v6.to_bits(),
-                            port: mapping.service_port,
-                            protocol,
-                            _pad: 0,
-                        }),
+                        ServiceKey::v6(svc_v6.to_bits(), mapping.service_port, protocol),
                         EndpointValue::V6(EndpointValueV6 {
                             ip: ep_v6.to_bits(),
                             port: mapping.backend_port,

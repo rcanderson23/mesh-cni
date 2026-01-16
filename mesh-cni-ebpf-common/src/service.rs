@@ -17,6 +17,17 @@ pub struct ServiceKeyV4 {
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for ServiceKeyV4 {}
 
+impl ServiceKeyV4 {
+    pub const fn new(ip: u32, port: u16, protocol: u8) -> Self {
+        Self {
+            ip,
+            port,
+            protocol,
+            _pad: 0,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ServiceKeyV6 {
@@ -28,6 +39,17 @@ pub struct ServiceKeyV6 {
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for ServiceKeyV6 {}
+
+impl ServiceKeyV6 {
+    pub const fn new(ip: u128, port: u16, protocol: u8) -> Self {
+        Self {
+            ip,
+            port,
+            protocol,
+            _pad: 0,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -47,6 +69,26 @@ pub struct EndpointKey {
 }
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for EndpointKey {}
+
+impl EndpointKey {
+    pub const fn new(id: u16, position: u16) -> Self {
+        Self {
+            id,
+            position,
+            _pad: 0,
+        }
+    }
+}
+
+impl ServiceKey {
+    pub const fn v4(ip: u32, port: u16, protocol: u8) -> Self {
+        ServiceKey::V4(ServiceKeyV4::new(ip, port, protocol))
+    }
+
+    pub const fn v6(ip: u128, port: u16, protocol: u8) -> Self {
+        ServiceKey::V6(ServiceKeyV6::new(ip, port, protocol))
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum EndpointValue {

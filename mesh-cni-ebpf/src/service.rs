@@ -67,11 +67,7 @@ pub fn try_mesh_cni_cgroup_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
     let position = get_position(service_value.count);
 
     let endpoints_value = unsafe {
-        match ENDPOINTS_V4.get(EndpointKey {
-            id: service_value.id,
-            position,
-            _pad: 0,
-        }) {
+        match ENDPOINTS_V4.get(EndpointKey::new(service_value.id, position)) {
             Some(value) => value,
             None => return Ok(1),
         }
@@ -103,12 +99,7 @@ fn build_service_key(ctx: &SockAddrContext, ptr: *mut bpf_sock_addr) -> Result<S
         (ip, port, protocol)
     };
 
-    Ok(ServiceKeyV4 {
-        ip,
-        port,
-        protocol,
-        _pad: 0,
-    })
+    Ok(ServiceKeyV4::new(ip, port, protocol))
 }
 
 #[inline]

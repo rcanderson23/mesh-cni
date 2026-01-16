@@ -133,12 +133,10 @@ where
         self.service_cache.insert(key, service_value);
 
         for (position, endpoint) in value.iter().enumerate() {
-            let endpoint_key = EndpointKey {
+            let endpoint_key = EndpointKey::new(
                 id,
-                position: u16::try_from(position)
-                    .map_err(|e| Error::ConversionError(e.to_string()))?,
-                _pad: 0,
-            };
+                u16::try_from(position).map_err(|e| Error::ConversionError(e.to_string()))?,
+            );
 
             self.endpoint_map.update(endpoint_key, **endpoint)?;
             self.endpoint_cache.insert(endpoint_key, **endpoint);
@@ -156,11 +154,7 @@ where
             let position = u16::try_from(position).map_err(|e| {
                 Error::ConversionError(format!("failed to convert position: {}", e))
             })?;
-            let endpoint_key = EndpointKey {
-                id: service_value.id,
-                position,
-                _pad: 0,
-            };
+            let endpoint_key = EndpointKey::new(service_value.id, position);
             self.endpoint_map.update(endpoint_key, **ep)?;
             self.endpoint_cache.insert(endpoint_key, **ep);
         }
@@ -169,11 +163,7 @@ where
 
     fn delete_endpoints(&mut self, service_value: &ServiceValue, range: Range<u16>) -> Result<()> {
         for idx in range {
-            let endpoint_key = EndpointKey {
-                id: service_value.id,
-                position: idx,
-                _pad: 0,
-            };
+            let endpoint_key = EndpointKey::new(service_value.id, idx);
             self.endpoint_map.delete(&endpoint_key)?;
             self.endpoint_cache.remove(&endpoint_key);
         }
@@ -331,11 +321,8 @@ where
             let mut endpoints = vec![];
             let count = v.count;
             for idx in 0..count {
-                let Some(endpoint_value) = cached_endpoints_v4.get(&EndpointKey {
-                    id: v.id,
-                    position: idx,
-                    _pad: 0,
-                }) else {
+                let Some(endpoint_value) = cached_endpoints_v4.get(&EndpointKey::new(v.id, idx))
+                else {
                     warn!("did not find endpoints with id {} and idx {}", v.id, idx);
                     continue;
                 };
@@ -349,11 +336,8 @@ where
             let mut endpoints = vec![];
             let count = v.count;
             for idx in 0..count {
-                let Some(endpoint_value) = cached_endpoints_v6.get(&EndpointKey {
-                    id: v.id,
-                    position: idx,
-                    _pad: 0,
-                }) else {
+                let Some(endpoint_value) = cached_endpoints_v6.get(&EndpointKey::new(v.id, idx))
+                else {
                     warn!("did not find endpoints with id {} and idx {}", v.id, idx);
                     continue;
                 };
@@ -375,11 +359,7 @@ where
             let mut endpoints = vec![];
             let count = v.count;
             for idx in 0..count {
-                let Some(endpoint_value) = endpoint_map_v4.get(&EndpointKey {
-                    id: v.id,
-                    position: idx,
-                    _pad: 0,
-                }) else {
+                let Some(endpoint_value) = endpoint_map_v4.get(&EndpointKey::new(v.id, idx)) else {
                     warn!("did not find endpoints with id {} and idx {}", v.id, idx);
                     continue;
                 };
@@ -395,11 +375,7 @@ where
             let mut endpoints = vec![];
             let count = v.count;
             for idx in 0..count {
-                let Some(endpoint_value) = endpoint_map_v6.get(&EndpointKey {
-                    id: v.id,
-                    position: idx,
-                    _pad: 0,
-                }) else {
+                let Some(endpoint_value) = endpoint_map_v6.get(&EndpointKey::new(v.id, idx)) else {
                     warn!("did not find endpoints with id {} and idx {}", v.id, idx);
                     continue;
                 };
@@ -456,12 +432,11 @@ mod test {
     fn test_update_with_same_key() -> crate::Result<()> {
         let mut service_endpoint = new_service_endpoint();
 
-        let service_key = ServiceKeyV4 {
-            ip: Ipv4Addr::new(192, 168, 0, 1).to_bits(),
-            port: 80,
-            protocol: KubeProtocol::Tcp as u8,
-            _pad: 0,
-        };
+        let service_key = ServiceKeyV4::new(
+            Ipv4Addr::new(192, 168, 0, 1).to_bits(),
+            80,
+            KubeProtocol::Tcp as u8,
+        );
         let endpoint_one = EndpointValueV4 {
             ip: Ipv4Addr::new(10, 0, 0, 1).to_bits(),
             port: 8080,
