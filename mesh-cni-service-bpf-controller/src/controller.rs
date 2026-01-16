@@ -1,16 +1,16 @@
 use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use ahash::HashMap;
-use k8s_openapi::api::core::v1::Service;
-use k8s_openapi::api::discovery::v1::EndpointSlice;
-use kube::core::{Expression, Selector, SelectorExt};
-use kube::runtime::reflector::ObjectRef;
-use kube::{ResourceExt, runtime::controller::Action};
-use serde::de::DeserializeOwned;
-use tracing::{error, info};
-
+use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
+use kube::{
+    ResourceExt,
+    core::{Expression, Selector, SelectorExt},
+    runtime::{controller::Action, reflector::ObjectRef},
+};
 use mesh_cni_crds::v1alpha1::meshendpoint::{MeshEndpoint, generate_mesh_endpoint_spec};
 use mesh_cni_ebpf_common::service::{EndpointValue, ServiceKey};
+use serde::de::DeserializeOwned;
+use tracing::{error, info};
 
 use crate::{Context, Error, MESH_SERVICE, Result, ServiceBpfState};
 

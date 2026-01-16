@@ -1,14 +1,9 @@
-use std::io::Read;
-use std::process::ExitCode;
+use std::{io::Read, process::ExitCode};
 
 use clap::Parser;
-use mesh_cni_plugin::delete::delete;
-use mesh_cni_plugin::types::Input;
-use mesh_cni_plugin::{CNI_VERSION, add::add};
-use mesh_cni_plugin::{Result, config::Args};
+use mesh_cni_plugin::{CNI_VERSION, Result, add::add, config::Args, delete::delete, types::Input};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 fn main() -> ExitCode {
     let _guard = setup_logging();

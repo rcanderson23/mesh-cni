@@ -1,23 +1,23 @@
-use std::collections::BTreeMap;
-use std::fmt::Debug;
-use std::net::IpAddr;
-use std::str::FromStr;
-use std::sync::Arc;
+use std::{collections::BTreeMap, fmt::Debug, net::IpAddr, str::FromStr, sync::Arc};
 
 use aya::maps::lpm_trie::Key as LpmKey;
 use k8s_openapi::api::core::v1::{Namespace, Pod};
-use kube::runtime::reflector::ObjectRef;
-use kube::{ResourceExt, runtime::controller::Action};
+use kube::{
+    ResourceExt,
+    runtime::{controller::Action, reflector::ObjectRef},
+};
 use mesh_cni_ebpf_common::Id;
 use serde::de::DeserializeOwned;
 use tracing::{Span, field, info, instrument, warn};
 
-use crate::bpf::BpfMap;
-use crate::kubernetes::Labels;
-use crate::kubernetes::controllers::ip::context::Context;
-use crate::kubernetes::controllers::{DEFAULT_REQUEUE_DURATION, metrics};
-use crate::kubernetes::{ClusterId, LABEL_MESH_CLUSTER_ID};
-use crate::{Error, Result};
+use crate::{
+    Error, Result,
+    bpf::BpfMap,
+    kubernetes::{
+        ClusterId, LABEL_MESH_CLUSTER_ID, Labels,
+        controllers::{DEFAULT_REQUEUE_DURATION, ip::context::Context, metrics},
+    },
+};
 
 #[instrument(skip(ctx, pod), fields(trace_id))]
 pub(crate) async fn reconcile_pod<IP4, IP6>(

@@ -2,18 +2,17 @@ use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::{Namespace, Pod};
-use kube::ResourceExt;
-use kube::runtime::Config;
-use kube::runtime::reflector::ObjectRef;
-use kube::{Api, Client, runtime::Controller};
+use kube::{
+    Api, Client, ResourceExt,
+    runtime::{Config, Controller, reflector::ObjectRef},
+};
 use mesh_cni_k8s_utils::create_store_and_subscriber;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-use crate::Result;
-use crate::context::Context;
 use crate::{
-    Error,
+    Error, Result,
+    context::Context,
     controller::{error_policy, reconcile_namespace},
 };
 

@@ -1,9 +1,8 @@
-use serde_json::Value;
-use std::io::Write;
-use std::{collections::HashMap, process::ExitCode};
+use std::{collections::HashMap, io::Write, process::ExitCode};
 
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::Result;
 

@@ -1,5 +1,7 @@
-use k8s_openapi::api::core::v1::{Namespace, Pod};
-use k8s_openapi::api::networking::v1::NetworkPolicy;
+use k8s_openapi::api::{
+    core::v1::{Namespace, Pod},
+    networking::v1::NetworkPolicy,
+};
 use kube::runtime::reflector::Store;
 
 pub struct Context {

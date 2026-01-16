@@ -8,12 +8,14 @@ use kube::{
     Api, Client,
     runtime::{Controller, watcher::Config},
 };
+use mesh_cni_crds::v1alpha1::cluster::Cluster;
 use tokio_util::sync::CancellationToken;
 
-use crate::Result;
-use crate::context::Context;
-use crate::controller::{error_policy, reconcile};
-use mesh_cni_crds::v1alpha1::cluster::Cluster;
+use crate::{
+    Result,
+    context::Context,
+    controller::{error_policy, reconcile},
+};
 
 pub async fn start_cluster_controller(client: Client, cancel: CancellationToken) -> Result<()> {
     let api: Api<Cluster> = Api::all(client.clone());

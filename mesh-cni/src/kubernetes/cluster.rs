@@ -4,9 +4,7 @@ use http::Uri;
 use kube::config::KubeConfigOptions;
 use serde::Deserialize;
 
-use crate::kubernetes::ClusterId;
-
-use crate::Result;
+use crate::{Result, kubernetes::ClusterId};
 
 #[derive(Clone)]
 pub struct Cluster {

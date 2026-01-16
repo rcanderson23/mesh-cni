@@ -1,16 +1,21 @@
-use std::fs::{self, File};
-use std::io;
+use std::{
+    fs::{self, File},
+    io,
+};
 
-use aya::Ebpf;
-use aya::programs::links::FdLink;
-use aya::programs::{CgroupAttachMode, CgroupSockAddr};
+use aya::{
+    Ebpf,
+    programs::{CgroupAttachMode, CgroupSockAddr, links::FdLink},
+};
 use tracing::{error, info, warn};
 
-use crate::bpf::{
-    BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_FS_DIR, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR,
-    BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, MAPS_LIST, PROG_LIST,
+use crate::{
+    Error, Result,
+    bpf::{
+        BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_FS_DIR, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR,
+        BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, MAPS_LIST, PROG_LIST,
+    },
 };
-use crate::{Error, Result};
 
 const CGROUP_SYS_DIR: &str = "/sys/fs/cgroup";
 

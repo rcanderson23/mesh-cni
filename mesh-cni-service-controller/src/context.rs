@@ -1,7 +1,7 @@
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use kube::runtime::reflector::Store;
-
 use mesh_cni_crds::v1alpha1::meshendpoint::MeshEndpoint;
+
 use crate::metrics::ControllerMetrics;
 
 pub(crate) struct Context {

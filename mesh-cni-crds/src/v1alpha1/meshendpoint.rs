@@ -1,22 +1,22 @@
-use kube::CustomResource;
-use kube::KubeSchema;
-use kube::core::Selector;
-use kube::core::SelectorExt;
-use kube::runtime::reflector::Store;
-use serde::{Deserialize, Serialize};
-
-use std::net::IpAddr;
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc};
 
 use ahash::HashMap;
-use k8s_openapi::api::core::v1::Service;
-use k8s_openapi::api::discovery::v1::{EndpointConditions, EndpointSlice};
-use kube::ResourceExt;
-use kube::core::Expression;
-use mesh_cni_ebpf_common::KubeProtocol;
-use mesh_cni_ebpf_common::service::{
-    EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4, ServiceKeyV6,
+use k8s_openapi::api::{
+    core::v1::Service,
+    discovery::v1::{EndpointConditions, EndpointSlice},
 };
+use kube::{
+    CustomResource, KubeSchema, ResourceExt,
+    core::{Expression, Selector, SelectorExt},
+    runtime::reflector::Store,
+};
+use mesh_cni_ebpf_common::{
+    KubeProtocol,
+    service::{
+        EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4, ServiceKeyV6,
+    },
+};
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::SERVICE_OWNER_LABEL;

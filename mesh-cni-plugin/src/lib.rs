@@ -8,8 +8,7 @@ pub mod response;
 pub mod types;
 pub mod version;
 
-use std::fmt::Display;
-use std::str::FromStr;
+use std::{fmt::Display, str::FromStr};
 
 use semver::Version;
 use serde::{Deserialize, Deserializer, Serialize};

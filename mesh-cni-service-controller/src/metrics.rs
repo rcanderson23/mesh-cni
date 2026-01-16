@@ -1,14 +1,15 @@
-use std::borrow::Cow;
-use std::sync::{LazyLock, RwLock};
+use std::{
+    borrow::Cow,
+    sync::{LazyLock, RwLock},
+};
 
 use kube::ResourceExt;
 use opentelemetry::trace::TraceId;
 use prometheus_client::{
     encoding::EncodeLabelSet,
     metrics::{counter::Counter, exemplar::HistogramWithExemplars, family::Family},
-    registry::Unit,
+    registry::{Registry, Unit},
 };
-use prometheus_client::registry::Registry;
 use tokio::time::Instant;
 
 use crate::Error;
@@ -119,9 +120,7 @@ impl TryFrom<&TraceId> for TraceLabel {
 
     fn try_from(id: &TraceId) -> Result<TraceLabel, Self::Error> {
         if std::matches!(id, &TraceId::INVALID) {
-            Err(Error::Other(
-                "failed to convert trace id to label".into(),
-            ))
+            Err(Error::Other("failed to convert trace id to label".into()))
         } else {
             let trace_id = id.to_string();
             Ok(Self { trace_id })

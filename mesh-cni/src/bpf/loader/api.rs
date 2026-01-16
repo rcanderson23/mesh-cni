@@ -1,11 +1,8 @@
-use mesh_cni_api::bpf::v1::{AddPodReply, AddPodRequest};
+use mesh_cni_api::bpf::v1::{AddPodReply, AddPodRequest, bpf_server::Bpf as BpfApi};
 use tonic::{Request, Response, Status};
 use tracing::info;
 
-use crate::Result;
-use crate::bpf::loader::LoaderState;
-
-use mesh_cni_api::bpf::v1::bpf_server::Bpf as BpfApi;
+use crate::{Result, bpf::loader::LoaderState};
 
 const _NET_NS_DIR: &str = "/var/run/mesh/netns";
 

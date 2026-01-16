@@ -1,5 +1,5 @@
 [package]
-name = "mesh-cni-identity-controller"
+name = "mesh-cni-identity-gen-controller"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -23,7 +23,7 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [lib]
-name = "mesh_cni_identity_controller"
+name = "mesh_cni_identity_gen_controller"
 path = "src/lib.rs"
 
 [dev-dependencies]

@@ -3,10 +3,10 @@ use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::runtime::reflector::Store;
 use mesh_cni_ebpf_common::Id;
 
-use crate::bpf::BpfMap;
-use crate::bpf::ip::IpNetworkState;
-use crate::kubernetes::ClusterId;
-use crate::kubernetes::controllers::metrics::ControllerMetrics;
+use crate::{
+    bpf::{BpfMap, ip::IpNetworkState},
+    kubernetes::{ClusterId, controllers::metrics::ControllerMetrics},
+};
 
 pub(crate) struct Context<IP4, IP6>
 where

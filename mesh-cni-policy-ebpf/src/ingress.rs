@@ -1,10 +1,12 @@
-use aya_ebpf::cty::c_long;
-use aya_ebpf::maps::lpm_trie::Key as LpmKey;
-use aya_ebpf::{bindings::TC_ACT_PIPE, programs::TcContext};
+use aya_ebpf::{
+    bindings::TC_ACT_PIPE, cty::c_long, maps::lpm_trie::Key as LpmKey, programs::TcContext,
+};
 use aya_log_ebpf::{error, info};
-use network_types::eth::{EthHdr, EtherType};
-use network_types::ip::Ipv4Hdr;
-use network_types::tcp::TcpHdr;
+use network_types::{
+    eth::{EthHdr, EtherType},
+    ip::Ipv4Hdr,
+    tcp::TcpHdr,
+};
 
 use crate::id_v4;
 

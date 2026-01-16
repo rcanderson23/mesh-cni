@@ -3,9 +3,10 @@ mod client;
 mod ip;
 mod service;
 
-use crate::cli::Cli;
 use clap::Parser;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use crate::cli::Cli;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

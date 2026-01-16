@@ -1,8 +1,7 @@
 mod error;
 mod metrics;
 
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use tokio::select;
 use tokio_util::sync::CancellationToken;

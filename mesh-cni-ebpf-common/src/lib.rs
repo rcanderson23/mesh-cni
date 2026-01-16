@@ -2,9 +2,11 @@
 
 pub mod service;
 
-use core::fmt::Display;
-use core::hash::Hash;
-use core::net::{IpAddr, Ipv6Addr};
+use core::{
+    fmt::Display,
+    hash::Hash,
+    net::{IpAddr, Ipv6Addr},
+};
 
 pub type Id = u16;
 

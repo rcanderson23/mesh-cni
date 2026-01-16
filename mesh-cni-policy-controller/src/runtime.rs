@@ -2,14 +2,15 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use kube::{Api, Client, runtime::Controller};
+use mesh_cni_k8s_utils::create_store_and_subscriber;
 use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
 
-use mesh_cni_k8s_utils::create_store_and_subscriber;
-
-use crate::context::Context;
-use crate::controller::{error_policy, reconcile_namespace, reconcile_pod, reconcile_policy};
-use crate::{Error, Result};
+use crate::{
+    Error, Result,
+    context::Context,
+    controller::{error_policy, reconcile_namespace, reconcile_pod, reconcile_policy},
+};
 
 pub async fn start_policy_controllers<NPA>(
     client: Client,

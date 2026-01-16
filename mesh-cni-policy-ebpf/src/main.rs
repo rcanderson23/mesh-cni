@@ -1,8 +1,7 @@
 #![no_std]
 #![no_main]
 
-use aya_ebpf::macros::classifier;
-use aya_ebpf::programs::TcContext;
+use aya_ebpf::{macros::classifier, programs::TcContext};
 use mesh_cni_policy_ebpf::ingress::try_mesh_cni_ingress;
 
 #[classifier]

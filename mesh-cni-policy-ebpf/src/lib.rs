@@ -2,12 +2,15 @@
 
 pub mod ingress;
 
-use aya_ebpf::macros::map;
-use aya_ebpf::maps::lpm_trie::Key as LpmKey;
-use aya_ebpf::maps::{HashMap, LpmTrie};
-use mesh_cni_ebpf_common::Id;
-use mesh_cni_ebpf_common::service::{
-    EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
+use aya_ebpf::{
+    macros::map,
+    maps::{HashMap, LpmTrie, lpm_trie::Key as LpmKey},
+};
+use mesh_cni_ebpf_common::{
+    Id,
+    service::{
+        EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
+    },
 };
 
 #[map(name = "identity_v4")]

@@ -1,12 +1,15 @@
-use std::fmt::Debug;
-use std::hash::Hash;
-use std::time::Duration;
+use std::{fmt::Debug, hash::Hash, time::Duration};
 
 use futures::StreamExt;
 use k8s_openapi::serde::de::DeserializeOwned;
-use kube::runtime::reflector::{ReflectHandle, Store};
-use kube::runtime::{WatchStreamExt, reflector, watcher};
-use kube::{Api, Resource};
+use kube::{
+    Api, Resource,
+    runtime::{
+        WatchStreamExt, reflector,
+        reflector::{ReflectHandle, Store},
+        watcher,
+    },
+};
 use thiserror::Error;
 use tracing::{error, trace};
 

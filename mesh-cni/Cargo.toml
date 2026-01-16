@@ -10,7 +10,7 @@ mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
 mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common", features = ["user"] }
 mesh-cni-plugin = { path = "../mesh-cni-plugin"}
 mesh-cni-api = { path = "../mesh-cni-api"}
-mesh-cni-identity-controller = { path = "../mesh-cni-identity-controller"}
+mesh-cni-identity-gen-controller = { path = "../mesh-cni-identity-gen-controller"}
 mesh-cni-service-controller = { path = "../mesh-cni-service-controller" }
 mesh-cni-service-bpf-controller = { path = "../mesh-cni-service-bpf-controller" }
 mesh-cni-crds = { path = "../mesh-cni-crds" }

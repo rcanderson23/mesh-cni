@@ -1,8 +1,7 @@
 #![no_std]
 #![no_main]
 
-use aya_ebpf::macros::cgroup_sock_addr;
-use aya_ebpf::programs::SockAddrContext;
+use aya_ebpf::{macros::cgroup_sock_addr, programs::SockAddrContext};
 use mesh_cni_service_ebpf::service::try_mesh_cni_cgroup_connect4;
 
 #[cgroup_sock_addr(connect4)]

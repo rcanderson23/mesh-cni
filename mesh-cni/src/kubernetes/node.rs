@@ -1,7 +1,7 @@
-use crate::Result;
 use k8s_openapi::api::core::v1::Node;
-use kube::api::PostParams;
-use kube::{Api, ResourceExt};
+use kube::{Api, ResourceExt, api::PostParams};
+
+use crate::Result;
 
 const TAINT_MESH_STARTUP: &str = "mesh-cni.dev/startup";
 const TAINT_CILIUM_STARTUP: &str = "node.cilium.io/agent-not-ready";

@@ -1,12 +1,8 @@
-use mesh_cni_api::ip::v1::ListIpsRequest;
-use mesh_cni_api::ip::v1::ip_client::IpClient;
-use tabled::Table;
-use tabled::settings::Style;
-use tonic::Request;
-use tonic::transport::Channel;
+use mesh_cni_api::ip::v1::{ListIpsRequest, ip_client::IpClient};
+use tabled::{Table, settings::Style};
+use tonic::{Request, transport::Channel};
 
-use crate::cli::IpCommands;
-use crate::client::MESH_CNI_SOCKET;
+use crate::{cli::IpCommands, client::MESH_CNI_SOCKET};
 
 pub(crate) async fn run(cmd: IpCommands) -> anyhow::Result<()> {
     let client = IpClient::connect(MESH_CNI_SOCKET).await?;

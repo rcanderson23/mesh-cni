@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-use std::net::IpAddr;
-use std::path::PathBuf;
+use std::{collections::HashMap, net::IpAddr, path::PathBuf};
 
 use ipnetwork::IpNetwork;
 use semver::Version;

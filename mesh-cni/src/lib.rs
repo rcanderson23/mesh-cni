@@ -7,9 +7,7 @@ pub mod http;
 pub mod kubernetes;
 pub mod metrics;
 
-use aya::EbpfError;
-use aya::pin::PinError;
-use aya::programs::ProgramError;
+use aya::{EbpfError, pin::PinError, programs::ProgramError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -97,7 +95,7 @@ pub enum Error {
     PinExists { path: String },
 
     #[error("mesh identity: {0}")]
-    MeshIdentityError(#[from] mesh_cni_identity_controller::Error),
+    MeshIdentityError(#[from] mesh_cni_identity_gen_controller::Error),
 
     #[error("ebpf log error: {0}")]
     EbpfLogError(#[from] aya_log::Error),

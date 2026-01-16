@@ -6,7 +6,7 @@ default:
   @just --list
 
 fmt:
-  cargo fmt
+  cargo +nightly fmt
 
 lint:
   cargo clippy

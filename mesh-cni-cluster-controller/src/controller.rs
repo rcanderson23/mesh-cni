@@ -4,12 +4,11 @@ use kube::{
     Api, ResourceExt,
     runtime::{controller::Action, finalizer},
 };
+use mesh_cni_crds::v1alpha1::cluster::Cluster;
 use serde::de::DeserializeOwned;
 use tracing::info;
 
-use crate::context::Context;
-use mesh_cni_crds::v1alpha1::cluster::Cluster;
-use crate::{Error, Result};
+use crate::{Error, Result, context::Context};
 
 const CLUSTER_FINALIZER: &str = "clusters.mesh-cni.dev/cleanup";
 const SHUTDOWN_REQUEUE: Duration = Duration::from_secs(5);

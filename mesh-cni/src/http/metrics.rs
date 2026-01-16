@@ -1,17 +1,17 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
-use axum::Router;
-use axum::extract::State as AxumState;
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::{
+    Router,
+    extract::State as AxumState,
+    response::{IntoResponse, Response},
+    routing::get,
+};
 use http::StatusCode;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use crate::Result;
-use crate::http::shutdown;
+use crate::{Result, http::shutdown};
 
 #[derive(Clone)]
 pub(crate) struct State {

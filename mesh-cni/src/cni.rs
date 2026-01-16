@@ -1,18 +1,21 @@
-use std::collections::HashMap;
-use std::ffi::OsStr;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    ffi::OsStr,
+    fs::{self, OpenOptions},
+    io::Write,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
-use mesh_cni_plugin::CNI_VERSION;
-use mesh_cni_plugin::config::{Config, PluginConfig};
+use mesh_cni_plugin::{
+    CNI_VERSION,
+    config::{Config, PluginConfig},
+};
 use serde_json::Value;
 use tracing::{info, warn};
 
-use crate::Result;
-use crate::config::AgentArgs;
+use crate::{Result, config::AgentArgs};
 
 const CONFLIST_NAME: &str = "05-mesh.conflist";
 

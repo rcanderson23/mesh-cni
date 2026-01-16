@@ -1,5 +1,4 @@
-use kube::CustomResource;
-use kube::KubeSchema;
+use kube::{CustomResource, KubeSchema};
 use schemars::json_schema;
 use serde::{Deserialize, Serialize};
 

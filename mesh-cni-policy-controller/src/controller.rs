@@ -1,14 +1,14 @@
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use k8s_openapi::api::core::v1::{Namespace, Pod};
-use k8s_openapi::api::networking::v1::NetworkPolicy;
+use k8s_openapi::api::{
+    core::v1::{Namespace, Pod},
+    networking::v1::NetworkPolicy,
+};
 use kube::{ResourceExt, runtime::controller::Action};
 use serde::de::DeserializeOwned;
 use tracing::info;
 
-use crate::context::Context;
-use crate::{Error, Result};
+use crate::{Error, Result, context::Context};
 
 const DEFAULT_REQUEUE_DURATION: Duration = Duration::from_secs(300);
 

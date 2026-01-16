@@ -1,5 +1,4 @@
-use aya::EbpfError;
-use aya::programs::ProgramError;
+use aya::{EbpfError, programs::ProgramError};
 use semver::Version;
 use thiserror::Error;
 

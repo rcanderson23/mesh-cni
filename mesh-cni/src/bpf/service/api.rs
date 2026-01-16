@@ -1,15 +1,19 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use mesh_cni_api::service::v1::service_server::Service as ServiceApi;
-use mesh_cni_api::service::v1::{ListServicesReply, ListServicesRequest, ServiceWithEndpoints};
+use mesh_cni_api::service::v1::{
+    ListServicesReply, ListServicesRequest, ServiceWithEndpoints,
+    service_server::Service as ServiceApi,
+};
 use mesh_cni_ebpf_common::service::{
     EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6,
 };
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
-use crate::bpf::service::state::{ServiceEndpointBpfMap, ServiceEndpointState};
-use crate::bpf::service::{load_endpoint_maps, load_service_maps};
+use crate::bpf::service::{
+    load_endpoint_maps, load_service_maps,
+    state::{ServiceEndpointBpfMap, ServiceEndpointState},
+};
 
 #[derive(Clone)]
 pub struct Server<SE4, SE6>

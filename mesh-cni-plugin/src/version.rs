@@ -1,9 +1,11 @@
 use tracing::info;
 
-use crate::config::Args;
-use crate::response::{Response, VersionResponse};
-use crate::types::Input;
-use crate::{CNI_VERSION, SUPPORTED_CNI_VERSION};
+use crate::{
+    CNI_VERSION, SUPPORTED_CNI_VERSION,
+    config::Args,
+    response::{Response, VersionResponse},
+    types::Input,
+};
 
 pub fn gc(_args: &Args, input: Input) -> Response {
     info!("gc called, received input {:?}", input);

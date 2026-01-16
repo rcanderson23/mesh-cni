@@ -1,21 +1,25 @@
 use std::{fmt::Debug, sync::Arc};
 
 use futures::StreamExt;
-use k8s_openapi::api::core::v1::Service;
-use k8s_openapi::api::discovery::v1::EndpointSlice;
-use kube::core::{Expression, Selector};
-use kube::runtime::Controller;
-use kube::runtime::reflector::{ReflectHandle, Store as KubeStore};
-use kube::{Api, ResourceExt};
+use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
+use kube::{
+    Api, ResourceExt,
+    core::{Expression, Selector},
+    runtime::{
+        Controller,
+        reflector::{ReflectHandle, Store as KubeStore},
+    },
+};
+use mesh_cni_crds::v1alpha1::meshendpoint::MeshEndpoint;
 use serde::de::DeserializeOwned;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use mesh_cni_crds::v1alpha1::meshendpoint::MeshEndpoint;
-
-use crate::controller::{error_policy, reconcile};
-use crate::utils::shutdown;
-use crate::{Context, MESH_SERVICE, MeshControllerExt, Result, ServiceBpfState};
+use crate::{
+    Context, MESH_SERVICE, MeshControllerExt, Result, ServiceBpfState,
+    controller::{error_policy, reconcile},
+    utils::shutdown,
+};
 
 pub async fn start_bpf_service_controller<B>(
     service_state: KubeStore<Service>,

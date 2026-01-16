@@ -1705,7 +1705,7 @@ dependencies = [
  "mesh-cni-api",
  "mesh-cni-crds",
  "mesh-cni-ebpf-common",
- "mesh-cni-identity-controller",
+ "mesh-cni-identity-gen-controller",
  "mesh-cni-k8s-utils",
  "mesh-cni-plugin",
  "mesh-cni-service-bpf-controller",
@@ -1806,7 +1806,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-cni-identity-controller"
+name = "mesh-cni-identity-gen-controller"
 version = "0.1.0"
 dependencies = [
  "futures",

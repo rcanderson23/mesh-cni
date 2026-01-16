@@ -1,10 +1,12 @@
 use serde::Deserialize;
 use tracing::info;
 
-use crate::response::Response;
-use crate::types::Input;
-use crate::{CNI_VERSION, Error};
-use crate::{config::Args, response::Success};
+use crate::{
+    CNI_VERSION, Error,
+    config::Args,
+    response::{Response, Success},
+    types::Input,
+};
 
 pub fn delete(_args: &Args, input: Input) -> Response {
     info!("delete called, received input {:?}", input);

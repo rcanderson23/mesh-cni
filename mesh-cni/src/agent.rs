@@ -1,18 +1,16 @@
-use std::fs;
-use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::{fs, io::ErrorKind, path::PathBuf};
 
 use mesh_cni_api::bpf::v1::bpf_server::BpfServer;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
 use tokio_util::sync::CancellationToken;
-use tonic::service::{Routes, RoutesBuilder};
-use tonic::transport::Server;
+use tonic::{
+    service::{Routes, RoutesBuilder},
+    transport::Server,
+};
 use tracing::info;
 
-use crate::config::AgentArgs;
-use crate::http::shutdown;
-use crate::{Result, bpf, kubernetes};
+use crate::{Result, bpf, config::AgentArgs, http::shutdown, kubernetes};
 
 pub async fn start(
     args: AgentArgs,

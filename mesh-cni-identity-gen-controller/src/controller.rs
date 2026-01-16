@@ -1,20 +1,23 @@
-use std::collections::{BTreeMap, HashSet};
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
-use kube::api::{DeleteParams, Patch, PatchParams};
-use kube::runtime::controller::Action;
-use kube::runtime::reflector::ObjectRef;
-use kube::{Api, ResourceExt};
+use kube::{
+    Api, ResourceExt,
+    api::{DeleteParams, Patch, PatchParams},
+    runtime::{controller::Action, reflector::ObjectRef},
+};
+use mesh_cni_crds::v1alpha1::identity::{Identity, IdentitySpec};
 use rand::Rng;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
-use crate::context::Context;
-use mesh_cni_crds::v1alpha1::identity::{Identity, IdentitySpec};
-use crate::{Error, Result};
+use crate::{Error, Result, context::Context};
 
-const MANANGER: &str = "identity-controller";
+const MANANGER: &str = "identity-gen-controller";
 
 #[tracing::instrument(skip(ctx, ns))]
 pub(crate) async fn reconcile_namespace(ns: Arc<Namespace>, ctx: Arc<Context>) -> Result<Action> {
@@ -137,11 +140,12 @@ mod tests {
 
     use http::Uri;
     use k8s_openapi::api::core::v1::{Namespace, Pod};
-    use kube::Client;
-    use kube::api::ObjectMeta;
-    use kube::config::Config;
-    use kube::runtime::reflector::store;
-    use kube::runtime::watcher;
+    use kube::{
+        Client,
+        api::ObjectMeta,
+        config::Config,
+        runtime::{reflector::store, watcher},
+    };
 
     use super::*;
 

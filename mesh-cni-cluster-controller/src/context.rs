@@ -1,11 +1,12 @@
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 
 use kube::{Api, Client};
+use mesh_cni_crds::v1alpha1::cluster::Cluster;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-
-use mesh_cni_crds::v1alpha1::cluster::Cluster;
 
 pub struct Context {
     pub client: Client,

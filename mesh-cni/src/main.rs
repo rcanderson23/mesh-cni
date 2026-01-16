@@ -1,6 +1,5 @@
 use clap::Parser;
-use mesh_cni::controller;
-use mesh_cni::{Result, agent, cni, config::Cli, http};
+use mesh_cni::{Result, agent, cni, config::Cli, controller, http};
 use tokio::task::JoinError;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};

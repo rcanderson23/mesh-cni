@@ -1,7 +1,5 @@
-use k8s_openapi::api::core::v1::Service;
-use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
 use kube::runtime::reflector::Store;
-
 use mesh_cni_crds::v1alpha1::meshendpoint::MeshEndpoint;
 
 use crate::ServiceBpfState;

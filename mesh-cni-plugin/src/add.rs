@@ -4,10 +4,12 @@ use mesh_cni_api::bpf::v1::{AddPodReply, AddPodRequest, bpf_client::BpfClient};
 use serde::Deserialize;
 use tracing::{error, info};
 
-use crate::response::Response;
-use crate::types::Input;
-use crate::{CNI_VERSION, Error};
-use crate::{config::Args, response::Success};
+use crate::{
+    CNI_VERSION, Error,
+    config::Args,
+    response::{Response, Success},
+    types::Input,
+};
 
 pub fn add(args: &Args, input: Input) -> Response {
     info!(

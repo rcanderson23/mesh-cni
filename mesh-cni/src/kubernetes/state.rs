@@ -1,19 +1,18 @@
-use std::pin::pin;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{pin::pin, sync::Arc, time::Duration};
 
 use ahash::{HashMap, HashMapExt};
 use futures::StreamExt;
 use k8s_openapi::Metadata;
-use kube::Resource;
-use kube::runtime::reflector::{ReflectHandle, Store};
+use kube::{
+    Resource,
+    runtime::reflector::{ReflectHandle, Store},
+};
+use mesh_cni_k8s_utils::create_store_and_subscriber;
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, warn};
 
-use crate::Result;
-use crate::kubernetes::cluster::Cluster;
-use mesh_cni_k8s_utils::create_store_and_subscriber;
+use crate::{Result, kubernetes::cluster::Cluster};
 
 pub struct MultiClusterState<K>
 where

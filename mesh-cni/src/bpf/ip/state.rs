@@ -1,14 +1,14 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::{Arc, Mutex};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::{Arc, Mutex},
+};
 
 use ahash::HashMap;
 use aya::maps::lpm_trie::Key as LpmKey;
 use mesh_cni_api::ip::v1::IpId;
 use mesh_cni_ebpf_common::Id;
 
-use crate::Result;
-use crate::bpf::BpfMap;
-use crate::kubernetes::Labels;
+use crate::{Result, bpf::BpfMap, kubernetes::Labels};
 
 struct Shared<IP4, IP6>
 where

@@ -2,16 +2,15 @@ pub mod ip;
 pub mod loader;
 pub mod service;
 
-use std::borrow::BorrowMut;
-use std::hash::Hash;
+use std::{borrow::BorrowMut, hash::Hash};
 
-use aya::Pod;
-use aya::maps::lpm_trie::Key as LpmKey;
-use aya::maps::{HashMap, LpmTrie, MapData};
+use aya::{
+    Pod,
+    maps::{HashMap, LpmTrie, MapData, lpm_trie::Key as LpmKey},
+};
 use mesh_cni_ebpf_common::Id;
 
-use crate::Result;
-use crate::bpf::ip::IpNetwork;
+use crate::{Result, bpf::ip::IpNetwork};
 
 pub(crate) const BPF_PROGRAM_INGRESS_TC: BpfNamePath = BpfNamePath::Program("mesh_cni_ingress");
 pub const BPF_PROGRAM_CGROUP_CONNECT_V4: BpfNamePath =

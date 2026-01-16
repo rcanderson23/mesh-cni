@@ -3,8 +3,7 @@ pub mod controllers;
 pub mod node;
 pub mod state;
 
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 const LABEL_MESH_CLUSTER_ID: &str = "mesh-cni.dev/cluster-id";
 

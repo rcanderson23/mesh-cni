@@ -1,22 +1,24 @@
 use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
-use kube::api::{DeleteParams, Patch, PatchParams};
-use kube::core::{Expression, Selector, SelectorExt};
-use kube::runtime::reflector::ObjectRef;
-use kube::{Api, Client, ResourceExt, runtime::controller::Action};
+use k8s_openapi::{
+    api::{core::v1::Service, discovery::v1::EndpointSlice},
+    apimachinery::pkg::apis::meta::v1::OwnerReference,
+};
+use kube::{
+    Api, Client, ResourceExt,
+    api::{DeleteParams, Patch, PatchParams},
+    core::{Expression, Selector, SelectorExt},
+    runtime::{controller::Action, reflector::ObjectRef},
+};
+use mesh_cni_crds::v1alpha1::meshendpoint::{MeshEndpoint, generate_mesh_endpoint_spec};
+use mesh_cni_k8s_utils::create_store_and_subscriber;
 use tokio_util::sync::CancellationToken;
 use tracing::{Span, field, info, instrument, warn};
 
-use mesh_cni_k8s_utils::create_store_and_subscriber;
-
-use crate::context::Context;
-use crate::metrics;
-use crate::utils::shutdown;
-use crate::{Error, MESH_SERVICE, Result, SERVICE_OWNER_LABEL};
-use mesh_cni_crds::v1alpha1::meshendpoint::{MeshEndpoint, generate_mesh_endpoint_spec};
+use crate::{
+    Error, MESH_SERVICE, Result, SERVICE_OWNER_LABEL, context::Context, metrics, utils::shutdown,
+};
 
 const MANANGER: &str = "service-meshendpoint-controller";
 

@@ -1,8 +1,7 @@
-use kube::CustomResource;
-use kube::KubeSchema;
-use serde::{Deserialize, Serialize};
-
 use std::collections::BTreeMap;
+
+use kube::{CustomResource, KubeSchema};
+use serde::{Deserialize, Serialize};
 
 #[derive(
     CustomResource, KubeSchema, Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug,

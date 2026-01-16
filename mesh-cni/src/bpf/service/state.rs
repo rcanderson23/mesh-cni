@@ -1,17 +1,20 @@
-use std::ops::Range;
-use std::sync::{Arc, Mutex};
+use std::{
+    ops::Range,
+    sync::{Arc, Mutex},
+};
 
 use ahash::{HashMap, HashMapExt};
-use mesh_cni_ebpf_common::Id;
-use mesh_cni_ebpf_common::service::{
-    EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4,
-    ServiceKeyV6, ServiceValue,
+use mesh_cni_ebpf_common::{
+    Id,
+    service::{
+        EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4,
+        ServiceKeyV6, ServiceValue,
+    },
 };
 use mesh_cni_service_bpf_controller::{Error as BpfControllerError, ServiceBpfState};
 use tracing::warn;
 
-use crate::bpf::BpfMap;
-use crate::{Error, Result};
+use crate::{Error, Result, bpf::BpfMap};
 
 pub trait ServiceEndpointBpfMap {
     type SKey: std::hash::Hash + std::cmp::Eq + Clone;

@@ -2,37 +2,31 @@ mod api;
 pub use api::Server as BpfServiceServer;
 
 mod state;
-use aya::maps::HashMap;
-use aya::maps::Map;
-use aya::maps::MapData;
-pub use state::ServiceEndpointBpfMap;
-pub use state::ServiceEndpointState as BpfServiceEndpointState;
+use std::time::Duration;
 
-use k8s_openapi::api::core::v1::Service;
-use k8s_openapi::api::discovery::v1::EndpointSlice;
-
+use aya::maps::{HashMap, Map, MapData};
+use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
 use kube::{Api, Client};
 use mesh_cni_api::service::v1::service_server::ServiceServer;
 use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
 };
-use std::time::Duration;
-use tokio_util::sync::CancellationToken;
-use tracing::info;
-
-use crate::Result;
-use crate::bpf::BPF_MAP_ENDPOINTS_V4;
-use crate::bpf::BPF_MAP_ENDPOINTS_V6;
-use crate::bpf::BPF_MAP_SERVICES_V4;
-use crate::bpf::BPF_MAP_SERVICES_V6;
-use crate::bpf::service::api::Server;
-use crate::bpf::service::state::ServiceEndpoint;
 use mesh_cni_k8s_utils::create_store_and_subscriber;
 use mesh_cni_service_bpf_controller::{
     start_bpf_meshendpoint_controller, start_bpf_service_controller,
 };
+pub use state::{ServiceEndpointBpfMap, ServiceEndpointState as BpfServiceEndpointState};
+use tokio_util::sync::CancellationToken;
+use tracing::info;
 
-use crate::kubernetes::ClusterId;
+use crate::{
+    Result,
+    bpf::{
+        BPF_MAP_ENDPOINTS_V4, BPF_MAP_ENDPOINTS_V6, BPF_MAP_SERVICES_V4, BPF_MAP_SERVICES_V6,
+        service::{api::Server, state::ServiceEndpoint},
+    },
+    kubernetes::ClusterId,
+};
 
 type ServiceEndpointV4 = ServiceEndpoint<
     HashMap<MapData, ServiceKeyV4, ServiceValue>,

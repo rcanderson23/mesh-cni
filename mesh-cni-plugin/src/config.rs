@@ -1,14 +1,16 @@
-use std::collections::{BTreeMap, HashMap};
-use std::net::IpAddr;
-use std::path::PathBuf;
-
-use crate::{Error, Result};
+use std::{
+    collections::{BTreeMap, HashMap},
+    net::IpAddr,
+    path::PathBuf,
+};
 
 use clap::Parser;
 use ipnetwork::IpNetwork;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::{Error, Result};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

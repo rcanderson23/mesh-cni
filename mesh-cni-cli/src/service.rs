@@ -1,12 +1,8 @@
-use mesh_cni_api::service::v1::ListServicesRequest;
-use mesh_cni_api::service::v1::service_client::ServiceClient;
-use tabled::Table;
-use tabled::settings::Style;
-use tonic::Request;
-use tonic::transport::Channel;
+use mesh_cni_api::service::v1::{ListServicesRequest, service_client::ServiceClient};
+use tabled::{Table, settings::Style};
+use tonic::{Request, transport::Channel};
 
-use crate::cli::ServiceCommands;
-use crate::client::MESH_CNI_SOCKET;
+use crate::{cli::ServiceCommands, client::MESH_CNI_SOCKET};
 
 pub(crate) async fn run(cmd: ServiceCommands) -> anyhow::Result<()> {
     let client = ServiceClient::connect(MESH_CNI_SOCKET).await?;
