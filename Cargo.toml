@@ -4,7 +4,7 @@ members = [
     "mesh-cni-api",
     "mesh-cni",
     "mesh-cni-cli",
-    "mesh-cni-ebpf",
+    "mesh-cni-service-ebpf",
     "mesh-cni-ebpf-common",
     "mesh-cni-cluster-controller",
     "mesh-cni-identity-controller",
@@ -96,6 +96,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 walkdir = { version = "2.5.0" }
 which = { version = "8.0.0"}
 
-[profile.release.package.mesh-cni-ebpf]
+[profile.release.package.mesh-cni-service-ebpf]
 debug = 2
 codegen-units = 1

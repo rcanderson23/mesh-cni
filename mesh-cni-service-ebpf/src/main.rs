@@ -3,7 +3,7 @@
 
 use aya_ebpf::macros::cgroup_sock_addr;
 use aya_ebpf::programs::SockAddrContext;
-use mesh_cni_ebpf::service::try_mesh_cni_cgroup_connect4;
+use mesh_cni_service_ebpf::service::try_mesh_cni_cgroup_connect4;
 
 #[cgroup_sock_addr(connect4)]
 pub fn mesh_cni_cgroup_connect4(ctx: SockAddrContext) -> i32 {

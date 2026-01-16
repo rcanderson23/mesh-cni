@@ -22,7 +22,7 @@ COPY mesh-cni-ebpf-common mesh-cni-ebpf-common
 COPY mesh-cni-identity-controller mesh-cni-identity-controller
 COPY mesh-cni-policy-controller mesh-cni-policy-controller
 COPY mesh-cni-policy-ebpf mesh-cni-policy-ebpf
-COPY mesh-cni-ebpf mesh-cni-ebpf
+COPY mesh-cni-service-ebpf mesh-cni-service-ebpf
 COPY mesh-cni-k8s-utils mesh-cni-k8s-utils
 COPY mesh-cni-crds mesh-cni-crds
 COPY mesh-cni-service-controller mesh-cni-service-controller

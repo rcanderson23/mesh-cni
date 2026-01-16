@@ -1,5 +1,5 @@
 [package]
-name = "mesh-cni-ebpf"
+name = "mesh-cni-service-ebpf"
 version = "0.1.0"
 edition.workspace = true
 
