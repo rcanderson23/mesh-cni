@@ -20,9 +20,9 @@ use crate::{
 pub async fn start_identity_controllers(client: Client, cancel: CancellationToken) -> Result<()> {
     let store_init = timeout(Duration::from_secs(30), async {
         tokio::try_join!(
-            create_store_and_subscriber(Api::all(client.clone())),
-            create_store_and_subscriber(Api::all(client.clone())),
-            create_store_and_subscriber(Api::all(client.clone())),
+            create_store_and_subscriber(Api::all(client.clone()), Some(Duration::from_secs(30))),
+            create_store_and_subscriber(Api::all(client.clone()), Some(Duration::from_secs(30))),
+            create_store_and_subscriber(Api::all(client.clone()), Some(Duration::from_secs(30))),
         )
     })
     .await

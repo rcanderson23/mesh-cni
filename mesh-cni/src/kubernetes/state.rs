@@ -1,5 +1,6 @@
 use std::pin::pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ahash::{HashMap, HashMapExt};
 use futures::StreamExt;
@@ -47,7 +48,9 @@ where
             };
 
             let api = kube::Api::all(client);
-            let Ok((store, subscriber)) = create_store_and_subscriber(api).await else {
+            let Ok((store, subscriber)) =
+                create_store_and_subscriber(api, Some(Duration::from_secs(30))).await
+            else {
                 warn!("failed to create store for cluster {}", cluster.name);
                 continue;
             };

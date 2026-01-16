@@ -12,7 +12,6 @@ use tracing::info;
 
 use crate::config::AgentArgs;
 use crate::http::shutdown;
-use crate::kubernetes::cluster::{Cluster, ClusterConfigs};
 use crate::{Result, bpf, kubernetes};
 
 pub async fn start(
@@ -21,19 +20,21 @@ pub async fn start(
     cancel: CancellationToken,
 ) -> Result<()> {
     info!("loading cluster configs");
-    let configs = ClusterConfigs::try_new_configs(args.mesh_clusters_config).await?;
-    let mut local_cluster = Cluster::try_new(configs.local).await?;
-    let kube_client = local_cluster.take_client().unwrap();
+    let mut config = kube::Config::infer().await?;
+    config.cluster_url = args.cluster_url;
+    dbg!(&config);
+    let kube_client = kube::Client::try_from(config)?;
 
     info!("initializing bpf loader");
     let loader = bpf::loader::LoaderState::try_new()?;
 
     info!("initializing ip server");
-    let ip_server = bpf::ip::run(kube_client.clone(), local_cluster.id, cancel.clone()).await?;
+    // TODO: fix id
+    let ip_server = bpf::ip::run(kube_client.clone(), 0, cancel.clone()).await?;
 
     info!("initializing service server");
-    let service_server =
-        bpf::service::run(kube_client.clone(), local_cluster.id, cancel.clone()).await?;
+    // TODO: fix id
+    let service_server = bpf::service::run(kube_client.clone(), 0, cancel.clone()).await?;
 
     info!("initializing bpf server");
     let bpf_server = BpfServer::new(loader);

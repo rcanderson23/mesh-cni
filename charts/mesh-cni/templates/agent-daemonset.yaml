@@ -54,12 +54,12 @@ spec:
         - name: {{ .Chart.Name }}
           args:
           - agent
+          - --cluster-url={{ .Values.agent.clusterURL }}
           - --metrics-address=0.0.0.0:{{ .Values.agent.metrics.port }}
           - --cni-bin-dir={{ .Values.agent.cniBinDir }}
           - --cni-conf-dir={{ .Values.agent.cniConfDir }}
           - --cni-plugin-log-dir={{ .Values.agent.cniPluginLogDir }}
           - --agent-socket-path={{ .Values.agent.socketPath }}
-          - --mesh-clusters-config=/etc/mesh-cni/clusters-config.yaml
           {{- if .Values.agent.chained }}
           - --chained
           {{- end }}
@@ -106,8 +106,6 @@ spec:
             name: plugin-logs
           - mountPath: /var/run/mesh
             name: socket
-          - mountPath: /etc/mesh-cni/
-            name: config
           {{- with .Values.agent.volumeMounts }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -140,9 +138,6 @@ spec:
           path: /var/run/mesh
           type: DirectoryOrCreate
         name: socket
-      - configMap:
-          name: mesh-cni-agent-config
-        name: config
       {{- with .Values.agent.extraVolumes }}
         {{- toYaml . | nindent 8 }}
       {{- end }}

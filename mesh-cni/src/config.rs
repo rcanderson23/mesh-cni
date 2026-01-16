@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use http::Uri;
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -19,6 +20,11 @@ pub enum Commands {
 
 #[derive(Parser, Debug, Clone)]
 pub struct AgentArgs {
+    /// Cluster URL for agent to connect to the Kubernetes
+    /// control plane without kube-proxy
+    #[arg(long)]
+    pub cluster_url: Uri,
+
     /// Path to the bpf fs for bpf maps
     #[arg(long, default_value = "/sys/fs/bpf")]
     pub bpf_fs: PathBuf,
@@ -59,14 +65,6 @@ pub struct AgentArgs {
     #[arg(long, env = "CNI_PLUGIN_BIN", default_value = "/app/mesh-cni-plugin")]
     pub cni_plugin_bin: PathBuf,
 
-    /// Cluster configs path
-    #[arg(
-        long,
-        env = "MESH_CLUSTERS_CONFIG",
-        default_value = "/etc/mesh-cni/cluster-config"
-    )]
-    pub mesh_clusters_config: PathBuf,
-
     /// Agent socket path
     #[arg(
         long,
@@ -82,14 +80,6 @@ pub struct AgentArgs {
 
 #[derive(Parser, Debug, Clone)]
 pub struct ControllerArgs {
-    /// Cluster configs path
-    #[arg(
-        long,
-        env = "MESH_CLUSTERS_CONFIG",
-        default_value = "/etc/mesh-cni/cluster-config"
-    )]
-    pub mesh_clusters_config: PathBuf,
-
     /// Metrics listener for agent
     #[arg(long, default_value = "0.0.0.0:9090")]
     pub metrics_address: SocketAddr,

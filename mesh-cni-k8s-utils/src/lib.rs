@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::time::Duration;
 
 use futures::StreamExt;
 use k8s_openapi::serde::de::DeserializeOwned;
@@ -20,7 +21,13 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-pub async fn create_store_and_subscriber<K>(api: Api<K>) -> Result<(Store<K>, ReflectHandle<K>)>
+// TODO: reconsider this timeout as we don't want services to hang
+// indefinitely waiting for the for the store to become ready but
+// there may be a better way to handle this
+pub async fn create_store_and_subscriber<K>(
+    api: Api<K>,
+    timeout: Option<Duration>,
+) -> Result<(Store<K>, ReflectHandle<K>)>
 where
     K: Resource + Send + Clone + Debug + DeserializeOwned + Sync + 'static,
     <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + Hash + Clone,
@@ -44,9 +51,15 @@ where
         });
 
     tokio::spawn(stream);
-    store
-        .wait_until_ready()
-        .await
-        .map_err(|e| Error::StoreCreation(e.to_string()))?;
+    let wait = store.wait_until_ready();
+    if let Some(timeout) = timeout {
+        tokio::time::timeout(timeout, wait)
+            .await
+            .map_err(|_| Error::StoreCreation("timed out waiting for store".into()))?
+            .map_err(|e| Error::StoreCreation(e.to_string()))?;
+    } else {
+        wait.await
+            .map_err(|e| Error::StoreCreation(e.to_string()))?;
+    }
     Ok((store, subscriber))
 }

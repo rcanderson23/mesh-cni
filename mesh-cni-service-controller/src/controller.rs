@@ -26,8 +26,10 @@ pub async fn start_service_controller(client: Client, cancel: CancellationToken)
     let mesh_ep_api: Api<MeshEndpoint> = Api::all(client.clone());
 
     let (endpoint_slice_state, _endpoint_slice_subscriber) =
-        create_store_and_subscriber(endpoint_slice_api.clone()).await?;
-    let (mesh_endpoint_state, _) = create_store_and_subscriber(mesh_ep_api).await?;
+        create_store_and_subscriber(endpoint_slice_api.clone(), Some(Duration::from_secs(30)))
+            .await?;
+    let (mesh_endpoint_state, _) =
+        create_store_and_subscriber(mesh_ep_api, Some(Duration::from_secs(30))).await?;
     let metrics = crate::metrics::ControllerMetrics::new("meshendpoint-services");
     let context = Context {
         metrics,

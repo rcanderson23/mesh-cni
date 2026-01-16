@@ -101,6 +101,9 @@ pub enum Error {
 
     #[error("ebpf log error: {0}")]
     EbpfLogError(#[from] aya_log::Error),
+
+    #[error("config error: {0}")]
+    ConfigError(#[from] kube::config::InferConfigError),
 }
 
 impl Error {

@@ -12,6 +12,10 @@ agent:
     # Overrides the image tag whose default is the chart appVersion.
     tag: "0.1.0"
   
+
+  # Used by the agent to connect to the kubernetes controller plane without kube-proxy
+  clusterURL: "https://172.18.0.2:6443/"
+
   # This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
   imagePullSecrets: []
   
@@ -27,15 +31,6 @@ agent:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
 
-  clustersConfig:
-    local:
-      name: cluster1
-      id: 1
-      endpoint: https://172.18.0.2:6443/
-    remote: []
-    # - name: cluster2
-    #   id: 2
-    #   context: cluster2
   chained: true
 
   cniBinDir: /host/opt/cni/bin

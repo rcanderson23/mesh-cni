@@ -38,10 +38,16 @@ where
     IP4: BpfMap<Key = LpmKey<u32>, Value = Id> + Send + 'static,
     IP6: BpfMap<Key = LpmKey<u128>, Value = Id> + Send + 'static,
 {
-    let (pod_store, pod_subscriber) =
-        create_store_and_subscriber(Api::<Pod>::all(client.clone())).await?;
-    let (ns_store, ns_subscriber) =
-        create_store_and_subscriber(Api::<Namespace>::all(client.clone())).await?;
+    let (pod_store, pod_subscriber) = create_store_and_subscriber(
+        Api::<Pod>::all(client.clone()),
+        Some(std::time::Duration::from_secs(30)),
+    )
+    .await?;
+    let (ns_store, ns_subscriber) = create_store_and_subscriber(
+        Api::<Namespace>::all(client.clone()),
+        Some(std::time::Duration::from_secs(30)),
+    )
+    .await?;
     let metrics = ControllerMetrics::new("ip");
     let context = Context {
         metrics,

@@ -16,6 +16,7 @@ use mesh_cni_api::service::v1::service_server::ServiceServer;
 use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
 };
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -26,10 +27,10 @@ use crate::bpf::BPF_MAP_SERVICES_V4;
 use crate::bpf::BPF_MAP_SERVICES_V6;
 use crate::bpf::service::api::Server;
 use crate::bpf::service::state::ServiceEndpoint;
+use mesh_cni_k8s_utils::create_store_and_subscriber;
 use mesh_cni_service_bpf_controller::{
     start_bpf_meshendpoint_controller, start_bpf_service_controller,
 };
-use mesh_cni_k8s_utils::create_store_and_subscriber;
 
 use crate::kubernetes::ClusterId;
 
@@ -69,14 +70,16 @@ pub async fn run(
 
     let service_api: Api<Service> = Api::all(kube_client.clone());
     let (service_state, service_subscriber) =
-        create_store_and_subscriber(service_api.clone()).await?;
+        create_store_and_subscriber(service_api, Some(Duration::from_secs(30))).await?;
 
     let endpoint_slice_api: Api<EndpointSlice> = Api::all(kube_client.clone());
     let (endpoint_slice_state, endpoint_slice_subscriber) =
-        create_store_and_subscriber(endpoint_slice_api.clone()).await?;
+        create_store_and_subscriber(endpoint_slice_api, Some(Duration::from_secs(30))).await?;
 
     let mesh_endpoint_api = Api::all(kube_client.clone());
-    let (mesh_endpoint_state, _) = create_store_and_subscriber(mesh_endpoint_api.clone()).await?;
+    let (mesh_endpoint_state, _) =
+        create_store_and_subscriber(mesh_endpoint_api.clone(), Some(Duration::from_secs(30)))
+            .await?;
 
     let service_controller = start_bpf_service_controller(
         service_state.clone(),
