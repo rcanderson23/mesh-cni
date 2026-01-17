@@ -15,5 +15,5 @@ memoffset = { workspace = true }
 which = { workspace = true }
 
 [[bin]]
-name = "mesh-cni"
+name = "mesh-cni-service"
 path = "src/main.rs"

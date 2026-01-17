@@ -33,16 +33,17 @@ pub const BPF_MESH_MAPS_DIR: &str = "/sys/fs/bpf/mesh/maps";
 pub const BPF_MESH_PROG_DIR: &str = "/sys/fs/bpf/mesh/programs";
 pub const BPF_MESH_LINKS_DIR: &str = "/sys/fs/bpf/mesh/links";
 
-pub(crate) const MAPS_LIST: [BpfNamePath; 6] = [
-    BPF_MAP_IDENTITY_V4,
-    BPF_MAP_IDENTITY_V6,
+pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 2] = [BPF_MAP_IDENTITY_V4, BPF_MAP_IDENTITY_V6];
+
+pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 4] = [
     BPF_MAP_SERVICES_V4,
     BPF_MAP_SERVICES_V6,
     BPF_MAP_ENDPOINTS_V4,
     BPF_MAP_ENDPOINTS_V6,
 ];
 
-pub(crate) const PROG_LIST: [BpfNamePath; 1] = [BPF_PROGRAM_CGROUP_CONNECT_V4];
+pub(crate) const PROG_LIST: [BpfNamePath; 2] =
+    [BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_INGRESS_TC];
 
 pub enum BpfNamePath {
     Map(&'static str),

@@ -12,21 +12,28 @@ use crate::id_v4;
 
 #[inline]
 pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
+    info!(&ctx, "ingress triggered");
     let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
 
+    info!(&ctx, "getting ether type");
     let Ok(ether_type) = ethhdr.ether_type() else {
         return Ok(TC_ACT_PIPE);
     };
 
+    info!(&ctx, "checking ipv4");
     if !matches!(ether_type, EtherType::Ipv4) {
         return Ok(TC_ACT_PIPE);
     }
+    info!(&ctx, "got ipv4");
 
+    info!(&ctx, "loading ipv4hdr");
     let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
 
+    info!(&ctx, "getting src and dst addr");
     let src = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst = u32::from_be_bytes(ipv4hdr.dst_addr);
 
+    info!(&ctx, "getting id from maps");
     // LpmTrie expects big endian order for comparisons
     let (Some(src_id), Some(dst_id)) = (
         id_v4(LpmKey::new(32, src.to_be())),
