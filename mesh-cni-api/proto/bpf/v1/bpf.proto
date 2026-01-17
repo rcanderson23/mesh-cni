@@ -6,6 +6,7 @@ import "cni/v1/types.proto";
 
 service Bpf {
     rpc AddPod(AddPodRequest) returns (AddPodReply) {}
+    rpc DeletePod(DeletePodRequest) returns (DeletePodReply) {}
 }
 
 message AddPodReply {
@@ -30,3 +31,18 @@ message AddPodRequest {
   bool chained = 4;
 }
 
+message DeletePodRequest {
+  // Interface name to be created
+  string iface = 1;
+
+  // Path to the network namespace
+  optional string net_namespace = 2;
+
+  // Path to the cgroup of the container
+  string container_id = 3;
+
+  // Determines if the CNI is configured to be chained
+  bool chained = 4;
+}
+
+message DeletePodReply {}

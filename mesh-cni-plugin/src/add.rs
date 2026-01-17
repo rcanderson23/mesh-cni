@@ -16,6 +16,8 @@ pub fn add(args: &Args, input: Input) -> Response {
         "add called, received input {:?} for containerid {}",
         input, &args.container_id
     );
+
+    // Non-chained
     let Some(prev) = input.previous_result else {
         let Ok(net_namespace) = args.net_ns.clone().unwrap().into_os_string().into_string() else {
             return Error::InvalidRequiredEnvVariables(
@@ -55,6 +57,7 @@ pub fn add(args: &Args, input: Input) -> Response {
         return Response::Success(success);
     };
 
+    // Chained
     let prev = match Success::deserialize(prev) {
         Ok(prev) => prev,
         Err(e) => {
