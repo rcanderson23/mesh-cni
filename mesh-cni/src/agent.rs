@@ -20,7 +20,6 @@ pub async fn start(
     info!("loading cluster configs");
     let mut config = kube::Config::infer().await?;
     config.cluster_url = args.cluster_url;
-    dbg!(&config);
     let kube_client = kube::Client::try_from(config)?;
 
     info!("initializing bpf loader");
@@ -28,7 +27,8 @@ pub async fn start(
 
     info!("initializing ip server");
     // TODO: fix id
-    let ip_server = bpf::ip::run(kube_client.clone(), 0, cancel.clone()).await?;
+    let ip_server =
+        bpf::ip::run(kube_client.clone(), args.node_name.clone(), cancel.clone()).await?;
 
     info!("initializing service server");
     // TODO: fix id

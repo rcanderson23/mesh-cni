@@ -1,0 +1,23 @@
+[package]
+name = "mesh-cni-identity-controller"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+aya = { workspace = true }
+futures = { workspace = true }
+ipnetwork = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+mesh-cni-crds = { path = "../mesh-cni-crds" }
+mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+
+[lib]
+name = "mesh_cni_identity_controller"
+path = "src/lib.rs"

@@ -8,6 +8,7 @@ use core::{
     net::{IpAddr, Ipv6Addr},
 };
 
+pub type IdentityId = u32;
 pub type Id = u16;
 
 #[repr(C)]

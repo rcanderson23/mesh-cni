@@ -12,9 +12,7 @@ use kube::{
 };
 use mesh_cni_ebpf_common::{
     KubeProtocol,
-    service::{
-        EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4, ServiceKeyV6,
-    },
+    service::{EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey},
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;

@@ -1,4 +1,4 @@
-use mesh_cni_identity_gen_controller::start_identity_controllers;
+use mesh_cni_identity_gen_controller::start_identity_gen_controller;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -19,7 +19,7 @@ pub async fn start(
     //
     // let service_handle = tokio::spawn(service_controller);
 
-    let identity_controller = start_identity_controllers(client, cancel.clone());
+    let identity_controller = start_identity_gen_controller(client, cancel.clone());
 
     let identity_handle = tokio::spawn(identity_controller);
 

@@ -7,17 +7,17 @@ use aya_ebpf::{
     maps::{HashMap, LpmTrie},
 };
 use mesh_cni_ebpf_common::{
-    Id,
+    IdentityId,
     service::{
         EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
 };
 
 #[map(name = "identity_v4")]
-static IDENTITY_V4: LpmTrie<u32, Id> = LpmTrie::with_max_entries(65535, 0);
+static IDENTITY_V4: LpmTrie<u32, IdentityId> = LpmTrie::with_max_entries(65535, 0);
 
 #[map(name = "identity_v6")]
-static IDENTITY_V6: LpmTrie<u128, Id> = LpmTrie::with_max_entries(65535, 0);
+static IDENTITY_V6: LpmTrie<u128, IdentityId> = LpmTrie::with_max_entries(65535, 0);
 
 #[map(name = "services_v4")]
 static SERVICES_V4: HashMap<ServiceKeyV4, ServiceValue> = HashMap::with_max_entries(65535, 0);

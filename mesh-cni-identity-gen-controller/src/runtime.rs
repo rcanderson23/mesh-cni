@@ -16,7 +16,10 @@ use crate::{
     controller::{error_policy, reconcile_namespace},
 };
 
-pub async fn start_identity_controllers(client: Client, cancel: CancellationToken) -> Result<()> {
+pub async fn start_identity_gen_controller(
+    client: Client,
+    cancel: CancellationToken,
+) -> Result<()> {
     let store_init = timeout(Duration::from_secs(30), async {
         tokio::try_join!(
             create_store_and_subscriber(Api::all(client.clone()), Some(Duration::from_secs(30))),

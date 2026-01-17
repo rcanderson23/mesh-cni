@@ -1,6 +1,7 @@
 name := "mesh-cni"
 container_image := "ghcr.io/rcanderson23/" + name
 kind_path := "./kind/single-node.yaml"
+host_target := `rustc -vV | sed -n 's/^host: //p'`
 
 default:
   @just --list
@@ -14,8 +15,11 @@ lint:
 container:
   docker buildx build --tag {{container_image}}:latest . --load
 
-build: 
+build:
   cargo build --release
+
+test target=host_target:
+  cargo test --target {{target}}
 
 kind-up:
   -kind create cluster --name={{name}} --config={{kind_path}}

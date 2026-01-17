@@ -8,6 +8,7 @@ members = [
     "mesh-cni-ebpf-common",
     "mesh-cni-cluster-controller",
     "mesh-cni-identity-gen-controller",
+    "mesh-cni-identity-controller",
     "mesh-cni-k8s-utils",
     "mesh-cni-plugin",
     "mesh-cni-policy-controller",

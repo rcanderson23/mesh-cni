@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{
@@ -16,6 +12,7 @@ use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 use crate::{Error, Result, context::Context};
+use mesh_cni_k8s_utils::sanitize_pod_labels;
 
 const MANANGER: &str = "identity-gen-controller";
 
@@ -69,7 +66,6 @@ pub(crate) async fn reconcile_namespace(ns: Arc<Namespace>, ctx: Arc<Context>) -
     Ok(Action::requeue(Duration::from_secs(300)))
 }
 
-// TODO: revisit error handling and backoff strategy once controller logic is defined.
 pub(crate) fn error_policy<K>(k: Arc<K>, error: &Error, _ctx: Arc<Context>) -> Action
 where
     K: ResourceExt<DynamicType = ()>,
@@ -120,18 +116,6 @@ fn get_or_generate_identity(ctx: &Context, ns: &Namespace, pod: &Pod) -> Result<
     };
 
     Ok(Identity::new(&name, spec))
-}
-
-fn sanitize_pod_labels(labels: &mut BTreeMap<String, String>) {
-    let removal_list = [
-        "controller-revision-hash",
-        "pod-template-hash",
-        "pod-template-generation",
-    ];
-
-    removal_list.iter().for_each(|i| {
-        labels.remove(*i);
-    });
 }
 
 #[cfg(test)]

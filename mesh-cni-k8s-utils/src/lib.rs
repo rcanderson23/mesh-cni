@@ -66,3 +66,15 @@ where
     }
     Ok((store, subscriber))
 }
+
+pub fn sanitize_pod_labels(labels: &mut std::collections::BTreeMap<String, String>) {
+    let removal_list = [
+        "controller-revision-hash",
+        "pod-template-hash",
+        "pod-template-generation",
+    ];
+
+    removal_list.iter().for_each(|i| {
+        labels.remove(*i);
+    });
+}

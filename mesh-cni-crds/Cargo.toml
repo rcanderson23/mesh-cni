@@ -5,9 +5,10 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-k8s-openapi = { workspace = true, features = ["v1_34"] }
+k8s-openapi = { workspace = true }
 kube = { workspace = true }
 mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common", features = ["user"] }
+mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
 ahash = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
@@ -20,6 +21,6 @@ tracing = { workspace = true }
 name = "mesh_cni_crds"
 path = "src/lib.rs"
 
-[[bin]]
-name = "mesh-cni"
-path = "src/main.rs"
+[dev-dependencies]
+http = { workspace = true }
+k8s-openapi = { workspace = true, features = ["v1_34"] }

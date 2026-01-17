@@ -8,17 +8,18 @@ use aya::{
     Pod,
     maps::{HashMap, LpmTrie, MapData, lpm_trie::Key as LpmKey},
 };
-use mesh_cni_ebpf_common::Id;
+use ipnetwork::IpNetwork;
+use mesh_cni_ebpf_common::IdentityId;
 
-use crate::{Result, bpf::ip::IpNetwork};
+use crate::{Result, bpf::ip::LpmKeyNetwork};
 
 pub(crate) const BPF_PROGRAM_INGRESS_TC: BpfNamePath = BpfNamePath::Program("mesh_cni_ingress");
 pub const BPF_PROGRAM_CGROUP_CONNECT_V4: BpfNamePath =
     BpfNamePath::Program("mesh_cni_cgroup_connect4");
 pub const BPF_LINK_CGROUP_CONNECT_V4_PATH: &str = "/sys/fs/bpf/mesh/links/mesh_cni_cgroup_connect4";
 
-pub type IdentityMapV4 = LpmTrie<MapData, u32, Id>;
-pub type IdentityMapV6 = LpmTrie<MapData, u128, Id>;
+pub type IdentityMapV4 = LpmTrie<MapData, u32, IdentityId>;
+pub type IdentityMapV6 = LpmTrie<MapData, u128, IdentityId>;
 
 pub const BPF_MAP_IDENTITY_V4: BpfNamePath = BpfNamePath::Map("identity_v4");
 pub const BPF_MAP_IDENTITY_V6: BpfNamePath = BpfNamePath::Map("identity_v6");
@@ -156,7 +157,7 @@ where
         for v in self.iter() {
             match v {
                 Ok((k, v)) => {
-                    let k = IpNetwork::from(k);
+                    let k = <u32 as LpmKeyNetwork>::key_to_network(k);
                     map.insert(k, v);
                 }
                 Err(e) => return Err(e.into()),
@@ -188,7 +189,7 @@ where
         for v in self.iter() {
             match v {
                 Ok((k, v)) => {
-                    let k = IpNetwork::from(k);
+                    let k = <u128 as LpmKeyNetwork>::key_to_network(k);
                     map.insert(k, v);
                 }
                 Err(e) => return Err(e.into()),

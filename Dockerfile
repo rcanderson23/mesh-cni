@@ -20,6 +20,7 @@ COPY mesh-cni-cli mesh-cni-cli
 COPY mesh-cni mesh-cni
 COPY mesh-cni-ebpf-common mesh-cni-ebpf-common
 COPY mesh-cni-identity-gen-controller mesh-cni-identity-gen-controller
+COPY mesh-cni-identity-controller mesh-cni-identity-controller
 COPY mesh-cni-policy-controller mesh-cni-policy-controller
 COPY mesh-cni-policy-ebpf mesh-cni-policy-ebpf
 COPY mesh-cni-service-ebpf mesh-cni-service-ebpf
