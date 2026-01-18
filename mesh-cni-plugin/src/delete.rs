@@ -9,6 +9,7 @@ use crate::{
     types::Input,
 };
 
+// https://www.cni.dev/docs/spec/#del-remove-container-from-network-or-un-apply-modifications
 //Input:
 //
 //The runtime will provide a JSON-serialized plugin configuration object (defined below) on standard in.
@@ -31,6 +32,8 @@ pub fn delete(args: &Args, input: Input) -> Response {
         return Error::NoPreviousResult("no previous result found".into())
             .into_response(CNI_VERSION);
     };
+
+    // TODO: implemented unchained
 
     // Chained
     let prev = match Success::deserialize(prev) {

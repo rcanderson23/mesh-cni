@@ -11,13 +11,29 @@ use crate::{
     types::Input,
 };
 
+// https://www.cni.dev/docs/spec/#add-add-container-to-network-or-apply-modifications
+// Input:
+//
+//The runtime will provide a JSON-serialized plugin configuration object (defined below) on standard in.
+//
+//Required environment parameters:
+//
+//    CNI_COMMAND
+//    CNI_CONTAINERID
+//    CNI_NETNS
+//    CNI_IFNAME
+//
+//Optional environment parameters:
+//
+//    CNI_ARGS
+//    CNI_PATH
 pub fn add(args: &Args, input: Input) -> Response {
     info!(
         "add called, received input {:?} for containerid {}",
         input, &args.container_id
     );
 
-    // Non-chained
+    // Unchained
     let Some(prev) = input.previous_result else {
         let Ok(net_namespace) = args.net_ns.clone().unwrap().into_os_string().into_string() else {
             return Error::InvalidRequiredEnvVariables(
