@@ -13,7 +13,7 @@ permissions:
   packages: write
 jobs:
   docker:
-    runs-on: mesh-cni-runners
+    runs-on: ubuntu-latest
     # TODO: fix for proper multirunner build
     # strategy:
     #   fail-fast: true
