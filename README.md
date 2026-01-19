@@ -1,5 +1,7 @@
 # mesh-cni
 
+Just a CNI that I am writing for my homelab, currently only works (partially) on a local cluster via Kind.
+
 ## Prerequisites
 
 1. stable rust toolchains: `rustup toolchain install stable`
@@ -8,29 +10,15 @@
 1. (if cross-compiling) LLVM: (e.g.) `brew install llvm` (on macOS)
 1. (if cross-compiling) C toolchain: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
 1. bpf-linker: `cargo install bpf-linker` (`--no-default-features --features=llvm-21` on macOS)
+1. just: `cargo install just --locked`
+1. kind: [Installation](https://kind.sigs.k8s.io/#installation-and-usage)
 
-## Build & Run
+## Deploy to local cluster
 
-Use `cargo build`, `cargo check`, etc. as normal. Run your program with:
+Deploy to a local [Kind](https://kind.sigs.k8s.io/) cluster by running `just run-local`. Depending on your setup, you may need to adjust the var `agent.clusterURL` found at `charts/mesh-cni/values.yaml` to match the Kubernetes endpoint for your Kind
+cluster.
 
-```shell
-cargo run --release --config 'target."cfg(all())".runner="sudo -E"'
-```
-
-Cargo build scripts are used to automatically build the eBPF correctly and include it in the
-program.
-
-## Cross-compiling on macOS
-
-Cross compilation should work on both Intel and Apple Silicon Macs.
-
-```shell
-CC=${ARCH}-linux-musl-gcc cargo build --package mesh-cni --release \
-  --target=${ARCH}-unknown-linux-musl \
-  --config=target.${ARCH}-unknown-linux-musl.linker=\"${ARCH}-linux-musl-gcc\"
-```
-The cross-compiled program `target/${ARCH}-unknown-linux-musl/release/mesh-cni` can be
-copied to a Linux server or VM and run there.
+Changes to the BPF maps may require resetting the cluster. This can be done with a `just kind-down` and `just run-local`.
 
 ## License
 
