@@ -2,6 +2,8 @@
 
 Just a CNI that I am writing for my homelab, currently only works (partially) on a local cluster via Kind.
 
+[End Goal](https://github.com/rcanderson23/mesh-cni/issues/6)
+
 ## Prerequisites
 
 1. stable rust toolchains: `rustup toolchain install stable`
