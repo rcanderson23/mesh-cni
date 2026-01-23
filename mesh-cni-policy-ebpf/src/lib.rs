@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod ingress;
+mod ipv4;
 
 use aya_ebpf::{
     macros::map,

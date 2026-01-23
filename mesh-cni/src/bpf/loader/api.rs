@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use aya::{
     pin::PinError,
@@ -22,10 +22,10 @@ use crate::{
 const _NET_NS_DIR: &str = "/var/run/mesh/netns";
 const MESH_INGRESS_LINK_PREFIX: &str = "mesh_cni_ingress_";
 
-fn ingress_link_path(iface: &str) -> PathBuf {
-    PathBuf::from(BPF_MESH_LINKS_DIR).join(format!("{}{}", MESH_INGRESS_LINK_PREFIX, iface))
-}
-
+// TODO: this only handles chained creation correctly
+//
+// Spec says there SHOULD be a DEL call in between ADD calls so we need
+// to try to clean up on failed attach and pin calls
 #[tonic::async_trait]
 impl BpfApi for LoaderState {
     async fn add_pod(
@@ -36,35 +36,38 @@ impl BpfApi for LoaderState {
         info!("received add request {:?}", request);
         let _ = tc::qdisc_add_clsact(&request.iface);
         info!("adding tc ingress progam to {}", &request.iface);
-        let mut ingress_prog =
-            SchedClassifier::from_pin(BPF_PROGRAM_INGRESS_TC.path()).map_err(|e| {
-                error!(%e, "failed to load ingress program from pin");
-                tonic::Status::new(Code::Internal, e.to_string())
-            })?;
+        attach_and_pin_links(
+            &request.iface,
+            BPF_PROGRAM_INGRESS_TC.path(),
+            TcAttachType::Ingress,
+        )
+        .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
 
-        let link_id = ingress_prog
-            .attach(&request.iface, TcAttachType::Ingress)
-            .map_err(|e| {
-                error!(%e, "failed to attach ingress program");
-                tonic::Status::new(Code::Internal, e.to_string())
-            })?;
+        info!("adding tc egress progam to {}", &request.iface);
+        if let Err(e) = attach_and_pin_links(
+            &request.iface,
+            BPF_PROGRAM_INGRESS_TC.path(),
+            TcAttachType::Egress,
+        ) {
+            let ingress_path = pin_path(&request.iface, TcAttachType::Ingress);
+            let egress_path = pin_path(&request.iface, TcAttachType::Egress);
+            for path in [ingress_path, egress_path] {
+                let Err(u) = unpin_path(path) else {
+                    continue;
+                };
+                error!(%u, "failed to unpin path");
+            }
 
-        let link = ingress_prog
-            .take_link(link_id)
-            .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
-        let link: FdLink = link
-            .try_into()
-            .map_err(|e: LinkError| tonic::Status::new(Code::Internal, e.to_string()))?;
-        let path = ingress_link_path(&request.iface);
-        link.pin(path)
-            .map_err(|e: PinError| tonic::Status::new(Code::Internal, e.to_string()))?;
-
-        Ok(Response::new(AddPodReply {
-            interfaces: Vec::new(),
-            ips: Vec::new(),
-            routes: Vec::new(),
-            dns: None,
-        }))
+            error!(%e, "failed to attach and pin egress link");
+            Err(tonic::Status::new(Code::Internal, e.to_string()))
+        } else {
+            Ok(Response::new(AddPodReply {
+                interfaces: Vec::new(),
+                ips: Vec::new(),
+                routes: Vec::new(),
+                dns: None,
+            }))
+        }
     }
 
     async fn delete_pod(
@@ -74,18 +77,66 @@ impl BpfApi for LoaderState {
         let request = request.into_inner();
         info!("received delete request {:?}", request);
 
-        let path = ingress_link_path(&request.iface);
-        match PinnedLink::from_pin(&path) {
-            Ok(link) => {
-                let _link = link
-                    .unpin()
-                    .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
-            }
-            Err(LinkError::SyscallError(err))
-                if err.io_error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(tonic::Status::new(Code::Internal, e.to_string())),
+        let ingress_path = pin_path(&request.iface, TcAttachType::Ingress);
+        let egress_path = pin_path(&request.iface, TcAttachType::Egress);
+
+        for path in [ingress_path, egress_path] {
+            unpin_path(path).map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
         }
 
         Ok(Response::new(DeletePodReply {}))
     }
+}
+
+fn unpin_path(path: impl AsRef<Path>) -> Result<()> {
+    match path.as_ref().try_exists() {
+        Ok(true) => {}
+        Ok(false) => return Ok(()),
+        Err(e) => {
+            return Err(e.into());
+        }
+    }
+    match PinnedLink::from_pin(path) {
+        Ok(link) => {
+            let _link = link.unpin()?;
+        }
+        Err(LinkError::SyscallError(err))
+            if err.io_error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
+fn pin_path(iface: &str, attach_type: TcAttachType) -> PathBuf {
+    match attach_type {
+        TcAttachType::Ingress => PathBuf::from(BPF_MESH_LINKS_DIR)
+            .join(format!("{}{}_ingress", MESH_INGRESS_LINK_PREFIX, iface)),
+        TcAttachType::Egress => PathBuf::from(BPF_MESH_LINKS_DIR)
+            .join(format!("{}{}_egress", MESH_INGRESS_LINK_PREFIX, iface)),
+        TcAttachType::Custom(_) => PathBuf::from(BPF_MESH_LINKS_DIR)
+            .join(format!("{}{}_custom", MESH_INGRESS_LINK_PREFIX, iface)),
+    }
+}
+
+fn attach_and_pin_links(
+    iface: &str,
+    path: impl AsRef<Path>,
+    attach_type: TcAttachType,
+) -> Result<()> {
+    let mut prog = SchedClassifier::from_pin(path)?;
+
+    let link_id = prog.attach(iface, attach_type)?;
+
+    let link = prog.take_link(link_id)?;
+    let link: FdLink = link.try_into()?;
+    let pin_path = match attach_type {
+        TcAttachType::Ingress => PathBuf::from(BPF_MESH_LINKS_DIR)
+            .join(format!("{}{}_ingress", MESH_INGRESS_LINK_PREFIX, iface)),
+        TcAttachType::Egress => PathBuf::from(BPF_MESH_LINKS_DIR)
+            .join(format!("{}{}_egress", MESH_INGRESS_LINK_PREFIX, iface)),
+        TcAttachType::Custom(_) => PathBuf::from(BPF_MESH_LINKS_DIR)
+            .join(format!("{}{}_custom", MESH_INGRESS_LINK_PREFIX, iface)),
+    };
+    link.pin(pin_path)?;
+    Ok(())
 }

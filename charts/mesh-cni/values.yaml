@@ -14,7 +14,7 @@ agent:
   
 
   # Used by the agent to connect to the kubernetes controller plane without kube-proxy
-  clusterURL: "https://172.18.0.2:6443/"
+  clusterURL: "https://172.18.0.3:6443/"
 
   # This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
   imagePullSecrets: []

@@ -102,6 +102,9 @@ pub enum Error {
 
     #[error("config error: {0}")]
     ConfigError(#[from] kube::config::InferConfigError),
+
+    #[error("link error: {0}")]
+    LinkError(#[from] aya::programs::links::LinkError),
 }
 
 impl Error {

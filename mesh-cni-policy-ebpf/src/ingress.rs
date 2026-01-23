@@ -1,97 +1,19 @@
-use aya_ebpf::{
-    bindings::TC_ACT_PIPE, cty::c_long, maps::lpm_trie::Key as LpmKey, programs::TcContext,
-};
-use aya_log_ebpf::{error, info};
-use network_types::{
-    eth::{EthHdr, EtherType},
-    ip::Ipv4Hdr,
-    tcp::TcpHdr,
-};
+use aya_ebpf::{bindings::TC_ACT_PIPE, programs::TcContext};
+use network_types::eth::{EthHdr, EtherType};
 
-use crate::id_v4;
+use crate::ipv4::handle_ipv4;
 
 #[inline]
 pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
-    info!(&ctx, "ingress triggered");
     let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
 
-    info!(&ctx, "getting ether type");
     let Ok(ether_type) = ethhdr.ether_type() else {
         return Ok(TC_ACT_PIPE);
     };
 
-    info!(&ctx, "checking ipv4");
     if !matches!(ether_type, EtherType::Ipv4) {
         return Ok(TC_ACT_PIPE);
     }
-    info!(&ctx, "got ipv4");
 
-    info!(&ctx, "loading ipv4hdr");
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
-
-    info!(&ctx, "getting src and dst addr");
-    let src = u32::from_be_bytes(ipv4hdr.src_addr);
-    let dst = u32::from_be_bytes(ipv4hdr.dst_addr);
-
-    info!(&ctx, "getting id from maps");
-    // LpmTrie expects big endian order for comparisons
-    let (Some(src_id), Some(dst_id)) = (
-        id_v4(LpmKey::new(32, src.to_be())),
-        id_v4(LpmKey::new(32, dst.to_be())),
-    ) else {
-        return Ok(TC_ACT_PIPE);
-    };
-
-    // requests on the same node do not got through eth0 so we need to attach elsewhere
-    // likely the cgroup path so we will need to determine those based on the pods present
-    info!(&ctx, "checking tcphdr");
-    let tcphdr: Result<TcpHdr, c_long> = match ipv4hdr.proto {
-        network_types::ip::IpProto::Tcp => {
-            info!(&ctx, "found tcp proto");
-            ctx.load(EthHdr::LEN + Ipv4Hdr::LEN)
-        }
-        network_types::ip::IpProto::Ipv4 => {
-            info!(&ctx, "found ipv4 proto");
-            return Ok(TC_ACT_PIPE);
-        }
-        network_types::ip::IpProto::Ipv6 => {
-            info!(&ctx, "found ipv6 proto");
-            return Ok(TC_ACT_PIPE);
-        }
-        network_types::ip::IpProto::Udp => {
-            info!(&ctx, "found udp proto");
-            return Ok(TC_ACT_PIPE);
-        }
-        _ => {
-            info!(&ctx, "proto found unexpected: {}", ipv4hdr.proto as u8);
-            return Ok(TC_ACT_PIPE);
-        }
-    };
-    let tcphdr = match tcphdr {
-        Ok(t) => t,
-        Err(e) => {
-            error!(&ctx, "failed to load tcphdr: {}", e);
-            return Ok(TC_ACT_PIPE);
-        }
-    };
-
-    info!(&ctx, "loading bitfield");
-    let bitfield = tcphdr._bitfield_1;
-    for bit in 8..15 {
-        if bitfield.get_bit(bit) {
-            info!(
-                &ctx,
-                "bit {} set, src_id: {}, dst_id: {}", bit, src_id, dst_id
-            );
-        }
-    }
-    // let syn = bitfield.get_bit(SYN_BIT);
-    // let ack = bitfield.get_bit(15);
-
-    // if syn {
-    // } else {
-    // }
-    // ipv4hdr.tot_len
-
-    Ok(TC_ACT_PIPE)
+    handle_ipv4(ctx)
 }
