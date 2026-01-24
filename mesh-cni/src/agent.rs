@@ -22,8 +22,9 @@ pub async fn start(
     config.cluster_url = args.cluster_url;
     let kube_client = kube::Client::try_from(config)?;
 
-    info!("initializing bpf loader");
-    let loader = bpf::loader::LoaderState::try_new()?;
+    info!("initializing bpf");
+    bpf::loader::init_bpf()?;
+    let loader = bpf::cni::LoaderState;
 
     info!("initializing ip server");
     // TODO: fix id

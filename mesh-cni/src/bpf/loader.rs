@@ -3,11 +3,11 @@ use std::{
     io,
 };
 
+use anyhow::{anyhow, bail};
 use aya::{
     Ebpf,
     programs::{CgroupAttachMode, CgroupSockAddr, SchedClassifier, links::FdLink},
 };
-use anyhow::{anyhow, bail};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -21,41 +21,36 @@ use crate::{
 
 const CGROUP_SYS_DIR: &str = "/sys/fs/cgroup";
 
-#[derive(Clone)]
-pub struct State;
-
-impl State {
-    pub fn try_new() -> Result<State> {
-        if pins_exist()? {
-            start_ebpf_logger()?;
-
-            return Ok(Self);
-        }
-        reset_pins()?;
-
-        let mut service_ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-            env!("OUT_DIR"),
-            "/mesh-cni-service"
-        )))?;
-
-        info!("ensuring cgroupsockaddr program loaded and pinned");
-        attach_cgroup_connect_bpf_program(&mut service_ebpf)?;
-
-        pin_maps(&mut service_ebpf, &SERVICE_MAPS_LIST)?;
-
-        let mut policy_ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-            env!("OUT_DIR"),
-            "/mesh-cni-policy"
-        )))?;
-
-        info!("ensuring ingress program loaded and pinned");
-        ensure_ingress_program(&mut policy_ebpf)?;
-
-        pin_maps(&mut policy_ebpf, &POLICY_MAPS_LIST)?;
-
+pub fn init_bpf() -> Result<()> {
+    if pins_exist()? {
         start_ebpf_logger()?;
-        Ok(Self)
+
+        return Ok(());
     }
+    reset_pins()?;
+
+    let mut service_ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
+        env!("OUT_DIR"),
+        "/mesh-cni-service"
+    )))?;
+
+    info!("ensuring cgroupsockaddr program loaded and pinned");
+    attach_cgroup_connect_bpf_program(&mut service_ebpf)?;
+
+    pin_maps(&mut service_ebpf, &SERVICE_MAPS_LIST)?;
+
+    let mut policy_ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
+        env!("OUT_DIR"),
+        "/mesh-cni-policy"
+    )))?;
+
+    info!("ensuring ingress program loaded and pinned");
+    ensure_ingress_program(&mut policy_ebpf)?;
+
+    pin_maps(&mut policy_ebpf, &POLICY_MAPS_LIST)?;
+
+    start_ebpf_logger()?;
+    Ok(())
 }
 
 fn pin_maps(ebpf: &mut Ebpf, map_list: &[BpfNamePath]) -> Result<()> {
@@ -119,12 +114,7 @@ fn ensure_ingress_program(ebpf: &mut Ebpf) -> Result<()> {
     }
     let ingress: &mut SchedClassifier = ebpf
         .program_mut(BPF_PROGRAM_INGRESS_TC.name())
-        .ok_or_else(|| {
-            anyhow!(
-                "failed to get program {}",
-                BPF_PROGRAM_INGRESS_TC.name()
-            )
-        })?
+        .ok_or_else(|| anyhow!("failed to get program {}", BPF_PROGRAM_INGRESS_TC.name()))?
         .try_into()?;
 
     if let Err(e) = ingress.load()
@@ -190,9 +180,9 @@ fn attach_cgroup_connect_bpf_program(ebpf: &mut Ebpf) -> Result<()> {
     program.pin(BPF_PROGRAM_CGROUP_CONNECT_V4.path())?;
 
     let link = program.take_link(link_id)?;
-    let link: FdLink = link.try_into().map_err(|e| {
-        anyhow!("failed to create fdlink from cgroup attachment link: {e}")
-    })?;
+    let link: FdLink = link
+        .try_into()
+        .map_err(|e| anyhow!("failed to create fdlink from cgroup attachment link: {e}"))?;
     link.pin(BPF_LINK_CGROUP_CONNECT_V4_PATH)?;
 
     Ok(())

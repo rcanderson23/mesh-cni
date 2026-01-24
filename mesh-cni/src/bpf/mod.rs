@@ -1,14 +1,15 @@
+pub mod cni;
 pub mod ip;
 pub mod loader;
 pub mod service;
 
 use std::{borrow::BorrowMut, hash::Hash};
 
+use anyhow::anyhow;
 use aya::{
     Pod,
     maps::{HashMap, LpmTrie, MapData, lpm_trie::Key as LpmKey},
 };
-use anyhow::anyhow;
 use ipnetwork::IpNetwork;
 use mesh_cni_ebpf_common::IdentityId;
 
