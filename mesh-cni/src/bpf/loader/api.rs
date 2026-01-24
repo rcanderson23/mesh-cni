@@ -1,12 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use aya::{
-    pin::PinError,
-    programs::{
-        SchedClassifier, TcAttachType,
-        links::{FdLink, LinkError, PinnedLink},
-        tc,
-    },
+use aya::programs::{
+    SchedClassifier, TcAttachType,
+    links::{FdLink, LinkError, PinnedLink},
+    tc,
 };
 use mesh_cni_api::bpf::v1::{
     AddPodReply, AddPodRequest, DeletePodReply, DeletePodRequest, bpf_server::Bpf as BpfApi,
@@ -31,7 +28,7 @@ impl BpfApi for LoaderState {
     async fn add_pod(
         &self,
         request: Request<AddPodRequest>,
-    ) -> Result<Response<AddPodReply>, Status> {
+    ) -> std::result::Result<Response<AddPodReply>, Status> {
         let request = request.into_inner();
         info!("received add request {:?}", request);
         let _ = tc::qdisc_add_clsact(&request.iface);
@@ -73,7 +70,7 @@ impl BpfApi for LoaderState {
     async fn delete_pod(
         &self,
         request: Request<DeletePodRequest>,
-    ) -> Result<Response<DeletePodReply>, Status> {
+    ) -> std::result::Result<Response<DeletePodReply>, Status> {
         let request = request.into_inner();
         info!("received delete request {:?}", request);
 

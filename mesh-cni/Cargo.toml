@@ -17,6 +17,7 @@ mesh-cni-service-bpf-controller = { path = "../mesh-cni-service-bpf-controller" 
 mesh-cni-crds = { path = "../mesh-cni-crds" }
 
 ahash = { workspace = true }
+anyhow = { workspace = true }
 async-stream = { workspace = true }
 axum = { version = "0.8.4", features = ["tokio"]}
 aya = { workspace = true }
@@ -52,7 +53,6 @@ tokio-util = { workspace = true }
 tokio-rustls = { workspace = true }
 tonic = { workspace = true }
 tower = { workspace = true }
-thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }

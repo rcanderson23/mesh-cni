@@ -1,14 +1,10 @@
 use mesh_cni_identity_gen_controller::start_identity_gen_controller;
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    Error, Result,
-    config::ControllerArgs,
-    kubernetes::cluster::{Cluster, ClusterConfigs},
-};
+use crate::{Result, config::ControllerArgs};
 
 pub async fn start(
-    args: ControllerArgs,
+    _args: ControllerArgs,
     ready: CancellationToken,
     cancel: CancellationToken,
 ) -> Result<()> {

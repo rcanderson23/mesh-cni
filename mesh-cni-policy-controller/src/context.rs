@@ -4,6 +4,7 @@ use k8s_openapi::api::{
 };
 use kube::runtime::reflector::Store;
 
+#[allow(unused)]
 pub struct Context {
     pub pod_store: Store<Pod>,
     pub policy_store: Store<NetworkPolicy>,

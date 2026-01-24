@@ -8,6 +8,7 @@ use aya::{
     Pod,
     maps::{HashMap, LpmTrie, MapData, lpm_trie::Key as LpmKey},
 };
+use anyhow::anyhow;
 use ipnetwork::IpNetwork;
 use mesh_cni_ebpf_common::IdentityId;
 
@@ -127,7 +128,7 @@ where
     fn get(&self, key: &K) -> Result<V> {
         match <ahash::HashMap<K, V>>::get(self, key) {
             Some(i) => Ok(*i),
-            None => Err(crate::Error::Other("not found".into())),
+            None => Err(anyhow!("not found")),
         }
     }
     fn get_state(&self) -> Result<ahash::HashMap<K, V>> {

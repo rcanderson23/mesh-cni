@@ -7,10 +7,11 @@ use aya::{
     Ebpf,
     programs::{CgroupAttachMode, CgroupSockAddr, SchedClassifier, links::FdLink},
 };
+use anyhow::{anyhow, bail};
 use tracing::{error, info, warn};
 
 use crate::{
-    Error, Result,
+    Result,
     bpf::{
         BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_FS_DIR, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR,
         BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_INGRESS_TC, BpfNamePath,
@@ -60,12 +61,10 @@ impl State {
 fn pin_maps(ebpf: &mut Ebpf, map_list: &[BpfNamePath]) -> Result<()> {
     for map in map_list {
         if fs::exists(map.path())? {
-            return Err(Error::PinExists { path: map.path() });
+            bail!("pinned object {} already exists", map.path());
         }
         let Some(m) = ebpf.map_mut(map.name()) else {
-            return Err(Error::MapNotFound {
-                name: map.name().to_string(),
-            });
+            bail!("map {} not found", map.name());
         };
         m.pin(map.path())?;
     }
@@ -121,10 +120,10 @@ fn ensure_ingress_program(ebpf: &mut Ebpf) -> Result<()> {
     let ingress: &mut SchedClassifier = ebpf
         .program_mut(BPF_PROGRAM_INGRESS_TC.name())
         .ok_or_else(|| {
-            Error::EbpfProgramError(format!(
+            anyhow!(
                 "failed to get program {}",
                 BPF_PROGRAM_INGRESS_TC.name()
-            ))
+            )
         })?
         .try_into()?;
 
@@ -175,10 +174,10 @@ fn attach_cgroup_connect_bpf_program(ebpf: &mut Ebpf) -> Result<()> {
     let program: &mut CgroupSockAddr = ebpf
         .program_mut(BPF_PROGRAM_CGROUP_CONNECT_V4.name())
         .ok_or_else(|| {
-            Error::EbpfProgramError(format!(
+            anyhow!(
                 "failed to load program {}",
                 BPF_PROGRAM_CGROUP_CONNECT_V4.name()
-            ))
+            )
         })?
         .try_into()?;
     if let Err(e) = program.load()
@@ -192,9 +191,7 @@ fn attach_cgroup_connect_bpf_program(ebpf: &mut Ebpf) -> Result<()> {
 
     let link = program.take_link(link_id)?;
     let link: FdLink = link.try_into().map_err(|e| {
-        Error::Other(format!(
-            "failed to create fdlink from cgroup attachment link: {e}"
-        ))
+        anyhow!("failed to create fdlink from cgroup attachment link: {e}")
     })?;
     link.pin(BPF_LINK_CGROUP_CONNECT_V4_PATH)?;
 

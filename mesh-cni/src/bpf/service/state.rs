@@ -14,7 +14,9 @@ use mesh_cni_ebpf_common::{
 use mesh_cni_service_bpf_controller::{Error as BpfControllerError, ServiceBpfState};
 use tracing::warn;
 
-use crate::{Error, Result, bpf::BpfMap};
+use anyhow::anyhow;
+
+use crate::{Result, bpf::BpfMap};
 
 pub trait ServiceEndpointBpfMap {
     type SKey: std::hash::Hash + std::cmp::Eq + Clone;
@@ -80,8 +82,7 @@ where
     type SKey = SK;
     type EValue = EV;
     fn update(&mut self, key: Self::SKey, value: Vec<&Self::EValue>, id: Id) -> Result<Id> {
-        let new_count =
-            u16::try_from(value.len()).map_err(|e| Error::ConversionError(e.to_string()))?;
+        let new_count = u16::try_from(value.len()).map_err(|e| anyhow!(e.to_string()))?;
 
         let Some(current_service_value) = self.service_cache.get(&key) else {
             return self.insert_new_service(key, value, id);
@@ -128,18 +129,15 @@ where
         value: Vec<&Self::EValue>,
         mut id: Id,
     ) -> Result<Id> {
-        let count =
-            u16::try_from(value.len()).map_err(|e| Error::ConversionError(e.to_string()))?;
+        let count = u16::try_from(value.len()).map_err(|e| anyhow!(e.to_string()))?;
         let service_value = ServiceValue { id, count };
 
         self.service_map.update(key, service_value)?;
         self.service_cache.insert(key, service_value);
 
         for (position, endpoint) in value.iter().enumerate() {
-            let endpoint_key = EndpointKey::new(
-                id,
-                u16::try_from(position).map_err(|e| Error::ConversionError(e.to_string()))?,
-            );
+            let endpoint_key =
+                EndpointKey::new(id, u16::try_from(position).map_err(|e| anyhow!(e.to_string()))?);
 
             self.endpoint_map.update(endpoint_key, **endpoint)?;
             self.endpoint_cache.insert(endpoint_key, **endpoint);
@@ -154,9 +152,8 @@ where
         endpoints: Vec<&Self::EValue>,
     ) -> Result<()> {
         for (position, ep) in endpoints.iter().enumerate() {
-            let position = u16::try_from(position).map_err(|e| {
-                Error::ConversionError(format!("failed to convert position: {}", e))
-            })?;
+            let position = u16::try_from(position)
+                .map_err(|e| anyhow!("failed to convert position: {}", e))?;
             let endpoint_key = EndpointKey::new(service_value.id, position);
             self.endpoint_map.update(endpoint_key, **ep)?;
             self.endpoint_cache.insert(endpoint_key, **ep);

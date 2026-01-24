@@ -6,7 +6,7 @@ use kube::{
 };
 use mesh_cni_crds::v1alpha1::cluster::Cluster;
 use serde::de::DeserializeOwned;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::{Error, Result, context::Context};
 
@@ -25,12 +25,12 @@ pub(crate) async fn reconcile(cluster: Arc<Cluster>, ctx: Arc<Context>) -> Resul
             finalizer::Event::Cleanup(cluster) => cleanup(cluster, ctx).await,
         }
     })
-    .await;
+    .await?;
 
     Ok(Action::requeue(DEFAULT_REQUEUE))
 }
 
-async fn reconcile_cluster(cluster: Arc<Cluster>, ctx: Arc<Context>) -> Result<Action> {
+async fn reconcile_cluster(_cluster: Arc<Cluster>, _ctx: Arc<Context>) -> Result<Action> {
     Ok(Action::requeue(DEFAULT_REQUEUE))
 }
 
@@ -53,6 +53,6 @@ where
     K: DeserializeOwned + Clone + Send + Sync + std::fmt::Debug + 'static,
 {
     let name = resource.name_any();
-    tracing::error!(?error, "reconcile error for Cluster {}", name);
+    error!(?error, "reconcile error for Cluster {}", name);
     Action::requeue(Duration::from_secs(5))
 }

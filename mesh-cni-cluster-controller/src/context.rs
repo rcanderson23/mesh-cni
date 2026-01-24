@@ -8,6 +8,7 @@ use mesh_cni_crds::v1alpha1::cluster::Cluster;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
+#[allow(unused)]
 pub struct Context {
     pub client: Client,
     pub cluster_api: Api<Cluster>,
@@ -16,6 +17,7 @@ pub struct Context {
     pub controllers: Arc<Mutex<BTreeMap<String, ClusterCancellation>>>,
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShutdownState {
     Running,
@@ -28,12 +30,14 @@ pub struct ClusterCancellation {
     shutdown: watch::Receiver<ShutdownState>,
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct ClusterCancellationHandle {
     cancel: CancellationToken,
     shutdown: watch::Sender<ShutdownState>,
 }
 
+#[allow(unused)]
 impl ClusterCancellation {
     pub fn new() -> (Self, ClusterCancellationHandle) {
         let cancel = CancellationToken::new();
@@ -59,6 +63,7 @@ impl ClusterCancellation {
     }
 }
 
+#[allow(unused)]
 impl ClusterCancellationHandle {
     pub fn cancel_token(&self) -> CancellationToken {
         self.cancel.clone()

@@ -3,10 +3,7 @@ use mesh_cni_api::ip::v1::{IpId, ListIpsReply, ListIpsRequest, ip_server::Ip as 
 use mesh_cni_ebpf_common::IdentityId;
 use tonic::{Request, Response, Status};
 
-use crate::{
-    Result,
-    bpf::{BpfMap, ip::state::IpNetworkState},
-};
+use crate::bpf::{BpfMap, ip::state::IpNetworkState};
 
 #[derive(Clone)]
 pub struct Server<IP4, IP6>
@@ -36,7 +33,7 @@ where
     async fn list_ips(
         &self,
         _request: Request<ListIpsRequest>,
-    ) -> Result<Response<ListIpsReply>, Status> {
+    ) -> std::result::Result<Response<ListIpsReply>, Status> {
         let state = self.state.state();
         let ips = state
             .iter()

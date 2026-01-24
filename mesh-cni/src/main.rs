@@ -106,7 +106,7 @@ async fn shutdown_signal() {
     }
 }
 
-fn exit(task: &str, out: Result<Result<()>, JoinError>) {
+fn exit(task: &str, out: std::result::Result<anyhow::Result<()>, JoinError>) {
     match out {
         Ok(Ok(_)) => {
             info!("{task} exited")

@@ -19,6 +19,7 @@ where
     K: Resource + Send + Clone + core::fmt::Debug + DeserializeOwned + Metadata + Sync + 'static,
     <K as Resource>::DynamicType: Default + Eq + Send + DeserializeOwned + core::hash::Hash + Clone,
 {
+    #[allow(dead_code)]
     state: HashMap<String, Store<K>>,
     rx: Option<Receiver<Arc<K>>>,
 }
