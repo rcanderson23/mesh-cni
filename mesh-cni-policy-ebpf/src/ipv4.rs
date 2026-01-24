@@ -23,9 +23,10 @@ pub fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         network_types::ip::IpProto::Tcp => ctx
             .load(EthHdr::LEN + Ipv4Hdr::LEN)
             .map_err(|_| TC_ACT_PIPE)?,
+        // TODO: handle these cases
         network_types::ip::IpProto::Udp => return Ok(TC_ACT_PIPE),
+        network_types::ip::IpProto::Sctp => return Ok(TC_ACT_PIPE),
         _ => {
-            info!(&ctx, "proto found unexpected: {}", ipv4hdr.proto as u8);
             return Ok(TC_ACT_PIPE);
         }
     };

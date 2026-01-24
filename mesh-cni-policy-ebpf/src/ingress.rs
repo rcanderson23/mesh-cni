@@ -11,6 +11,7 @@ pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
         return Ok(TC_ACT_PIPE);
     };
 
+    // TODO: handle ipv6
     if !matches!(ether_type, EtherType::Ipv4) {
         return Ok(TC_ACT_PIPE);
     }

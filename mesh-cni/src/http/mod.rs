@@ -1,5 +1,5 @@
 mod error;
-mod metrics;
+mod readiness;
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -8,14 +8,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Result;
 
-pub async fn serve_metrics(
+pub async fn serve(
     addr: SocketAddr,
     ready: CancellationToken,
     cancel: CancellationToken,
 ) -> Result<()> {
-    let state = Arc::new(metrics::State::new(ready));
+    let state = Arc::new(readiness::State::new(ready));
 
-    metrics::serve(addr, state, cancel).await
+    readiness::serve(addr, state, cancel).await
 }
 
 pub(crate) async fn shutdown(cancel: CancellationToken) {

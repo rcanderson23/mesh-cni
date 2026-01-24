@@ -9,13 +9,14 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     setup_subscriber(None);
     let cancel = tokio_util::sync::CancellationToken::new();
+
     // TODO: implement actual readiness/health checking instead of this hack
     let ready = tokio_util::sync::CancellationToken::new();
     match cli.command {
         mesh_cni::config::Commands::Agent(agent_args) => {
             cni::ensure_cni_preconditions(&agent_args).await?;
 
-            let mut metrics_handle = tokio::spawn(http::serve_metrics(
+            let mut metrics_handle = tokio::spawn(http::serve(
                 agent_args.metrics_address,
                 ready.child_token(),
                 cancel.child_token(),
@@ -41,7 +42,7 @@ async fn main() -> Result<()> {
             info!("Exiting...");
         }
         mesh_cni::config::Commands::Controller(controller_args) => {
-            let mut metrics_handle = tokio::spawn(http::serve_metrics(
+            let mut readiness_handle = tokio::spawn(http::serve(
                 controller_args.metrics_address,
                 ready.child_token(),
                 cancel.child_token(),
@@ -54,12 +55,12 @@ async fn main() -> Result<()> {
             let mut shutdown_handle = tokio::spawn(async move { shutdown_signal().await });
             // watch for shutdown and errors
             tokio::select! {
-                h = &mut metrics_handle => exit("metrics", h),
+                h = &mut readiness_handle => exit("metrics", h),
                 h = &mut controller_handle => exit("controller", h),
                 _ = &mut shutdown_handle => {
                         cancel.cancel();
-                        let (metrics, agent) = tokio::join!(metrics_handle, controller_handle);
-                        if let Err(m) = metrics {
+                        let (readiness, agent) = tokio::join!(readiness_handle, controller_handle);
+                        if let Err(m) = readiness {
                             error!("metrics exited with error: {}", m.to_string());
                         }
                         if let Err(s) = agent {

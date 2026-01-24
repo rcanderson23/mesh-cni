@@ -29,14 +29,6 @@ impl State {
             Readiness::NotReady
         }
     }
-    pub fn metrics(&self) -> String {
-        let mut buffer = String::new();
-        let registry = &*crate::metrics::REGISTRY.read().unwrap();
-        match prometheus_client::encoding::text::encode(&mut buffer, registry) {
-            Ok(_) => buffer,
-            Err(_) => "".into(),
-        }
-    }
 }
 
 pub(crate) async fn serve(
@@ -56,13 +48,8 @@ pub(crate) async fn serve(
 
 pub fn router(state: Arc<State>) -> Result<Router> {
     Ok(Router::new()
-        .route("/metrics", get(metrics))
         .route("/readyz", get(readyz))
         .with_state(state))
-}
-
-async fn metrics(AxumState(handler): AxumState<Arc<State>>) -> String {
-    handler.metrics()
 }
 
 async fn readyz(AxumState(handler): AxumState<Arc<State>>) -> Readiness {
