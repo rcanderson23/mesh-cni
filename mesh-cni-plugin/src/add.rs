@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mesh_cni_api::bpf::v1::{AddPodReply, AddPodRequest, bpf_client::BpfClient};
+use mesh_cni_api::cni::v1::{AddPodReply, AddPodRequest, cni_client::CniClient};
 use serde::Deserialize;
 use tracing::{error, info};
 
@@ -127,7 +127,7 @@ pub fn add(args: &Args, input: Input) -> Response {
 
 async fn request(req: AddPodRequest) -> Result<AddPodReply, Error> {
     let path = "unix:///var/run/mesh/mesh.sock";
-    let mut client = BpfClient::connect(path).await?;
+    let mut client = CniClient::connect(path).await?;
     let resp = client.add_pod(req).await?;
     Ok(resp.into_inner())
 }

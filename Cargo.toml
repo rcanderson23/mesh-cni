@@ -75,6 +75,7 @@ kube = { version = "2.0.1", default-features = false, features = [
 memoffset = { version = "0.9.1" }
 netns-rs = "0.1.0"
 network-types = { version = "0.1.0" }
+nix = { version = "0.31.1" }
 prometheus-client = { version = "0.24.0" }
 rand = { version = "0.9.2" }
 opentelemetry = { version = "0.31", features = ["trace"] }

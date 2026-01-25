@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package grpc.bpf.v1;
+package grpc.cni.v1;
 
 import "cni/v1/types.proto";
 
-service Bpf {
+service Cni {
     rpc AddPod(AddPodRequest) returns (AddPodReply) {}
     rpc DeletePod(DeletePodRequest) returns (DeletePodReply) {}
 }

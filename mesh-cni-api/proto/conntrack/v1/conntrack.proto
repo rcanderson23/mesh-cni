@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package grpc.conntrack.v1;
+
+service Conntrack {
+    rpc GetConntrack(GetConntrackRequest) returns (GetConntrackReply) {}
+}
+
+message GetConntrackReply {
+  repeated Connection connections = 1;
+}
+
+message GetConntrackRequest {}
+
+message Connection {
+  string src_ip = 1;
+  uint32 src_port  = 2;
+  string dst_ip = 3;
+  uint32 dst_port  = 4;
+  string proto = 5;
+}
+

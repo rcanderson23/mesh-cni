@@ -1,6 +1,6 @@
 use std::{fs, io::ErrorKind, path::PathBuf};
 
-use mesh_cni_api::bpf::v1::bpf_server::BpfServer;
+use mesh_cni_api::cni::v1::cni_server::CniServer;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
 use tokio_util::sync::CancellationToken;
@@ -35,14 +35,19 @@ pub async fn start(
     // TODO: fix id
     let service_server = bpf::service::run(kube_client.clone(), 0, cancel.clone()).await?;
 
+    info!("initializing conntrack");
+    // TODO: fix id
+    let conntrack_server = bpf::conntrack::run(cancel.clone()).await?;
+
     info!("initializing bpf server");
-    let bpf_server = BpfServer::new(loader);
+    let cni_server = CniServer::new(loader);
 
     let mut routes = RoutesBuilder::default();
     let routes = routes
-        .add_service(bpf_server)
+        .add_service(cni_server)
         .add_service(ip_server)
-        .add_service(service_server);
+        .add_service(service_server)
+        .add_service(conntrack_server);
     let routes = routes.to_owned().routes();
     tokio::spawn(serve(args.agent_socket_path, routes, cancel.child_token()));
 

@@ -5,8 +5,8 @@ use aya::programs::{
     links::{FdLink, LinkError, PinnedLink},
     tc,
 };
-use mesh_cni_api::bpf::v1::{
-    AddPodReply, AddPodRequest, DeletePodReply, DeletePodRequest, bpf_server::Bpf as BpfApi,
+use mesh_cni_api::cni::v1::{
+    AddPodReply, AddPodRequest, DeletePodReply, DeletePodRequest, cni_server::Cni as CniApi,
 };
 use tonic::{Code, Request, Response, Status};
 use tracing::{error, info};
@@ -26,7 +26,7 @@ pub struct LoaderState;
 // Spec says there SHOULD be a DEL call in between ADD calls so we need
 // to try to clean up on failed attach and pin calls
 #[tonic::async_trait]
-impl BpfApi for LoaderState {
+impl CniApi for LoaderState {
     async fn add_pod(
         &self,
         request: Request<AddPodRequest>,

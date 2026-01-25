@@ -1,4 +1,4 @@
-use mesh_cni_api::bpf::v1::{DeletePodReply, DeletePodRequest, bpf_client::BpfClient};
+use mesh_cni_api::cni::v1::{DeletePodReply, DeletePodRequest, cni_client::CniClient};
 use serde::Deserialize;
 use tracing::{error, info};
 
@@ -87,7 +87,7 @@ pub fn delete(args: &Args, input: Input) -> Response {
 
 async fn request(req: DeletePodRequest) -> Result<DeletePodReply, Error> {
     let path = "unix:///var/run/mesh/mesh.sock";
-    let mut client = BpfClient::connect(path).await?;
+    let mut client = CniClient::connect(path).await?;
     let resp = client.delete_pod(req).await?;
     Ok(resp.into_inner())
 }

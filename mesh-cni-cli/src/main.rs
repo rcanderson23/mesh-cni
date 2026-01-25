@@ -1,5 +1,6 @@
 mod cli;
 mod client;
+mod conntrack;
 mod ip;
 mod service;
 
@@ -14,6 +15,9 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         crate::cli::Commands::Ip(ip_commands) => ip::run(ip_commands).await?,
         crate::cli::Commands::Service(service_commands) => service::run(service_commands).await?,
+        crate::cli::Commands::Conntrack(conntrack_commands) => {
+            conntrack::run(conntrack_commands).await?
+        }
     };
     Ok(())
 }

@@ -1,9 +1,4 @@
 pub mod tables;
-pub mod bpf {
-    pub mod v1 {
-        tonic::include_proto!("grpc.bpf.v1");
-    }
-}
 
 pub mod cni {
     pub mod v1 {
@@ -20,5 +15,11 @@ pub mod ip {
 pub mod service {
     pub mod v1 {
         tonic::include_proto!("grpc.service.v1");
+    }
+}
+
+pub mod conntrack {
+    pub mod v1 {
+        tonic::include_proto!("grpc.conntrack.v1");
     }
 }

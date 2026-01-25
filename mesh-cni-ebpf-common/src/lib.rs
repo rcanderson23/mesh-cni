@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod service;
+pub mod conntrack;
 
 use core::{
     fmt::Display,

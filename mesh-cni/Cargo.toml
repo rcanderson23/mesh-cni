@@ -36,6 +36,7 @@ k8s-openapi = { workspace = true, features = ["v1_34"] }
 kube = { workspace = true}
 netns-rs = { workspace = true }
 network-types = { workspace = true }
+nix = { workspace = true, features = ["time"] }
 prometheus-client = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }

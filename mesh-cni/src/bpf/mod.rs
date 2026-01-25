@@ -1,4 +1,5 @@
 pub mod cni;
+pub mod conntrack;
 pub mod ip;
 pub mod loader;
 pub mod service;
@@ -25,6 +26,7 @@ pub type IdentityMapV6 = LpmTrie<MapData, u128, IdentityId>;
 
 pub const BPF_MAP_IDENTITY_V4: BpfNamePath = BpfNamePath::Map("identity_v4");
 pub const BPF_MAP_IDENTITY_V6: BpfNamePath = BpfNamePath::Map("identity_v6");
+pub const BPF_MAP_CONNTRACK_V4: BpfNamePath = BpfNamePath::Map("conntrack_v4");
 pub const BPF_MAP_SERVICES_V4: BpfNamePath = BpfNamePath::Map("services_v4");
 pub const BPF_MAP_SERVICES_V6: BpfNamePath = BpfNamePath::Map("services_v6");
 pub const BPF_MAP_ENDPOINTS_V4: BpfNamePath = BpfNamePath::Map("endpoints_v4");
@@ -35,7 +37,11 @@ pub const BPF_MESH_MAPS_DIR: &str = "/sys/fs/bpf/mesh/maps";
 pub const BPF_MESH_PROG_DIR: &str = "/sys/fs/bpf/mesh/programs";
 pub const BPF_MESH_LINKS_DIR: &str = "/sys/fs/bpf/mesh/links";
 
-pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 2] = [BPF_MAP_IDENTITY_V4, BPF_MAP_IDENTITY_V6];
+pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 3] = [
+    BPF_MAP_IDENTITY_V4,
+    BPF_MAP_IDENTITY_V6,
+    BPF_MAP_CONNTRACK_V4,
+];
 
 pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 4] = [
     BPF_MAP_SERVICES_V4,
