@@ -1,13 +1,10 @@
-mod api;
-pub use api::Server as BpfServiceServer;
-
 mod state;
+
 use std::time::Duration;
 
 use aya::maps::{HashMap, Map, MapData};
 use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
 use kube::{Api, Client};
-use mesh_cni_api::service::v1::service_server::ServiceServer;
 use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
 };
@@ -15,53 +12,34 @@ use mesh_cni_k8s_utils::create_store_and_subscriber;
 use mesh_cni_service_bpf_controller::{
     start_bpf_meshendpoint_controller, start_bpf_service_controller,
 };
-pub use state::{ServiceEndpointBpfMap, ServiceEndpointState as BpfServiceEndpointState};
+pub use state::{ServiceEndpoint, ServiceEndpointBpfMap, ServiceEndpointState};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
     Result,
-    bpf::{
-        BPF_MAP_ENDPOINTS_V4, BPF_MAP_ENDPOINTS_V6, BPF_MAP_SERVICES_V4, BPF_MAP_SERVICES_V6,
-        service::{api::Server, state::ServiceEndpoint},
-    },
-    kubernetes::ClusterId,
+    bpf::{BPF_MAP_ENDPOINTS_V4, BPF_MAP_ENDPOINTS_V6, BPF_MAP_SERVICES_V4, BPF_MAP_SERVICES_V6},
 };
-
-type ServiceEndpointV4 = ServiceEndpoint<
-    HashMap<MapData, ServiceKeyV4, ServiceValue>,
-    HashMap<MapData, EndpointKey, EndpointValueV4>,
-    ServiceKeyV4,
-    EndpointValueV4,
->;
-type ServiceEndpointV6 = ServiceEndpoint<
-    HashMap<MapData, ServiceKeyV6, ServiceValue>,
-    HashMap<MapData, EndpointKey, EndpointValueV6>,
-    ServiceKeyV6,
-    EndpointValueV6,
->;
 type ServiceMapV4 = HashMap<MapData, ServiceKeyV4, ServiceValue>;
 type ServiceMapV6 = HashMap<MapData, ServiceKeyV6, ServiceValue>;
 type EndpointMapV4 = HashMap<MapData, EndpointKey, EndpointValueV4>;
 type EndpointMapV6 = HashMap<MapData, EndpointKey, EndpointValueV6>;
 
-pub async fn run(
+pub async fn run<SE4, SE6>(
     kube_client: Client,
-    _cluster_id: ClusterId,
+    service_bpf_state: ServiceEndpointState<SE4, SE6>,
     cancel: CancellationToken,
-) -> Result<ServiceServer<Server<ServiceEndpointV4, ServiceEndpointV6>>> {
-    let (service_map_v4, service_map_v6) = load_service_maps()?;
-    let (endpoint_map_v4, endpoint_map_v6) = load_endpoint_maps()?;
-
-    info!("loaded bpf maps");
-
-    let service_endpoint_v4 = ServiceEndpoint::new(service_map_v4, endpoint_map_v4);
-    let service_endpoint_v6 = ServiceEndpoint::new(service_map_v6, endpoint_map_v6);
-
-    let state = state::ServiceEndpointState::new(service_endpoint_v4, service_endpoint_v6);
-    let server = Server::new(state.clone());
-    let server = mesh_cni_api::service::v1::service_server::ServiceServer::new(server);
-
+) -> Result<()>
+where
+    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>
+        + Send
+        + Sync
+        + 'static,
+    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>
+        + Send
+        + Sync
+        + 'static,
+{
     let service_api: Api<Service> = Api::all(kube_client.clone());
     let (service_state, service_subscriber) =
         create_store_and_subscriber(service_api, Some(Duration::from_secs(30))).await?;
@@ -81,7 +59,7 @@ pub async fn run(
         endpoint_slice_state.clone(),
         endpoint_slice_subscriber,
         mesh_endpoint_state.clone(),
-        state.clone(),
+        service_bpf_state.clone(),
         cancel.clone(),
     );
 
@@ -90,16 +68,16 @@ pub async fn run(
         service_state,
         endpoint_slice_state,
         mesh_endpoint_state,
-        state,
+        service_bpf_state,
         cancel.clone(),
     );
     tokio::spawn(service_controller);
     tokio::spawn(mesh_endpoint_controller);
 
-    Ok(server)
+    Ok(())
 }
 
-fn load_service_maps() -> Result<(ServiceMapV4, ServiceMapV6)> {
+pub fn load_service_maps() -> Result<(ServiceMapV4, ServiceMapV6)> {
     info!("loading v4 service map");
     let ipv4_map = MapData::from_pin(BPF_MAP_SERVICES_V4.path())?;
     let ipv4_map = Map::HashMap(ipv4_map);
@@ -113,7 +91,7 @@ fn load_service_maps() -> Result<(ServiceMapV4, ServiceMapV6)> {
     Ok((ipv4_map, ipv6_map))
 }
 
-fn load_endpoint_maps() -> Result<(EndpointMapV4, EndpointMapV6)> {
+pub fn load_endpoint_maps() -> Result<(EndpointMapV4, EndpointMapV6)> {
     info!("loading v4 endpoint map");
     let ipv4_map = MapData::from_pin(BPF_MAP_ENDPOINTS_V4.path())?;
     let ipv4_map = Map::HashMap(ipv4_map);

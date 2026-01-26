@@ -2,7 +2,8 @@ use std::net::Ipv4Addr;
 
 use anyhow::bail;
 use mesh_cni_api::conntrack::v1::{
-    Connection, GetConntrackReply, GetConntrackRequest, conntrack_server::Conntrack as ConntrackApi,
+    Connection, GetConntrackReply, GetConntrackRequest,
+    conntrack_server::{Conntrack as ConntrackApi, ConntrackServer},
 };
 use mesh_cni_ebpf_common::conntrack::ConntrackKeyV4;
 use tonic::{Code, Request, Response, Status};
@@ -10,6 +11,11 @@ use tracing::{error, info};
 
 use crate::{Result, bpf::conntrack::load_map};
 
+pub fn server() -> ConntrackServer<Conntrack> {
+    ConntrackServer::new(Conntrack)
+}
+
+#[derive(Clone)]
 pub struct Conntrack;
 
 #[tonic::async_trait]

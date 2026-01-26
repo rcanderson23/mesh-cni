@@ -1,4 +1,3 @@
-pub mod cni;
 pub mod conntrack;
 pub mod ip;
 pub mod loader;
@@ -146,7 +145,6 @@ where
 impl<T, V> BpfMap for LpmTrie<T, u32, V>
 where
     T: BorrowMut<MapData>,
-    // K: Pod + Eq + Hash + From<LpmKey<>>,
     V: Pod,
 {
     type Key = LpmKey<u32>;
@@ -175,6 +173,7 @@ where
         Ok(map)
     }
 }
+
 impl<T, V> BpfMap for LpmTrie<T, u128, V>
 where
     T: BorrowMut<MapData>,

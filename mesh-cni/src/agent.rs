@@ -1,16 +1,19 @@
-use std::{fs, io::ErrorKind, path::PathBuf};
-
+use anyhow::bail;
 use mesh_cni_api::cni::v1::cni_server::CniServer;
-use tokio::net::UnixListener;
-use tokio_stream::wrappers::UnixListenerStream;
 use tokio_util::sync::CancellationToken;
-use tonic::{
-    service::{Routes, RoutesBuilder},
-    transport::Server,
-};
-use tracing::info;
+use tonic::service::RoutesBuilder;
+use tracing::{error, info};
 
-use crate::{Result, bpf, config::AgentArgs, http::shutdown, kubernetes};
+use crate::{
+    Result,
+    bpf::{
+        self,
+        ip::IpNetworkState,
+        service::{ServiceEndpoint, ServiceEndpointState},
+    },
+    config::AgentArgs,
+    http, kubernetes,
+};
 
 pub async fn start(
     args: AgentArgs,
@@ -24,23 +27,39 @@ pub async fn start(
 
     info!("initializing bpf");
     bpf::loader::init_bpf()?;
-    let loader = bpf::cni::LoaderState;
 
-    info!("initializing ip server");
-    // TODO: fix id
-    let ip_server =
-        bpf::ip::run(kube_client.clone(), args.node_name.clone(), cancel.clone()).await?;
-
-    info!("initializing service server");
-    // TODO: fix id
-    let service_server = bpf::service::run(kube_client.clone(), 0, cancel.clone()).await?;
-
-    info!("initializing conntrack");
-    // TODO: fix id
-    let conntrack_server = bpf::conntrack::run(cancel.clone()).await?;
-
-    info!("initializing bpf server");
+    info!("starting cni service");
+    let loader = http::grpc::cni::LoaderState;
     let cni_server = CniServer::new(loader);
+
+    info!("loading ip maps");
+    let (ipv4_map, ipv6_map) = bpf::ip::load_maps()?;
+    let state = IpNetworkState::new(ipv4_map, ipv6_map);
+
+    info!("starting ip service");
+    bpf::ip::run(
+        kube_client.clone(),
+        args.node_name.clone(),
+        state.clone(),
+        cancel.clone(),
+    )
+    .await?;
+    let ip_server = http::grpc::ip::server(state);
+
+    info!("loading service/endpoint bpf maps");
+    let (service_map_v4, service_map_v6) = bpf::service::load_service_maps()?;
+    let (endpoint_map_v4, endpoint_map_v6) = bpf::service::load_endpoint_maps()?;
+
+    info!("starting kube service service");
+    let service_endpoint_v4 = ServiceEndpoint::new(service_map_v4, endpoint_map_v4);
+    let service_endpoint_v6 = ServiceEndpoint::new(service_map_v6, endpoint_map_v6);
+    let state = ServiceEndpointState::new(service_endpoint_v4, service_endpoint_v6);
+    bpf::service::run(kube_client.clone(), state.clone(), cancel.clone()).await?;
+    let service_server = http::grpc::service::server(state);
+
+    info!("starting conntrack cleanup background process");
+    let cleanup_handle = tokio::spawn(bpf::conntrack::run_cleanup(cancel.clone()));
+    let conntrack_server = http::grpc::conntrack::server();
 
     let mut routes = RoutesBuilder::default();
     let routes = routes
@@ -49,41 +68,51 @@ pub async fn start(
         .add_service(service_server)
         .add_service(conntrack_server);
     let routes = routes.to_owned().routes();
-    tokio::spawn(serve(args.agent_socket_path, routes, cancel.child_token()));
+
+    info!("starting gprc server");
+    let grpc_handle = tokio::spawn(http::grpc::serve(
+        args.agent_socket_path,
+        routes,
+        cancel.child_token(),
+    ));
 
     // TODO: move to something less brittle
     info!("removing node taint");
     kubernetes::node::remove_startup_taint(kube_client, args.node_name).await?;
+
+    // TODO: do something else than a cancellation token for readiness probe
     ready.cancel();
+
     // TODO: add graceful shutdown
     tokio::select! {
         _ = cancel.cancelled() => {},
+        h = grpc_handle => {
+            match h {
+                Ok(Ok(_)) => info!("grpc task exited gracefully"),
+                Ok(Err(e)) => {
+                    error!(%e, "grpc exited with error");
+                    return Err(e);
+                },
+                Err(e) => {
+                    error!(%e);
+                    bail!("failed to join tasks");
+                },
+            }
+        },
+        h = cleanup_handle => {
+            match h {
+                Ok(Ok(_)) => info!("cleanup exited gracefully"),
+                Ok(Err(e)) => {
+                    error!(%e, "cleanup exited with error");
+                    return Err(e);
+                },
+                Err(e) => {
+                    error!(%e);
+                    bail!("failed to join tasks");
+                },
+            }
+
+        }
     }
-    Ok(())
-}
-
-pub(crate) async fn serve(path: PathBuf, routes: Routes, cancel: CancellationToken) -> Result<()> {
-    if let Err(e) = fs::remove_file(&path)
-        && e.kind() != ErrorKind::NotFound
-    {
-        return Err(e.into());
-    }
-    let Some(parent) = path.parent() else {
-        return Err(std::io::Error::new(
-            ErrorKind::NotFound,
-            format!("parent of path {} could not resolve", path.display()),
-        )
-        .into());
-    };
-    fs::create_dir_all(parent)?;
-    let listener = UnixListener::bind(&path)?;
-
-    let stream = UnixListenerStream::new(listener);
-
-    Server::builder()
-        .add_routes(routes)
-        .serve_with_incoming_shutdown(stream, shutdown(cancel))
-        .await?;
-
     Ok(())
 }

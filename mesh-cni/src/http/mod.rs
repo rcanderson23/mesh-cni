@@ -1,4 +1,5 @@
 mod error;
+pub mod grpc;
 mod readiness;
 
 use std::{net::SocketAddr, sync::Arc};

@@ -4,6 +4,7 @@ use std::{
 };
 
 use ahash::{HashMap, HashMapExt};
+use anyhow::anyhow;
 use mesh_cni_ebpf_common::{
     Id,
     service::{
@@ -13,8 +14,6 @@ use mesh_cni_ebpf_common::{
 };
 use mesh_cni_service_bpf_controller::{Error as BpfControllerError, ServiceBpfState};
 use tracing::warn;
-
-use anyhow::anyhow;
 
 use crate::{Result, bpf::BpfMap};
 
@@ -62,6 +61,7 @@ where
     SK: std::hash::Hash + std::cmp::Eq + Clone + Copy,
     EV: Clone + std::cmp::PartialEq + Copy,
 {
+    // TODO: create cached maps from bpf maps?
     pub fn new(service_map: S, endpoint_map: E) -> Self {
         Self {
             service_cache: ahash::HashMap::default(),
@@ -136,8 +136,10 @@ where
         self.service_cache.insert(key, service_value);
 
         for (position, endpoint) in value.iter().enumerate() {
-            let endpoint_key =
-                EndpointKey::new(id, u16::try_from(position).map_err(|e| anyhow!(e.to_string()))?);
+            let endpoint_key = EndpointKey::new(
+                id,
+                u16::try_from(position).map_err(|e| anyhow!(e.to_string()))?,
+            );
 
             self.endpoint_map.update(endpoint_key, **endpoint)?;
             self.endpoint_cache.insert(endpoint_key, **endpoint);

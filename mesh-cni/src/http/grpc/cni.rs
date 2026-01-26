@@ -16,10 +16,10 @@ use crate::{
     bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_INGRESS_TC},
 };
 
+pub struct LoaderState;
+
 const _NET_NS_DIR: &str = "/var/run/mesh/netns";
 const MESH_INGRESS_LINK_PREFIX: &str = "mesh_cni_ingress_";
-
-pub struct LoaderState;
 
 // TODO: this only handles chained creation correctly
 //

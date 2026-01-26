@@ -1,35 +1,20 @@
-pub mod api;
-
 use std::time::Duration;
 
 use aya::maps::{HashMap, Map, MapData};
-use mesh_cni_api::conntrack::v1::conntrack_server::ConntrackServer;
 use mesh_cni_ebpf_common::conntrack::{ConntrackKeyV4, ConntrackValue};
 use nix::time::{ClockId, clock_gettime};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use crate::{
-    Result,
-    bpf::{BPF_MAP_CONNTRACK_V4, conntrack::api::Conntrack},
-};
+use crate::{Result, bpf::BPF_MAP_CONNTRACK_V4};
 
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(300);
 const CT_TIMEOUT_TCP_NS: u64 = 60 * 60 * 12 * 1_000_000_000;
 const CT_TIMEOUT_UDP_NS: u64 = 60 * 1_000_000_000;
 
-pub async fn run(cancel: CancellationToken) -> Result<ConntrackServer<Conntrack>> {
-    info!("starting bpf conntrack cleanup task");
-    tokio::spawn(run_cleanup(cancel.child_token()));
-
-    let state = api::Conntrack;
-    let server = ConntrackServer::new(state);
-
-    Ok(server)
-}
-
 pub async fn run_cleanup(cancel: CancellationToken) -> Result<()> {
+    info!("starting bpf conntrack cleanup task");
     let mut map = load_map()?;
     let mut ticker = interval(CLEANUP_INTERVAL);
 

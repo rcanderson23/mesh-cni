@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
         mesh_cni::config::Commands::Agent(agent_args) => {
             cni::ensure_cni_preconditions(&agent_args).await?;
 
-            let mut metrics_handle = tokio::spawn(http::serve(
+            let mut readiness_handle = tokio::spawn(http::serve(
                 agent_args.metrics_address,
                 ready.child_token(),
                 cancel.child_token(),
@@ -26,11 +26,11 @@ async fn main() -> Result<()> {
             let mut shutdown_handle = tokio::spawn(async move { shutdown_signal().await });
             // watch for shutdown and errors
             tokio::select! {
-                h = &mut metrics_handle => exit("metrics", h),
+                h = &mut readiness_handle => exit("metrics", h),
                 h = &mut agent_handle => exit("agent", h),
                 _ = &mut shutdown_handle => {
                         cancel.cancel();
-                        let (metrics, agent) = tokio::join!(metrics_handle, agent_handle);
+                        let (metrics, agent) = tokio::join!(readiness_handle, agent_handle);
                         if let Err(m) = metrics {
                             error!("metrics exited with error: {}", m.to_string());
                         }

@@ -1,9 +1,22 @@
 use aya::maps::lpm_trie::Key as LpmKey;
-use mesh_cni_api::ip::v1::{IpId, ListIpsReply, ListIpsRequest, ip_server::Ip as IpApi};
+use mesh_cni_api::ip::v1::{
+    IpId, ListIpsReply, ListIpsRequest,
+    ip_server::{Ip as IpApi, IpServer},
+};
 use mesh_cni_ebpf_common::IdentityId;
 use tonic::{Request, Response, Status};
+use tracing::info;
 
-use crate::bpf::{BpfMap, ip::state::IpNetworkState};
+use crate::bpf::{BpfMap, ip::IpNetworkState};
+
+pub fn server<IP4, IP6>(state: IpNetworkState<IP4, IP6>) -> IpServer<Server<IP4, IP6>>
+where
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId>,
+{
+    info!("creating new network state");
+    mesh_cni_api::ip::v1::ip_server::IpServer::new(Server::new(state))
+}
 
 #[derive(Clone)]
 pub struct Server<IP4, IP6>
@@ -16,8 +29,8 @@ where
 
 impl<IP4, IP6> Server<IP4, IP6>
 where
-    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId> + Send + 'static,
-    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId> + Send + 'static,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId>,
 {
     pub fn new(state: IpNetworkState<IP4, IP6>) -> Self {
         Self { state }
@@ -27,8 +40,8 @@ where
 #[tonic::async_trait]
 impl<IP4, IP6> IpApi for Server<IP4, IP6>
 where
-    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId> + Send + 'static,
-    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId> + Send + 'static,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId> + Send + Sync + 'static,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId> + Send + Sync + 'static,
 {
     async fn list_ips(
         &self,
