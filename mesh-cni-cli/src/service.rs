@@ -18,7 +18,7 @@ async fn list(mut client: ServiceClient<Channel>, from_map: bool) -> anyhow::Res
         .await?;
     let services = response.into_inner().services;
 
-    let table = Table::new(services).with(Style::modern()).to_string();
+    let table = Table::new(services).with(Style::empty()).to_string();
     println!("{table}");
     Ok(())
 }

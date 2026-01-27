@@ -18,7 +18,7 @@ async fn list(mut client: ConntrackClient<Channel>) -> anyhow::Result<()> {
         .await?;
     let connections = response.into_inner().connections;
 
-    let table = Table::new(connections).with(Style::modern()).to_string();
+    let table = Table::new(connections).with(Style::empty()).to_string();
     println!("{table}");
     Ok(())
 }

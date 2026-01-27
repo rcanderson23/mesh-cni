@@ -4,8 +4,9 @@ use mesh_cni_api::service::v1::{
     ListServicesReply, ListServicesRequest, ServiceWithEndpoints,
     service_server::{Service as ServiceApi, ServiceServer},
 };
-use mesh_cni_ebpf_common::service::{
-    EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6,
+use mesh_cni_ebpf_common::{
+    KubeProtocol,
+    service::{EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6},
 };
 use tonic::{Request, Response, Status};
 use tracing::info;
@@ -68,7 +69,9 @@ where
                     let service_ip = Ipv4Addr::from_bits(service_key_v4.ip);
                     let service_port = service_key_v4.port;
                     let service_endpoint = format!("{}:{}", service_ip, service_port);
-                    let protocol = service_key_v4.protocol.to_string();
+                    let protocol = KubeProtocol::try_from(service_key_v4.protocol as u32)
+                        .map_err(|e| Status::new(tonic::Code::Internal, e))?
+                        .to_string();
                     let endpoints = v
                         .iter()
                         .filter_map(|e| {
@@ -86,7 +89,9 @@ where
                     let service_ip = Ipv6Addr::from_bits(service_key_v6.ip);
                     let service_port = service_key_v6.port;
                     let service_endpoint = format!("{}:{}", service_ip, service_port);
-                    let protocol = service_key_v6.protocol.to_string();
+                    let protocol = KubeProtocol::try_from(service_key_v6.protocol as u32)
+                        .map_err(|e| Status::new(tonic::Code::Internal, e))?
+                        .to_string();
                     let endpoints = v
                         .iter()
                         .filter_map(|e| {

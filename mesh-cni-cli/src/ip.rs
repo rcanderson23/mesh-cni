@@ -18,7 +18,7 @@ async fn list(mut client: IpClient<Channel>) -> anyhow::Result<()> {
         .await?;
     let ips = response.into_inner().ips;
 
-    let table = Table::new(ips).with(Style::modern()).to_string();
+    let table = Table::new(ips).with(Style::empty()).to_string();
     println!("{table}");
     Ok(())
 }
