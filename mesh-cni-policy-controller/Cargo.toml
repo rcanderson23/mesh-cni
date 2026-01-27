@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
+mesh-cni-crds = { path = "../mesh-cni-crds" }
 
 ahash = { workspace = true }
 futures = { workspace = true }
@@ -17,8 +18,10 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 
-[build-dependencies]
-
 [lib]
 name = "mesh_cni_policy_controller"
 path = "src/lib.rs"
+
+[dev-dependencies]
+k8s-openapi = { workspace = true, features = ["v1_34"] }
+

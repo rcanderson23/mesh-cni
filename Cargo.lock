@@ -1895,6 +1895,7 @@ dependencies = [
  "futures",
  "k8s-openapi",
  "kube",
+ "mesh-cni-crds",
  "mesh-cni-k8s-utils",
  "serde",
  "thiserror 2.0.17",
