@@ -60,3 +60,27 @@ impl Tabled for crate::conntrack::v1::Connection {
         ]
     }
 }
+
+impl Tabled for crate::policy::v1::PolicySet {
+    const LENGTH: usize = 5;
+
+    fn fields(&self) -> Vec<Cow<'_, str>> {
+        vec![
+            Cow::Owned(self.src_id.to_string()),
+            Cow::Owned(self.dst_id.to_string()),
+            Cow::Owned(self.dst_port.to_string()),
+            Cow::Borrowed(&self.proto),
+            Cow::Borrowed(&self.action),
+        ]
+    }
+
+    fn headers() -> Vec<Cow<'static, str>> {
+        vec![
+            Cow::Borrowed("SOURCE ID"),
+            Cow::Borrowed("DESTINATION ID"),
+            Cow::Borrowed("DESTINATION PORT"),
+            Cow::Borrowed("PROTO"),
+            Cow::Borrowed("ACTION"),
+        ]
+    }
+}

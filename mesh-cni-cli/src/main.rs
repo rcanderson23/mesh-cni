@@ -2,6 +2,7 @@ mod cli;
 mod client;
 mod conntrack;
 mod ip;
+mod policy;
 mod service;
 
 use clap::Parser;
@@ -18,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
         crate::cli::Commands::Conntrack(conntrack_commands) => {
             conntrack::run(conntrack_commands).await?
         }
+        crate::cli::Commands::Policy(policy_commands) => policy::run(policy_commands).await?,
     };
     Ok(())
 }

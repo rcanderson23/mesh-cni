@@ -16,4 +16,7 @@ pub enum Error {
 
     #[error("utils error: {0}")]
     UtilsError(#[from] mesh_cni_k8s_utils::Error),
+
+    #[error("bpf error: {0}")]
+    BpfError(String),
 }

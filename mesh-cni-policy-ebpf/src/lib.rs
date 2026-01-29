@@ -5,11 +5,12 @@ mod ipv4;
 
 use aya_ebpf::{
     macros::map,
-    maps::{LpmTrie, LruHashMap, lpm_trie::Key as LpmKey},
+    maps::{HashMap, LpmTrie, LruHashMap, lpm_trie::Key as LpmKey},
 };
 use mesh_cni_ebpf_common::{
     IdentityId,
     conntrack::{ConntrackKeyV4, ConntrackValue},
+    policy::{PolicyKey, PolicyValue},
 };
 
 #[map(name = "identity_v4")]
@@ -21,6 +22,9 @@ static IDENTITY_V6: LpmTrie<u128, IdentityId> = LpmTrie::with_max_entries(65535,
 #[map(name = "conntrack_v4")]
 static CONNTRACK_V4: LruHashMap<ConntrackKeyV4, ConntrackValue> =
     LruHashMap::with_max_entries(65535, 0);
+
+#[map(name = "policy")]
+static POLICY: HashMap<PolicyKey, PolicyValue> = HashMap::with_max_entries(65535, 0);
 
 #[inline]
 fn id_v4(ip: LpmKey<u32>) -> Option<IdentityId> {

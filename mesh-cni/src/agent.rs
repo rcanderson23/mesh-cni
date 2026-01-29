@@ -9,6 +9,7 @@ use crate::{
     bpf::{
         self,
         ip::IpNetworkState,
+        policy::{PolicyBpfState, PolicyState},
         service::{ServiceEndpoint, ServiceEndpointState},
     },
     config::AgentArgs,
@@ -57,6 +58,12 @@ pub async fn start(
     bpf::service::run(kube_client.clone(), state.clone(), cancel.clone()).await?;
     let service_server = http::grpc::service::server(state);
 
+    info!("starting policy service");
+    let policy_state = PolicyBpfState::try_new()?;
+    let policy_state = PolicyState::new(policy_state);
+    bpf::policy::run(kube_client.clone(), policy_state.clone(), cancel.clone()).await?;
+    let policy_server = http::grpc::policy::server(policy_state);
+
     info!("starting conntrack cleanup background process");
     let cleanup_handle = tokio::spawn(bpf::conntrack::run_cleanup(cancel.clone()));
     let conntrack_server = http::grpc::conntrack::server();
@@ -66,6 +73,7 @@ pub async fn start(
         .add_service(cni_server)
         .add_service(ip_server)
         .add_service(service_server)
+        .add_service(policy_server)
         .add_service(conntrack_server);
     let routes = routes.to_owned().routes();
 

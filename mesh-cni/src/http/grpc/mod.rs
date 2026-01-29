@@ -1,6 +1,7 @@
 pub mod cni;
 pub mod conntrack;
 pub mod ip;
+pub mod policy;
 pub mod service;
 
 use std::{fs, io::ErrorKind, path::PathBuf};

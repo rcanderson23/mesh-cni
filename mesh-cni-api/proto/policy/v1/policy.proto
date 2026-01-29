@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package grpc.policy.v1;
+
+service Policy {
+    rpc ListPolicy(ListPolicyRequest) returns (ListPolicyReply) {}
+}
+
+message ListPolicyReply {
+  repeated PolicySet policies = 1;
+}
+
+message ListPolicyRequest {}
+
+message PolicySet {
+  uint32 src_id = 1;
+  uint32 dst_id = 2;
+  uint32 dst_port  = 3;
+  string proto = 4;
+  string action = 5;
+}
+

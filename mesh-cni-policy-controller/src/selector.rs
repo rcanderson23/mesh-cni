@@ -1,12 +1,37 @@
-use k8s_openapi::api::networking::v1::{NetworkPolicy, NetworkPolicyPeer};
+use std::{collections::BTreeMap, str::FromStr};
+
+use k8s_openapi::{
+    api::networking::v1::{
+        NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyIngressRule, NetworkPolicyPeer,
+        NetworkPolicySpec,
+    },
+    apimachinery::pkg::apis::meta::v1::LabelSelector,
+};
 use kube::{
     ResourceExt,
     core::{Selector, SelectorExt},
 };
 use mesh_cni_crds::v1alpha1::identity::Identity;
-use tracing::warn;
 
-pub fn policy_selects_identity(policy: &NetworkPolicy, identity: &Identity) -> bool {
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PolicyType {
+    Ingress,
+    Egress,
+}
+
+impl FromStr for PolicyType {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Ingress" | "ingress" => Ok(Self::Ingress),
+            "Egress" | "egress" => Ok(Self::Egress),
+            _ => Err("Unknown policy type"),
+        }
+    }
+}
+
+pub(crate) fn policy_selects_identity(policy: &NetworkPolicy, identity: &Identity) -> bool {
     let Some(policy_ns) = policy.namespace() else {
         return false;
     };
@@ -25,42 +50,114 @@ pub fn policy_selects_identity(policy: &NetworkPolicy, identity: &Identity) -> b
         return false;
     };
 
-    let selector = match Selector::try_from(policy_pod_selector) {
-        Ok(selector) => selector,
-        Err(e) => {
-            warn!(%e, "invalid selector found on NetworkPolicy {}/{}", policy_ns, policy.name_any());
-            return false;
-        }
-    };
-    selector.matches(&identity.spec.pod_labels)
+    label_selector_matches(&policy_pod_selector, &identity.spec.pod_labels)
 }
 
-pub fn peer_selects_identity(peer: &NetworkPolicyPeer, identity: &Identity) -> bool {
+fn peers_select_identity(peers: Option<&Vec<NetworkPolicyPeer>>, identity: &Identity) -> bool {
+    match peers {
+        None => true,
+        Some(peers) if peers.is_empty() => true,
+        Some(peers) => peers
+            .iter()
+            .any(|peer| peer_selects_identity(peer, identity)),
+    }
+}
+
+pub(crate) fn peer_selects_identity(peer: &NetworkPolicyPeer, identity: &Identity) -> bool {
     if peer.ip_block.is_some() && peer.pod_selector.is_none() && peer.namespace_selector.is_none() {
         return false;
     }
 
-    if let Some(selector) = &peer.namespace_selector {
-        let selector = match Selector::try_from(selector.clone()) {
-            Ok(selector) => selector,
-            Err(_) => return false,
-        };
-        if !selector.matches(&identity.spec.namespace_labels) {
-            return false;
-        }
+    if let Some(selector) = &peer.namespace_selector
+        && !label_selector_matches(selector, &identity.spec.namespace_labels)
+    {
+        return false;
     }
 
-    if let Some(selector) = &peer.pod_selector {
-        let selector = match Selector::try_from(selector.clone()) {
-            Ok(selector) => selector,
-            Err(_) => return false,
-        };
-        if !selector.matches(&identity.spec.pod_labels) {
-            return false;
-        }
+    if let Some(selector) = &peer.pod_selector
+        && !label_selector_matches(selector, &identity.spec.pod_labels)
+    {
+        return false;
     }
 
     peer.pod_selector.is_some() || peer.namespace_selector.is_some()
+}
+
+pub(crate) fn label_selector_matches(
+    selector: &LabelSelector,
+    labels: &BTreeMap<String, String>,
+) -> bool {
+    let Ok(selector) = Selector::try_from(selector.clone()) else {
+        return false;
+    };
+    selector.matches(labels)
+}
+
+pub fn ingress_rules_select_identity(
+    identity: &Identity,
+    policy: &NetworkPolicy,
+) -> Vec<NetworkPolicyIngressRule> {
+    let Some(spec) = &policy.spec else {
+        return vec![];
+    };
+
+    if !policy_affects_type(spec, PolicyType::Ingress) {
+        return vec![];
+    }
+
+    let Some(rules) = &spec.ingress else {
+        return vec![];
+    };
+
+    rules
+        .iter()
+        .filter(|rule| {
+            let peers = rule.from.as_ref();
+            peers_select_identity(peers, identity)
+        })
+        .cloned()
+        .collect()
+}
+
+pub fn egress_rules_select_identity(
+    identity: &Identity,
+    policy: &NetworkPolicy,
+) -> Vec<NetworkPolicyEgressRule> {
+    let Some(spec) = &policy.spec else {
+        return vec![];
+    };
+
+    if !policy_affects_type(spec, PolicyType::Egress) {
+        return vec![];
+    }
+
+    let Some(rules) = &spec.egress else {
+        return vec![];
+    };
+    rules
+        .iter()
+        .filter(|rule| {
+            let peers = rule.to.as_ref();
+            peers_select_identity(peers, identity)
+        })
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn policy_affects_type(spec: &NetworkPolicySpec, policy_type: PolicyType) -> bool {
+    let Some(policy_types) = &spec.policy_types else {
+        return match policy_type {
+            PolicyType::Ingress => spec.ingress.is_some() || spec.egress.is_none(),
+            PolicyType::Egress => spec.egress.is_some(),
+        };
+    };
+    policy_types.iter().any(|spec_policy_type| {
+        if let Ok(spt) = PolicyType::from_str(spec_policy_type) {
+            spt == policy_type
+        } else {
+            false
+        }
+    })
 }
 
 #[cfg(test)]

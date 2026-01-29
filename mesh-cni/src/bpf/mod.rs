@@ -1,6 +1,7 @@
 pub mod conntrack;
 pub mod ip;
 pub mod loader;
+pub mod policy;
 pub mod service;
 
 use std::{borrow::BorrowMut, hash::Hash};
@@ -30,16 +31,18 @@ pub const BPF_MAP_SERVICES_V4: BpfNamePath = BpfNamePath::Map("services_v4");
 pub const BPF_MAP_SERVICES_V6: BpfNamePath = BpfNamePath::Map("services_v6");
 pub const BPF_MAP_ENDPOINTS_V4: BpfNamePath = BpfNamePath::Map("endpoints_v4");
 pub const BPF_MAP_ENDPOINTS_V6: BpfNamePath = BpfNamePath::Map("endpoints_v6");
+pub const BPF_MAP_POLICY: BpfNamePath = BpfNamePath::Map("policy");
 
 pub const BPF_MESH_FS_DIR: &str = "/sys/fs/bpf/mesh";
 pub const BPF_MESH_MAPS_DIR: &str = "/sys/fs/bpf/mesh/maps";
 pub const BPF_MESH_PROG_DIR: &str = "/sys/fs/bpf/mesh/programs";
 pub const BPF_MESH_LINKS_DIR: &str = "/sys/fs/bpf/mesh/links";
 
-pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 3] = [
+pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 4] = [
     BPF_MAP_IDENTITY_V4,
     BPF_MAP_IDENTITY_V6,
     BPF_MAP_CONNTRACK_V4,
+    BPF_MAP_POLICY,
 ];
 
 pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 4] = [
@@ -79,6 +82,16 @@ pub trait BpfMap {
     type KeyOutput;
     fn update(&mut self, key: Self::Key, value: Self::Value) -> Result<()>;
     fn delete(&mut self, key: &Self::Key) -> Result<()>;
+    fn get(&self, key: &Self::Key) -> Result<Self::Value>;
+    fn get_state(&self) -> Result<ahash::HashMap<Self::KeyOutput, Self::Value>>;
+}
+
+pub trait SharedBpfMap: Send + Sync + 'static {
+    type Key;
+    type Value;
+    type KeyOutput;
+    fn update(&self, key: Self::Key, value: Self::Value) -> Result<()>;
+    fn delete(&self, key: &Self::Key) -> Result<()>;
     fn get(&self, key: &Self::Key) -> Result<Self::Value>;
     fn get_state(&self) -> Result<ahash::HashMap<Self::KeyOutput, Self::Value>>;
 }

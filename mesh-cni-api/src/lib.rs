@@ -23,3 +23,9 @@ pub mod conntrack {
         tonic::include_proto!("grpc.conntrack.v1");
     }
 }
+
+pub mod policy {
+    pub mod v1 {
+        tonic::include_proto!("grpc.policy.v1");
+    }
+}

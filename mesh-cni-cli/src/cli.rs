@@ -20,6 +20,10 @@ pub enum Commands {
     /// Used to interact with the Conntrack subsystem
     #[command(subcommand)]
     Conntrack(ConntrackCommands),
+
+    /// Used to interact with the Conntrack subsystem
+    #[command(subcommand)]
+    Policy(PolicyCommands),
 }
 
 #[derive(Clone, Subcommand, Debug)]
@@ -41,5 +45,11 @@ pub enum ServiceCommands {
 #[derive(Clone, Subcommand, Debug)]
 pub enum ConntrackCommands {
     /// List the connections in the Conntrack
+    List,
+}
+
+#[derive(Clone, Subcommand, Debug)]
+pub enum PolicyCommands {
+    /// List the policies currently enforced
     List,
 }
