@@ -12,6 +12,7 @@ use kube::{
     core::{Selector, SelectorExt},
 };
 use mesh_cni_crds::v1alpha1::identity::Identity;
+use mesh_cni_ebpf_common::policy::PolicyIndexKey;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PolicyType {
@@ -91,6 +92,13 @@ pub(crate) fn label_selector_matches(
         return false;
     };
     selector.matches(labels)
+}
+
+pub fn build_policy_keys_for_identity(
+    _identity: &Identity,
+    _policies: &[NetworkPolicy],
+) -> Vec<PolicyIndexKey> {
+    todo!("implement policy key generation for identity")
 }
 
 pub fn ingress_rules_select_identity(

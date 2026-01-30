@@ -17,6 +17,6 @@ message PolicySet {
   uint32 dst_id = 2;
   uint32 dst_port  = 3;
   string proto = 4;
-  string action = 5;
+  string direction = 5;
+  string action = 6;
 }
-

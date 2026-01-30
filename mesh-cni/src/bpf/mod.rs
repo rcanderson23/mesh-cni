@@ -31,18 +31,20 @@ pub const BPF_MAP_SERVICES_V4: BpfNamePath = BpfNamePath::Map("services_v4");
 pub const BPF_MAP_SERVICES_V6: BpfNamePath = BpfNamePath::Map("services_v6");
 pub const BPF_MAP_ENDPOINTS_V4: BpfNamePath = BpfNamePath::Map("endpoints_v4");
 pub const BPF_MAP_ENDPOINTS_V6: BpfNamePath = BpfNamePath::Map("endpoints_v6");
-pub const BPF_MAP_POLICY: BpfNamePath = BpfNamePath::Map("policy");
+pub const BPF_MAP_POLICY_INDEX: BpfNamePath = BpfNamePath::Map("policy_index");
+pub const BPF_MAP_POLICY_RULESET: BpfNamePath = BpfNamePath::Map("policy_ruleset");
 
 pub const BPF_MESH_FS_DIR: &str = "/sys/fs/bpf/mesh";
 pub const BPF_MESH_MAPS_DIR: &str = "/sys/fs/bpf/mesh/maps";
 pub const BPF_MESH_PROG_DIR: &str = "/sys/fs/bpf/mesh/programs";
 pub const BPF_MESH_LINKS_DIR: &str = "/sys/fs/bpf/mesh/links";
 
-pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 4] = [
+pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 5] = [
     BPF_MAP_IDENTITY_V4,
     BPF_MAP_IDENTITY_V6,
     BPF_MAP_CONNTRACK_V4,
-    BPF_MAP_POLICY,
+    BPF_MAP_POLICY_INDEX,
+    BPF_MAP_POLICY_RULESET,
 ];
 
 pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 4] = [

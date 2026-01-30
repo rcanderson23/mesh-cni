@@ -10,7 +10,7 @@ use aya_ebpf::{
 use mesh_cni_ebpf_common::{
     IdentityId,
     conntrack::{ConntrackKeyV4, ConntrackValue},
-    policy::{PolicyKey, PolicyValue},
+    policy::{PolicyIndexKey, PolicyRuleKey, PolicyValue},
 };
 
 #[map(name = "identity_v4")]
@@ -23,8 +23,11 @@ static IDENTITY_V6: LpmTrie<u128, IdentityId> = LpmTrie::with_max_entries(65535,
 static CONNTRACK_V4: LruHashMap<ConntrackKeyV4, ConntrackValue> =
     LruHashMap::with_max_entries(65535, 0);
 
-#[map(name = "policy")]
-static POLICY: HashMap<PolicyKey, PolicyValue> = HashMap::with_max_entries(65535, 0);
+#[map(name = "policy_index")]
+static POLICY_INDEX: HashMap<PolicyIndexKey, u32> = HashMap::with_max_entries(65535, 0);
+
+#[map(name = "policy_ruleset")]
+static POLICY_RULESET: HashMap<PolicyRuleKey, PolicyValue> = HashMap::with_max_entries(65535, 0);
 
 #[inline]
 fn id_v4(ip: LpmKey<u32>) -> Option<IdentityId> {

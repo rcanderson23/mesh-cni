@@ -1,19 +1,64 @@
 use core::fmt::Display;
 
+pub const ANY_ID: u32 = 1;
+
+pub const ANY_PORT: u16 = 0;
+
+pub const ANY_DIR: u8 = 0;
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
+pub enum PolicyDirection {
+    #[default]
+    Any = 0,
+    Ingress = 1,
+    Egress = 2,
+}
+
+impl Display for PolicyDirection {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            PolicyDirection::Any => write!(f, "ANY"),
+            PolicyDirection::Ingress => write!(f, "INGRESS"),
+            PolicyDirection::Egress => write!(f, "EGRESS"),
+        }
+    }
+}
+
+impl From<u8> for PolicyDirection {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => PolicyDirection::Ingress,
+            2 => PolicyDirection::Egress,
+            _ => PolicyDirection::Any,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct PolicyKey {
+pub struct PolicyIndexKey {
     pub src_id: u32,
     pub dst_id: u32,
-    /// Value of 0 is used for wildcard
-    pub dst_port: u16,
-    /// Value of 0 is used for wildcard
-    pub proto: u8,
+    pub direction: u8,
     pub _pad: [u8; 3],
 }
 
 #[cfg(feature = "user")]
-unsafe impl aya::Pod for PolicyKey {}
+unsafe impl aya::Pod for PolicyIndexKey {}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct PolicyRuleKey {
+    pub ruleset_id: u32,
+    pub proto: u8,
+    pub _pad0: [u8; 3],
+    pub port: u16,
+    pub _pad1: [u8; 2],
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for PolicyRuleKey {}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
