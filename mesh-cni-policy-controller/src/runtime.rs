@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     Error, PolicyControllerBpf, Result,
-    context::Context,
+    context::{Context, RulesetState},
     controller::{error_policy, reconcile},
 };
 
@@ -38,12 +38,17 @@ where
         (identity_store, identity_subscriber),
     ) = store_init;
 
+    let index_state = policy_bpf_state.index_state()?;
+    let ruleset_state = policy_bpf_state.ruleset_state()?;
+    let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
     let context = Arc::new(Context {
         pod_store: pod_store.clone(),
         policy_store: policy_store.clone(),
         namespace_store: namespace_store.clone(),
         identity_store: identity_store.clone(),
         policy_bpf_state,
+        ruleset_state,
     });
 
     tokio::spawn(

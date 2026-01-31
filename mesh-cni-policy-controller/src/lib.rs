@@ -17,7 +17,7 @@ use crate::context::Context;
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub(crate) trait PolicyControllerExt<P: PolicyControllerBpf> {
-    async fn reconcile(&self, ctx: Arc<Context<P>>) -> Result<Action>;
+    fn reconcile(&self, ctx: Arc<Context<P>>) -> Result<Action>;
 }
 
 pub trait PolicyControllerBpf {
@@ -25,4 +25,6 @@ pub trait PolicyControllerBpf {
     fn delete_index(&self, key: &PolicyIndexKey) -> Result<()>;
     fn update_rule(&self, key: PolicyRuleKey, value: PolicyValue) -> Result<()>;
     fn delete_rule(&self, key: &PolicyRuleKey) -> Result<()>;
+    fn index_state(&self) -> Result<ahash::HashMap<PolicyIndexKey, u32>>;
+    fn ruleset_state(&self) -> Result<ahash::HashMap<PolicyRuleKey, PolicyValue>>;
 }

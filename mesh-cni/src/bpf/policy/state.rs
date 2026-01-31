@@ -89,6 +89,18 @@ where
         PolicyState::delete_rule(self, key)
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
+
+    fn index_state(&self) -> mesh_cni_policy_controller::Result<ahash::HashMap<PolicyIndexKey, u32>> {
+        PolicyState::index_state(self)
+            .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
+    }
+
+    fn ruleset_state(
+        &self,
+    ) -> mesh_cni_policy_controller::Result<ahash::HashMap<PolicyRuleKey, PolicyValue>> {
+        PolicyState::ruleset_state(self)
+            .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
+    }
 }
 
 #[derive(Clone)]

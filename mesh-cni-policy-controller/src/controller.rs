@@ -23,7 +23,7 @@ where
         k.namespace().unwrap_or_default(),
         k.name_any()
     );
-    k.reconcile(ctx).await
+    k.reconcile(ctx)
 }
 
 // TODO: revisit error handling and backoff strategy once controller logic is defined.

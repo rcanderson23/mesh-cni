@@ -4,6 +4,7 @@ use mesh_cni_api::policy::v1::{
 };
 use mesh_cni_ebpf_common::policy::{
     Action, PolicyDirection, PolicyIndexKey, PolicyProtocol, PolicyRuleKey, PolicyValue,
+    RULESET_NONE,
 };
 use tonic::{Code, Request, Response, Status};
 use tracing::info;
@@ -65,7 +66,7 @@ where
 
         let mut policies = Vec::new();
         for (idx_key, ruleset_id) in index_state {
-            if ruleset_id == 0 {
+            if ruleset_id == RULESET_NONE {
                 continue;
             }
             let Some(rules) = rules_by_id.get(&ruleset_id) else {

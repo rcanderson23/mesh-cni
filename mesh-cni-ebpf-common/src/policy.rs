@@ -6,6 +6,8 @@ pub const ANY_PORT: u16 = 0;
 
 pub const ANY_DIR: u8 = 0;
 
+pub const RULESET_NONE: u32 = 0;
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
 pub enum PolicyDirection {
@@ -13,6 +15,20 @@ pub enum PolicyDirection {
     Any = 0,
     Ingress = 1,
     Egress = 2,
+}
+
+impl PolicyDirection {
+    pub const fn any_u8() -> u8 {
+        PolicyDirection::Any as u8
+    }
+
+    pub const fn ingress_u8() -> u8 {
+        PolicyDirection::Ingress as u8
+    }
+
+    pub const fn egress_u8() -> u8 {
+        PolicyDirection::Egress as u8
+    }
 }
 
 impl Display for PolicyDirection {
@@ -75,6 +91,16 @@ pub enum Action {
     Deny = 1,
 }
 
+impl Action {
+    pub const fn allow_u8() -> u8 {
+        Action::Allow as u8
+    }
+
+    pub const fn deny_u8() -> u8 {
+        Action::Deny as u8
+    }
+}
+
 impl Display for Action {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -105,6 +131,24 @@ pub enum PolicyProtocol {
     Udp = 17,
     Sctp = 132,
     Unknown = 255,
+}
+
+impl PolicyProtocol {
+    pub const fn any_u8() -> u8 {
+        PolicyProtocol::Any as u8
+    }
+
+    pub const fn tcp_u8() -> u8 {
+        PolicyProtocol::Tcp as u8
+    }
+
+    pub const fn udp_u8() -> u8 {
+        PolicyProtocol::Udp as u8
+    }
+
+    pub const fn sctp_u8() -> u8 {
+        PolicyProtocol::Sctp as u8
+    }
 }
 
 impl Display for PolicyProtocol {
