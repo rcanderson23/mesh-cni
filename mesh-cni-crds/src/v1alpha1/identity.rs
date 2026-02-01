@@ -2,9 +2,8 @@ use std::collections::BTreeMap;
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{CustomResource, KubeSchema, ResourceExt};
-use serde::{Deserialize, Serialize};
-
 use mesh_cni_k8s_utils::sanitize_pod_labels;
+use serde::{Deserialize, Serialize};
 
 #[derive(
     CustomResource, KubeSchema, Serialize, Deserialize, Default, PartialEq, Eq, Clone, Debug,
@@ -32,6 +31,12 @@ impl Identity {
         let namespace_labels = namespace.labels();
 
         self.spec.pod_labels == pod_labels && *namespace_labels == self.spec.namespace_labels
+    }
+    pub fn pod_labels_match(&self, pod: &Pod) -> bool {
+        let mut pod_labels = pod.labels().clone();
+        sanitize_pod_labels(&mut pod_labels);
+
+        self.spec.pod_labels == pod_labels
     }
 }
 

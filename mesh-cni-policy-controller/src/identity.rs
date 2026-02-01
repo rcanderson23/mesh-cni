@@ -11,19 +11,31 @@ use k8s_openapi::{
 };
 use kube::{ResourceExt, runtime::controller::Action};
 use mesh_cni_crds::v1alpha1::identity::Identity;
-use mesh_cni_ebpf_common::policy::{
-    ANY_ID, ANY_PORT, Action as PolicyAction, PolicyDirection, PolicyIndexKey, PolicyProtocol,
-    PolicyRuleKey, PolicyValue, RULESET_NONE,
+use mesh_cni_ebpf_common::{
+    IdentityId,
+    policy::{
+        ANY_ID, ANY_PORT, Action as PolicyAction, PolicyDirection, PolicyIndexKey, PolicyProtocol,
+        PolicyRuleKey, PolicyValue, RULESET_NONE,
+    },
 };
 
 use crate::{
     PolicyControllerBpf, PolicyControllerExt, Result,
-    context::Context,
+    context::{Context, RulesetId},
     controller::DEFAULT_REQUEUE_DURATION,
     selector::{PolicyType, peer_selects_identity, policy_affects_type, policy_selects_identity},
 };
 
 impl<P: PolicyControllerBpf> PolicyControllerExt<P> for Identity {
+    // Policy enforcement is broken up into two seperate BPF maps. The first map is keyed on
+    // the src_id, dst_id, and policy direction returning a ruleset_id. This ruleset_id
+    // can be combined with protocol and destination port to determine the desired action and
+    // allowing wildcard checks on port and proto. This ideally cuts down the number of BPF map
+    // checks for a new flow as well as allowing for re-usable rulesets reducing map size.
+    // We compute per-peer ingress/egress rules, resolve named ports against the peer
+    // identity's pods (when used in the policy), inject default-deny for directions with
+    // policyTypes but no allow rules, then diff desired vs current index entries and update
+    // BPF maps while releasing unused rulesets.
     fn reconcile(&self, ctx: Arc<Context<P>>) -> Result<Action> {
         let policy_state = ctx.policy_store.state();
         let selected_netpols: Vec<&Arc<NetworkPolicy>> = policy_state
@@ -35,8 +47,10 @@ impl<P: PolicyControllerBpf> PolicyControllerExt<P> for Identity {
         let index_state = ctx.policy_bpf_state.index_state()?;
         let identities = ctx.identity_store.state();
         let pods = ctx.pod_store.state();
-        let identity_by_id: HashMap<u32, Arc<Identity>> =
-            identities.iter().map(|id| (id.spec.id, id.clone())).collect();
+        let identity_by_id: HashMap<u32, Arc<Identity>> = identities
+            .iter()
+            .map(|id| (id.spec.id, id.clone()))
+            .collect();
         let mut desired_index: HashMap<PolicyIndexKey, u32> = HashMap::default();
         let mut written_rulesets: HashSet<u32> = HashSet::default();
         let mut has_ingress_policy = false;
@@ -156,11 +170,13 @@ impl<P: PolicyControllerBpf> PolicyControllerExt<P> for Identity {
             }
         }
 
-        for (key, current_ruleset_id) in &index_state {
-            if !identity_key_applies(identity_id, key) {
-                continue;
-            }
+        let current_index: HashMap<PolicyIndexKey, u32> = index_state
+            .iter()
+            .filter(|(key, _)| identity_key_applies(identity_id, key))
+            .map(|(key, value)| (*key, *value))
+            .collect();
 
+        for (key, current_ruleset_id) in &current_index {
             match desired_index.get(key) {
                 Some(desired_ruleset_id) if *desired_ruleset_id == *current_ruleset_id => {}
                 Some(desired_ruleset_id) => {
@@ -176,7 +192,7 @@ impl<P: PolicyControllerBpf> PolicyControllerExt<P> for Identity {
         }
 
         for (key, ruleset_id) in desired_index {
-            if index_state.contains_key(&key) {
+            if current_index.contains_key(&key) {
                 continue;
             }
             ctx.policy_bpf_state.update_index(key, ruleset_id)?;
@@ -404,7 +420,7 @@ fn add_rule_specs(
 fn build_ruleset(
     mut rules: Vec<RuleSpec>,
     ruleset_state: &crate::context::RulesetState,
-) -> (u32, Vec<(PolicyRuleKey, PolicyValue)>) {
+) -> (RulesetId, Vec<(PolicyRuleKey, PolicyValue)>) {
     rules.sort_by_key(|rule| (rule.proto, rule.port, rule.action));
     rules.dedup();
 
@@ -458,7 +474,7 @@ fn build_ruleset(
     (ruleset_id, ruleset_entries)
 }
 
-fn identity_key_applies(identity_id: u32, key: &PolicyIndexKey) -> bool {
+fn identity_key_applies(identity_id: IdentityId, key: &PolicyIndexKey) -> bool {
     match PolicyDirection::from(key.direction) {
         PolicyDirection::Ingress => key.dst_id == identity_id,
         PolicyDirection::Egress => key.src_id == identity_id,
@@ -468,7 +484,7 @@ fn identity_key_applies(identity_id: u32, key: &PolicyIndexKey) -> bool {
 
 fn release_ruleset_if_unused<P: PolicyControllerBpf>(
     ctx: &Context<P>,
-    ruleset_id: u32,
+    ruleset_id: RulesetId,
 ) -> Result<()> {
     if ruleset_id == RULESET_NONE {
         return Ok(());
@@ -487,7 +503,7 @@ mod tests {
 
     use k8s_openapi::{
         api::{
-            core::v1::{Container, ContainerPort, Namespace, Pod, PodSpec},
+            core::v1::{Container, ContainerPort, Pod, PodSpec},
             networking::v1::{
                 NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyIngressRule,
                 NetworkPolicyPort, NetworkPolicySpec,
@@ -668,7 +684,6 @@ mod tests {
 
         let (pod_store, mut pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut pod_writer, pod_a);
@@ -684,7 +699,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -749,7 +763,6 @@ mod tests {
 
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, _policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut identity_writer, identity.clone());
@@ -762,7 +775,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -835,7 +847,6 @@ mod tests {
 
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut policy_writer, policy);
@@ -849,7 +860,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -922,7 +932,6 @@ mod tests {
 
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut policy_writer, policy);
@@ -936,7 +945,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -1018,7 +1026,6 @@ mod tests {
 
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut policy_writer, policy);
@@ -1032,7 +1039,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -1107,7 +1113,6 @@ mod tests {
 
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut policy_writer, policy);
@@ -1121,7 +1126,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -1203,7 +1207,6 @@ mod tests {
 
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut policy_writer, policy);
@@ -1217,7 +1220,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -1314,7 +1316,6 @@ mod tests {
 
         let (pod_store, mut pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut pod_writer, pod);
@@ -1329,7 +1330,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -1457,7 +1457,6 @@ mod tests {
 
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut policy_writer, policy);
@@ -1473,7 +1472,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -1609,7 +1607,6 @@ mod tests {
                         port: Some(IntOrString::String("http".into())),
                         ..Default::default()
                     }]),
-                    ..Default::default()
                 }]),
                 ..Default::default()
             }),
@@ -1617,7 +1614,6 @@ mod tests {
 
         let (pod_store, mut pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut pod_writer, pod);
@@ -1633,7 +1629,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -1708,7 +1703,6 @@ mod tests {
                         port: Some(IntOrString::Int(80)),
                         ..Default::default()
                     }]),
-                    ..Default::default()
                 }]),
                 ..Default::default()
             }),
@@ -1743,7 +1737,6 @@ mod tests {
 
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
-        let (namespace_store, _namespace_writer) = store::<Namespace>();
         let (identity_store, mut identity_writer) = store::<Identity>();
 
         insert(&mut policy_writer, policy_v1);
@@ -1757,7 +1750,6 @@ mod tests {
         let ctx = Context {
             pod_store,
             policy_store,
-            namespace_store,
             identity_store,
             policy_bpf_state,
             ruleset_state,
@@ -1765,37 +1757,33 @@ mod tests {
 
         let ctx = Arc::new(ctx);
         identity.reconcile(ctx.clone()).unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
-
-        let has_port_80 = rules.keys().any(|key| {
-            key.proto == PolicyProtocol::tcp_u8()
-                && key.port == 80
-                && key.ruleset_id != RULESET_NONE
-        });
-        let has_port_81 = rules.keys().any(|key| {
-            key.proto == PolicyProtocol::tcp_u8()
-                && key.port == 81
-                && key.ruleset_id != RULESET_NONE
-        });
-        assert!(has_port_80);
-        assert!(!has_port_81);
+        let index_before = ctx.policy_bpf_state.index_state().unwrap();
+        let idx_key = PolicyIndexKey {
+            src_id: ANY_ID,
+            dst_id: 31,
+            direction: PolicyDirection::ingress_u8(),
+            _pad: [0; 3],
+        };
+        let old_ruleset_id = *index_before
+            .get(&idx_key)
+            .expect("expected initial ingress entry");
 
         insert(&mut policy_writer, policy_v2);
         identity.reconcile(ctx.clone()).unwrap();
+        let index_after = ctx.policy_bpf_state.index_state().unwrap();
+        let new_ruleset_id = *index_after
+            .get(&idx_key)
+            .expect("expected updated ingress entry");
+        assert_ne!(old_ruleset_id, new_ruleset_id);
+
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
-
-        let has_port_80 = rules.keys().any(|key| {
-            key.proto == PolicyProtocol::tcp_u8()
-                && key.port == 80
-                && key.ruleset_id != RULESET_NONE
-        });
-        let has_port_81 = rules.keys().any(|key| {
-            key.proto == PolicyProtocol::tcp_u8()
-                && key.port == 81
-                && key.ruleset_id != RULESET_NONE
-        });
-
-        assert!(!has_port_80);
-        assert!(has_port_81);
+        assert!(
+            rules.keys().all(|key| key.ruleset_id != old_ruleset_id),
+            "old ruleset entries should be removed"
+        );
+        assert!(
+            rules.keys().any(|key| key.ruleset_id == new_ruleset_id),
+            "new ruleset entries should exist"
+        );
     }
 }

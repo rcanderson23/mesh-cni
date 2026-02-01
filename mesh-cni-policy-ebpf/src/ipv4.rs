@@ -3,13 +3,16 @@ use aya_ebpf::{
     programs::TcContext,
 };
 use aya_log_ebpf::info;
-use mesh_cni_ebpf_common::conntrack::{ConntrackKeyV4, ConntrackValue};
+use mesh_cni_ebpf_common::{
+    conntrack::{ConntrackKeyV4, ConntrackValue},
+    policy::{Action, PolicyDirection, PolicyIndexKey, PolicyRuleKey, PolicyValue, RULESET_NONE},
+};
 use network_types::{eth::EthHdr, ip::Ipv4Hdr, tcp::TcpHdr, udp::UdpHdr};
 
-use crate::{CONNTRACK_V4, id_v4};
+use crate::{CONNTRACK_V4, POLICY_INDEX, POLICY_RULESET, id_v4};
 
 #[inline]
-pub fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
+pub fn handle_ipv4(ctx: TcContext, direction: PolicyDirection) -> Result<i32, i32> {
     let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
 
     let src = u32::from_be_bytes(ipv4hdr.src_addr);
@@ -83,9 +86,45 @@ pub fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         let _ = CONNTRACK_V4.insert(ct_key, ConntrackValue { last_seen_ns: now }, 0);
     }
 
+    let idx_key = PolicyIndexKey {
+        src_id,
+        dst_id,
+        direction: direction as u8,
+        _pad: [0; 3],
+    };
+
+    let mut action = Action::allow_u8();
+    let mut ruleset_id = RULESET_NONE;
+    if let Some(id) = unsafe { POLICY_INDEX.get(&idx_key) } {
+        ruleset_id = *id;
+        if ruleset_id != RULESET_NONE {
+            let rule_key = PolicyRuleKey {
+                ruleset_id,
+                proto,
+                _pad0: [0; 3],
+                port: dst_port,
+                _pad1: [0; 2],
+            };
+            if let Some(PolicyValue {
+                action: rule_action,
+            }) = unsafe { POLICY_RULESET.get(&rule_key) }
+            {
+                action = *rule_action;
+            } else {
+                action = Action::deny_u8();
+            }
+        }
+    }
+
     info!(
         &ctx,
-        "L4: src: {}:{}; dst: {}:{}", src_id, src_port, dst_id, dst_port
+        "L4: src: {}:{}; dst: {}:{}; ruleset: {}; action: {}",
+        src_id,
+        src_port,
+        dst_id,
+        dst_port,
+        ruleset_id,
+        action,
     );
 
     Ok(TC_ACT_PIPE)

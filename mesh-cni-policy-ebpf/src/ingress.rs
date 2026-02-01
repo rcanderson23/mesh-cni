@@ -1,4 +1,5 @@
 use aya_ebpf::{bindings::TC_ACT_PIPE, programs::TcContext};
+use mesh_cni_ebpf_common::policy::PolicyDirection;
 use network_types::eth::{EthHdr, EtherType};
 
 use crate::ipv4::handle_ipv4;
@@ -16,5 +17,5 @@ pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
         return Ok(TC_ACT_PIPE);
     }
 
-    handle_ipv4(ctx)
+    handle_ipv4(ctx, PolicyDirection::Ingress)
 }
