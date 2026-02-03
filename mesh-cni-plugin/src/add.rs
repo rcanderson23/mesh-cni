@@ -32,6 +32,14 @@ pub fn add(args: &Args, input: Input) -> Response {
         "add called, received input {:?} for containerid {}",
         input, &args.container_id
     );
+    let Some(pod_name) = args.args.get("K8S_POD_NAME") else {
+        return Error::Parse("missing pod name".to_string()).into_response(CNI_VERSION);
+    };
+    let pod_name = pod_name.to_string();
+    let Some(pod_namespace) = args.args.get("K8S_POD_NAMESPACE") else {
+        return Error::Parse("missing pod namespace".to_string()).into_response(CNI_VERSION);
+    };
+    let pod_namespace = pod_namespace.to_string();
 
     // Unchained
     let Some(prev) = input.previous_result else {
@@ -46,6 +54,8 @@ pub fn add(args: &Args, input: Input) -> Response {
             net_namespace: Some(net_namespace),
             container_id: args.container_id.clone(),
             chained: false,
+            pod_name,
+            pod_namespace,
         };
         let resp = tokio::runtime::Runtime::new()
             .unwrap()
@@ -98,6 +108,8 @@ pub fn add(args: &Args, input: Input) -> Response {
             net_namespace: None,
             container_id: args.container_id.clone(),
             chained: true,
+            pod_name: pod_name.clone(),
+            pod_namespace: pod_namespace.clone(),
         };
         let resp = tokio::runtime::Runtime::new()
             .unwrap()

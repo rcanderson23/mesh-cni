@@ -29,6 +29,12 @@ message AddPodRequest {
 
   // Determines if the CNI is configured to be chained
   bool chained = 4;
+
+  // Name of the pod being created
+  string pod_name = 5;
+
+  // Namespace of pod being created
+  string pod_namespace = 6;
 }
 
 message DeletePodRequest {

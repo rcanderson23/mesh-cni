@@ -20,186 +20,193 @@ use mesh_cni_ebpf_common::{
 };
 
 use crate::{
-    PolicyControllerBpf, PolicyControllerExt, Result,
+    PolicyControllerBpf, Result,
     context::{Context, RulesetId},
     controller::DEFAULT_REQUEUE_DURATION,
     selector::{PolicyType, peer_selects_identity, policy_affects_type, policy_selects_identity},
 };
 
-impl<P: PolicyControllerBpf> PolicyControllerExt<P> for Identity {
-    // Policy enforcement is broken up into two seperate BPF maps. The first map is keyed on
-    // the src_id, dst_id, and policy direction returning a ruleset_id. This ruleset_id
-    // can be combined with protocol and destination port to determine the desired action and
-    // allowing wildcard checks on port and proto. This ideally cuts down the number of BPF map
-    // checks for a new flow as well as allowing for re-usable rulesets reducing map size.
-    // We compute per-peer ingress/egress rules, resolve named ports against the peer
-    // identity's pods (when used in the policy), inject default-deny for directions with
-    // policyTypes but no allow rules, then diff desired vs current index entries and update
-    // BPF maps while releasing unused rulesets.
-    fn reconcile(&self, ctx: Arc<Context<P>>) -> Result<Action> {
-        let policy_state = ctx.policy_store.state();
-        let selected_netpols: Vec<&Arc<NetworkPolicy>> = policy_state
-            .iter()
-            .filter(|np| policy_selects_identity(np, self))
-            .collect();
+pub async fn reconcile_policy_with_identity<P: PolicyControllerBpf>(
+    identity: Arc<Identity>,
+    ctx: Arc<Context<P>>,
+) -> Result<Action> {
+    inner_reconcile_policy_with_identity(identity, ctx)
+}
 
-        let identity_id = self.spec.id;
-        let index_state = ctx.policy_bpf_state.index_state()?;
-        let identities = ctx.identity_store.state();
-        let pods = ctx.pod_store.state();
-        let identity_by_id: HashMap<u32, Arc<Identity>> = identities
-            .iter()
-            .map(|id| (id.spec.id, id.clone()))
-            .collect();
-        let mut desired_index: HashMap<PolicyIndexKey, u32> = HashMap::default();
-        let mut written_rulesets: HashSet<u32> = HashSet::default();
-        let mut has_ingress_policy = false;
-        let mut has_egress_policy = false;
+// Policy enforcement is broken up into two seperate BPF maps. The first map is keyed on
+// the src_id, dst_id, and policy direction returning a ruleset_id. This ruleset_id
+// can be combined with protocol and destination port to determine the desired action and
+// allowing wildcard checks on port and proto. This ideally cuts down the number of BPF map
+// checks for a new flow as well as allowing for re-usable rulesets reducing map size.
+// We compute per-peer ingress/egress rules, resolve named ports against the peer
+// identity's pods (when used in the policy), inject default-deny for directions with
+// policyTypes but no allow rules, then diff desired vs current index entries and update
+// BPF maps while releasing unused rulesets.
+pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
+    identity: Arc<Identity>,
+    ctx: Arc<Context<P>>,
+) -> Result<Action> {
+    let policy_state = ctx.policy_store.state();
+    let selected_netpols: Vec<&Arc<NetworkPolicy>> = policy_state
+        .iter()
+        .filter(|np| policy_selects_identity(np, &identity))
+        .collect();
 
-        if selected_netpols.is_empty() {
+    let identity_id = identity.spec.id;
+    let index_state = ctx.policy_bpf_state.index_state()?;
+    let identities = ctx.identity_store.state();
+    let pods = ctx.pod_store.state();
+    let identity_by_id: HashMap<u32, Arc<Identity>> = identities
+        .iter()
+        .map(|id| (id.spec.id, id.clone()))
+        .collect();
+    let mut desired_index: HashMap<PolicyIndexKey, u32> = HashMap::default();
+    let mut written_rulesets: HashSet<u32> = HashSet::default();
+    let mut has_ingress_policy = false;
+    let mut has_egress_policy = false;
+
+    if selected_netpols.is_empty() {
+        desired_index.insert(
+            PolicyIndexKey {
+                src_id: identity_id,
+                dst_id: ANY_ID,
+                direction: PolicyDirection::any_u8(),
+                _pad: [0; 3],
+            },
+            RULESET_NONE,
+        );
+    } else {
+        let mut ingress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
+        let mut egress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
+
+        for policy in &selected_netpols {
+            let Some(spec) = &policy.spec else {
+                continue;
+            };
+
+            let Some(policy_ns) = policy.namespace() else {
+                continue;
+            };
+
+            if policy_affects_type(spec, PolicyType::Ingress) {
+                has_ingress_policy = true;
+                let rules = spec.ingress.as_deref().unwrap_or(&[]);
+                for rule in rules {
+                    let peer_ids = peer_ids_for_rule(&policy_ns, rule.from.as_ref(), &identities);
+                    for peer_id in peer_ids {
+                        let rule_specs = rule_specs_for_peer(
+                            peer_id,
+                            &identity,
+                            &identity_by_id,
+                            &pods,
+                            rule.ports.as_ref(),
+                        );
+                        add_rule_specs(&mut ingress_rules, &[peer_id], &rule_specs);
+                    }
+                }
+            }
+
+            if policy_affects_type(spec, PolicyType::Egress) {
+                has_egress_policy = true;
+                let rules = spec.egress.as_deref().unwrap_or(&[]);
+                for rule in rules {
+                    let peer_ids = peer_ids_for_rule(&policy_ns, rule.to.as_ref(), &identities);
+                    for peer_id in peer_ids {
+                        let rule_specs = rule_specs_for_peer(
+                            peer_id,
+                            &identity,
+                            &identity_by_id,
+                            &pods,
+                            rule.ports.as_ref(),
+                        );
+                        add_rule_specs(&mut egress_rules, &[peer_id], &rule_specs);
+                    }
+                }
+            }
+        }
+
+        if has_ingress_policy {
+            add_rule_specs(&mut ingress_rules, &[ANY_ID], &[RuleSpec::deny_any()]);
+        }
+
+        for (peer_id, rule_specs) in ingress_rules {
+            if rule_specs.is_empty() {
+                continue;
+            }
+            let (ruleset_id, ruleset_entries) =
+                build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
+            if written_rulesets.insert(ruleset_id) {
+                for (key, value) in &ruleset_entries {
+                    ctx.policy_bpf_state.update_rule(*key, *value)?;
+                }
+            }
+            desired_index.insert(
+                PolicyIndexKey {
+                    src_id: peer_id,
+                    dst_id: identity_id,
+                    direction: PolicyDirection::ingress_u8(),
+                    _pad: [0; 3],
+                },
+                ruleset_id,
+            );
+        }
+
+        if has_egress_policy {
+            add_rule_specs(&mut egress_rules, &[ANY_ID], &[RuleSpec::deny_any()]);
+        }
+
+        for (peer_id, rule_specs) in egress_rules {
+            if rule_specs.is_empty() {
+                continue;
+            }
+            let (ruleset_id, ruleset_entries) =
+                build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
+            if written_rulesets.insert(ruleset_id) {
+                for (key, value) in &ruleset_entries {
+                    ctx.policy_bpf_state.update_rule(*key, *value)?;
+                }
+            }
             desired_index.insert(
                 PolicyIndexKey {
                     src_id: identity_id,
-                    dst_id: ANY_ID,
-                    direction: PolicyDirection::any_u8(),
+                    dst_id: peer_id,
+                    direction: PolicyDirection::egress_u8(),
                     _pad: [0; 3],
                 },
-                RULESET_NONE,
+                ruleset_id,
             );
-        } else {
-            let mut ingress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
-            let mut egress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
-
-            for policy in &selected_netpols {
-                let Some(spec) = &policy.spec else {
-                    continue;
-                };
-
-                let Some(policy_ns) = policy.namespace() else {
-                    continue;
-                };
-
-                if policy_affects_type(spec, PolicyType::Ingress) {
-                    has_ingress_policy = true;
-                    let rules = spec.ingress.as_deref().unwrap_or(&[]);
-                    for rule in rules {
-                        let peer_ids =
-                            peer_ids_for_rule(&policy_ns, rule.from.as_ref(), &identities);
-                        for peer_id in peer_ids {
-                            let rule_specs = rule_specs_for_peer(
-                                peer_id,
-                                self,
-                                &identity_by_id,
-                                &pods,
-                                rule.ports.as_ref(),
-                            );
-                            add_rule_specs(&mut ingress_rules, &[peer_id], &rule_specs);
-                        }
-                    }
-                }
-
-                if policy_affects_type(spec, PolicyType::Egress) {
-                    has_egress_policy = true;
-                    let rules = spec.egress.as_deref().unwrap_or(&[]);
-                    for rule in rules {
-                        let peer_ids = peer_ids_for_rule(&policy_ns, rule.to.as_ref(), &identities);
-                        for peer_id in peer_ids {
-                            let rule_specs = rule_specs_for_peer(
-                                peer_id,
-                                self,
-                                &identity_by_id,
-                                &pods,
-                                rule.ports.as_ref(),
-                            );
-                            add_rule_specs(&mut egress_rules, &[peer_id], &rule_specs);
-                        }
-                    }
-                }
-            }
-
-            if has_ingress_policy {
-                add_rule_specs(&mut ingress_rules, &[ANY_ID], &[RuleSpec::deny_any()]);
-            }
-
-            for (peer_id, rule_specs) in ingress_rules {
-                if rule_specs.is_empty() {
-                    continue;
-                }
-                let (ruleset_id, ruleset_entries) =
-                    build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
-                if written_rulesets.insert(ruleset_id) {
-                    for (key, value) in &ruleset_entries {
-                        ctx.policy_bpf_state.update_rule(*key, *value)?;
-                    }
-                }
-                desired_index.insert(
-                    PolicyIndexKey {
-                        src_id: peer_id,
-                        dst_id: identity_id,
-                        direction: PolicyDirection::ingress_u8(),
-                        _pad: [0; 3],
-                    },
-                    ruleset_id,
-                );
-            }
-
-            if has_egress_policy {
-                add_rule_specs(&mut egress_rules, &[ANY_ID], &[RuleSpec::deny_any()]);
-            }
-
-            for (peer_id, rule_specs) in egress_rules {
-                if rule_specs.is_empty() {
-                    continue;
-                }
-                let (ruleset_id, ruleset_entries) =
-                    build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
-                if written_rulesets.insert(ruleset_id) {
-                    for (key, value) in &ruleset_entries {
-                        ctx.policy_bpf_state.update_rule(*key, *value)?;
-                    }
-                }
-                desired_index.insert(
-                    PolicyIndexKey {
-                        src_id: identity_id,
-                        dst_id: peer_id,
-                        direction: PolicyDirection::egress_u8(),
-                        _pad: [0; 3],
-                    },
-                    ruleset_id,
-                );
-            }
         }
-
-        let current_index: HashMap<PolicyIndexKey, u32> = index_state
-            .iter()
-            .filter(|(key, _)| identity_key_applies(identity_id, key))
-            .map(|(key, value)| (*key, *value))
-            .collect();
-
-        for (key, current_ruleset_id) in &current_index {
-            match desired_index.get(key) {
-                Some(desired_ruleset_id) if *desired_ruleset_id == *current_ruleset_id => {}
-                Some(desired_ruleset_id) => {
-                    ctx.policy_bpf_state
-                        .update_index(*key, *desired_ruleset_id)?;
-                    release_ruleset_if_unused(&ctx, *current_ruleset_id)?;
-                }
-                None => {
-                    ctx.policy_bpf_state.delete_index(key)?;
-                    release_ruleset_if_unused(&ctx, *current_ruleset_id)?;
-                }
-            }
-        }
-
-        for (key, ruleset_id) in desired_index {
-            if current_index.contains_key(&key) {
-                continue;
-            }
-            ctx.policy_bpf_state.update_index(key, ruleset_id)?;
-        }
-
-        Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
     }
+
+    let current_index: HashMap<PolicyIndexKey, u32> = index_state
+        .iter()
+        .filter(|(key, _)| identity_key_applies(identity_id, key))
+        .map(|(key, value)| (*key, *value))
+        .collect();
+
+    for (key, current_ruleset_id) in &current_index {
+        match desired_index.get(key) {
+            Some(desired_ruleset_id) if *desired_ruleset_id == *current_ruleset_id => {}
+            Some(desired_ruleset_id) => {
+                ctx.policy_bpf_state
+                    .update_index(*key, *desired_ruleset_id)?;
+                release_ruleset_if_unused(&ctx, *current_ruleset_id)?;
+            }
+            None => {
+                ctx.policy_bpf_state.delete_index(key)?;
+                release_ruleset_if_unused(&ctx, *current_ruleset_id)?;
+            }
+        }
+    }
+
+    for (key, ruleset_id) in desired_index {
+        if current_index.contains_key(&key) {
+            continue;
+        }
+        ctx.policy_bpf_state.update_index(key, ruleset_id)?;
+    }
+
+    Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -705,7 +712,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
@@ -781,7 +789,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
@@ -866,7 +875,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
@@ -951,7 +961,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
@@ -1045,7 +1056,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
@@ -1132,7 +1144,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
@@ -1226,7 +1239,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
 
@@ -1336,7 +1350,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
@@ -1478,7 +1493,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
@@ -1635,7 +1651,8 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
         let index = ctx.policy_bpf_state.index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
@@ -1756,7 +1773,9 @@ mod tests {
         };
 
         let ctx = Arc::new(ctx);
-        identity.reconcile(ctx.clone()).unwrap();
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity.clone(), ctx.clone()).unwrap();
+
         let index_before = ctx.policy_bpf_state.index_state().unwrap();
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
@@ -1769,7 +1788,7 @@ mod tests {
             .expect("expected initial ingress entry");
 
         insert(&mut policy_writer, policy_v2);
-        identity.reconcile(ctx.clone()).unwrap();
+        inner_reconcile_policy_with_identity(identity.clone(), ctx.clone()).unwrap();
         let index_after = ctx.policy_bpf_state.index_state().unwrap();
         let new_ruleset_id = *index_after
             .get(&idx_key)

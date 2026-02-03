@@ -29,9 +29,16 @@ pub async fn start(
     info!("initializing bpf");
     bpf::loader::init_bpf()?;
 
+    info!("starting policy service");
+    let policy_state = PolicyBpfState::try_new()?;
+    let policy_state = PolicyState::new(policy_state.index(), policy_state.ruleset());
+    let policy_context =
+        bpf::policy::run(kube_client.clone(), policy_state.clone(), cancel.clone()).await?;
+    let policy_server = http::grpc::policy::server(policy_state.clone());
+
     info!("starting cni service");
-    let loader = http::grpc::cni::LoaderState;
-    let cni_server = CniServer::new(loader);
+    let cni_state = http::grpc::cni::CniState::new(policy_context);
+    let cni_server = CniServer::new(cni_state);
 
     info!("loading ip maps");
     let (ipv4_map, ipv6_map) = bpf::ip::load_maps()?;
@@ -57,12 +64,6 @@ pub async fn start(
     let state = ServiceEndpointState::new(service_endpoint_v4, service_endpoint_v6);
     bpf::service::run(kube_client.clone(), state.clone(), cancel.clone()).await?;
     let service_server = http::grpc::service::server(state);
-
-    info!("starting policy service");
-    let policy_state = PolicyBpfState::try_new()?;
-    let policy_state = PolicyState::new(policy_state.index(), policy_state.ruleset());
-    bpf::policy::run(kube_client.clone(), policy_state.clone(), cancel.clone()).await?;
-    let policy_server = http::grpc::policy::server(policy_state);
 
     info!("starting conntrack cleanup background process");
     let cleanup_handle = tokio::spawn(bpf::conntrack::run_cleanup(cancel.clone()));

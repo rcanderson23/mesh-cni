@@ -14,7 +14,8 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     Error, PolicyControllerBpf, Result,
     context::{Context, RulesetState},
-    controller::{error_policy, reconcile},
+    controller::error_policy,
+    identity::reconcile_policy_with_identity,
     selector::{
         egress_rules_select_identity, ingress_rules_select_identity, policy_selects_identity,
     },
@@ -24,7 +25,7 @@ pub async fn start_policy_controllers<P>(
     client: Client,
     policy_bpf_state: P,
     cancel: CancellationToken,
-) -> Result<()>
+) -> Result<Arc<Context<P>>>
 where
     P: PolicyControllerBpf + Send + Sync + 'static,
 {
@@ -110,12 +111,16 @@ where
             .watches_shared_stream(policy_subscriber, policy_mapper)
             .watches_shared_stream(pod_subscriber, pod_mapper)
             .graceful_shutdown_on(shutdown(cancel))
-            .run(reconcile, error_policy, context)
+            .run(
+                reconcile_policy_with_identity,
+                error_policy,
+                context.clone(),
+            )
             .filter_map(|x| async move { std::result::Result::ok(x) })
             .for_each(|_| futures::future::ready(())),
     );
 
-    Ok(())
+    Ok(context)
 }
 
 async fn shutdown(cancel: CancellationToken) {
