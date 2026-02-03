@@ -39,9 +39,8 @@ pub async fn reconcile_policy_with_identity<P: PolicyControllerBpf>(
 // allowing wildcard checks on port and proto. This ideally cuts down the number of BPF map
 // checks for a new flow as well as allowing for re-usable rulesets reducing map size.
 // We compute per-peer ingress/egress rules, resolve named ports against the peer
-// identity's pods (when used in the policy), inject default-deny for directions with
-// policyTypes but no allow rules, then diff desired vs current index entries and update
-// BPF maps while releasing unused rulesets.
+// identity's pods (when used in the policy), then diff desired vs current index
+// entries and update BPF maps while releasing unused rulesets.
 pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
     identity: Arc<Identity>,
     ctx: Arc<Context<P>>,
@@ -51,6 +50,10 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         .iter()
         .filter(|np| policy_selects_identity(np, &identity))
         .collect();
+
+    if selected_netpols.is_empty() {
+        return Ok(Action::requeue(DEFAULT_REQUEUE_DURATION));
+    }
 
     let identity_id = identity.spec.id;
     let index_state = ctx.policy_bpf_state.index_state()?;
@@ -65,117 +68,97 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
     let mut has_ingress_policy = false;
     let mut has_egress_policy = false;
 
-    if selected_netpols.is_empty() {
+    let mut ingress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
+    let mut egress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
+
+    for policy in &selected_netpols {
+        let Some(spec) = &policy.spec else {
+            continue;
+        };
+
+        let Some(policy_ns) = policy.namespace() else {
+            continue;
+        };
+
+        if policy_affects_type(spec, PolicyType::Ingress) {
+            has_ingress_policy = true;
+            let rules = spec.ingress.as_deref().unwrap_or(&[]);
+            for rule in rules {
+                let peer_ids = peer_ids_for_rule(&policy_ns, rule.from.as_ref(), &identities);
+                for peer_id in peer_ids {
+                    let rule_specs = rule_specs_for_peer(
+                        peer_id,
+                        &identity,
+                        &identity_by_id,
+                        &pods,
+                        rule.ports.as_ref(),
+                    );
+                    add_rule_specs(&mut ingress_rules, &[peer_id], &rule_specs);
+                }
+            }
+        }
+
+        if policy_affects_type(spec, PolicyType::Egress) {
+            has_egress_policy = true;
+            let rules = spec.egress.as_deref().unwrap_or(&[]);
+            for rule in rules {
+                let peer_ids = peer_ids_for_rule(&policy_ns, rule.to.as_ref(), &identities);
+                for peer_id in peer_ids {
+                    let rule_specs = rule_specs_for_peer(
+                        peer_id,
+                        &identity,
+                        &identity_by_id,
+                        &pods,
+                        rule.ports.as_ref(),
+                    );
+                    add_rule_specs(&mut egress_rules, &[peer_id], &rule_specs);
+                }
+            }
+        }
+    }
+
+    if has_ingress_policy && ingress_rules.is_empty() {
+        ingress_rules.insert(ANY_ID, Vec::new());
+    }
+
+    for (peer_id, rule_specs) in ingress_rules {
+        let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
+        if written_rulesets.insert(ruleset_id) {
+            for (key, value) in &ruleset_entries {
+                ctx.policy_bpf_state.update_rule(*key, *value)?;
+            }
+        }
+        desired_index.insert(
+            PolicyIndexKey {
+                src_id: peer_id,
+                dst_id: identity_id,
+                direction: PolicyDirection::Ingress.into(),
+                _pad: [0; 3],
+            },
+            ruleset_id,
+        );
+    }
+
+    if has_egress_policy && egress_rules.is_empty() {
+        egress_rules.insert(ANY_ID, Vec::new());
+    }
+
+    for (peer_id, rule_specs) in egress_rules {
+        let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
+        if written_rulesets.insert(ruleset_id) {
+            for (key, value) in &ruleset_entries {
+                ctx.policy_bpf_state.update_rule(*key, *value)?;
+            }
+        }
         desired_index.insert(
             PolicyIndexKey {
                 src_id: identity_id,
-                dst_id: ANY_ID,
-                direction: PolicyDirection::any_u8(),
+                dst_id: peer_id,
+                direction: PolicyDirection::Egress.into(),
                 _pad: [0; 3],
             },
-            RULESET_NONE,
+            ruleset_id,
         );
-    } else {
-        let mut ingress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
-        let mut egress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
-
-        for policy in &selected_netpols {
-            let Some(spec) = &policy.spec else {
-                continue;
-            };
-
-            let Some(policy_ns) = policy.namespace() else {
-                continue;
-            };
-
-            if policy_affects_type(spec, PolicyType::Ingress) {
-                has_ingress_policy = true;
-                let rules = spec.ingress.as_deref().unwrap_or(&[]);
-                for rule in rules {
-                    let peer_ids = peer_ids_for_rule(&policy_ns, rule.from.as_ref(), &identities);
-                    for peer_id in peer_ids {
-                        let rule_specs = rule_specs_for_peer(
-                            peer_id,
-                            &identity,
-                            &identity_by_id,
-                            &pods,
-                            rule.ports.as_ref(),
-                        );
-                        add_rule_specs(&mut ingress_rules, &[peer_id], &rule_specs);
-                    }
-                }
-            }
-
-            if policy_affects_type(spec, PolicyType::Egress) {
-                has_egress_policy = true;
-                let rules = spec.egress.as_deref().unwrap_or(&[]);
-                for rule in rules {
-                    let peer_ids = peer_ids_for_rule(&policy_ns, rule.to.as_ref(), &identities);
-                    for peer_id in peer_ids {
-                        let rule_specs = rule_specs_for_peer(
-                            peer_id,
-                            &identity,
-                            &identity_by_id,
-                            &pods,
-                            rule.ports.as_ref(),
-                        );
-                        add_rule_specs(&mut egress_rules, &[peer_id], &rule_specs);
-                    }
-                }
-            }
-        }
-
-        if has_ingress_policy {
-            add_rule_specs(&mut ingress_rules, &[ANY_ID], &[RuleSpec::deny_any()]);
-        }
-
-        for (peer_id, rule_specs) in ingress_rules {
-            if rule_specs.is_empty() {
-                continue;
-            }
-            let (ruleset_id, ruleset_entries) =
-                build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
-            if written_rulesets.insert(ruleset_id) {
-                for (key, value) in &ruleset_entries {
-                    ctx.policy_bpf_state.update_rule(*key, *value)?;
-                }
-            }
-            desired_index.insert(
-                PolicyIndexKey {
-                    src_id: peer_id,
-                    dst_id: identity_id,
-                    direction: PolicyDirection::ingress_u8(),
-                    _pad: [0; 3],
-                },
-                ruleset_id,
-            );
-        }
-
-        if has_egress_policy {
-            add_rule_specs(&mut egress_rules, &[ANY_ID], &[RuleSpec::deny_any()]);
-        }
-
-        for (peer_id, rule_specs) in egress_rules {
-            if rule_specs.is_empty() {
-                continue;
-            }
-            let (ruleset_id, ruleset_entries) =
-                build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
-            if written_rulesets.insert(ruleset_id) {
-                for (key, value) in &ruleset_entries {
-                    ctx.policy_bpf_state.update_rule(*key, *value)?;
-                }
-            }
-            desired_index.insert(
-                PolicyIndexKey {
-                    src_id: identity_id,
-                    dst_id: peer_id,
-                    direction: PolicyDirection::egress_u8(),
-                    _pad: [0; 3],
-                },
-                ruleset_id,
-            );
-        }
     }
 
     let current_index: HashMap<PolicyIndexKey, u32> = index_state
@@ -219,22 +202,14 @@ struct RuleSpec {
 impl Default for RuleSpec {
     fn default() -> Self {
         Self {
-            proto: PolicyProtocol::any_u8(),
+            proto: PolicyProtocol::Any.into(),
             port: ANY_PORT,
-            action: PolicyAction::allow_u8(),
+            action: PolicyAction::Allow.into(),
         }
     }
 }
 
-impl RuleSpec {
-    fn deny_any() -> Self {
-        Self {
-            proto: PolicyProtocol::any_u8(),
-            port: ANY_PORT,
-            action: PolicyAction::deny_u8(),
-        }
-    }
-}
+impl RuleSpec {}
 
 fn rule_specs_from_ports(
     identity: &Identity,
@@ -250,10 +225,10 @@ fn rule_specs_from_ports(
     let mut specs = Vec::new();
     for port in ports {
         let proto = match port.protocol.as_deref() {
-            None => PolicyProtocol::tcp_u8(),
-            Some("TCP") => PolicyProtocol::tcp_u8(),
-            Some("UDP") => PolicyProtocol::udp_u8(),
-            Some("SCTP") => PolicyProtocol::sctp_u8(),
+            None => PolicyProtocol::Tcp.into(),
+            Some("TCP") => PolicyProtocol::Tcp.into(),
+            Some("UDP") => PolicyProtocol::Udp.into(),
+            Some("SCTP") => PolicyProtocol::Sctp.into(),
             Some(_) => continue,
         };
 
@@ -261,7 +236,7 @@ fn rule_specs_from_ports(
             specs.push(RuleSpec {
                 proto,
                 port: ANY_PORT,
-                action: PolicyAction::allow_u8(),
+                action: PolicyAction::Allow.into(),
             });
             continue;
         };
@@ -279,7 +254,7 @@ fn rule_specs_from_ports(
                 specs.push(RuleSpec {
                     proto,
                     port: port_value,
-                    action: PolicyAction::allow_u8(),
+                    action: PolicyAction::Allow.into(),
                 });
             }
             IntOrString::String(port_name) => {
@@ -288,7 +263,7 @@ fn rule_specs_from_ports(
                     specs.push(RuleSpec {
                         proto,
                         port: resolved_port,
-                        action: PolicyAction::allow_u8(),
+                        action: PolicyAction::Allow.into(),
                     });
                 }
             }
@@ -369,11 +344,11 @@ fn labels_match_identity(identity: &Identity, pod: &Pod) -> bool {
 }
 
 fn container_port_matches_protocol(container_port: &ContainerPort, proto: u8) -> bool {
-    let declared = match container_port.protocol.as_deref() {
-        None => PolicyProtocol::tcp_u8(),
-        Some("TCP") => PolicyProtocol::tcp_u8(),
-        Some("UDP") => PolicyProtocol::udp_u8(),
-        Some("SCTP") => PolicyProtocol::sctp_u8(),
+    let declared: u8 = match container_port.protocol.as_deref() {
+        None => PolicyProtocol::Tcp.into(),
+        Some("TCP") => PolicyProtocol::Tcp.into(),
+        Some("UDP") => PolicyProtocol::Udp.into(),
+        Some("SCTP") => PolicyProtocol::Sctp.into(),
         Some(_) => return false,
     };
 
@@ -721,7 +696,7 @@ mod tests {
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
             dst_id: 10,
-            direction: PolicyDirection::ingress_u8(),
+            direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
         };
         let ruleset_id = *index.get(&idx_key).expect("expected index entry");
@@ -729,23 +704,23 @@ mod tests {
 
         let rule_key_a = PolicyRuleKey {
             ruleset_id,
-            proto: PolicyProtocol::tcp_u8(),
+            proto: PolicyProtocol::Tcp.into(),
             _pad0: [0; 3],
             port: 8080,
             _pad1: [0; 2],
         };
         let rule = rules.get(&rule_key_a).expect("expected ruleset entry");
-        assert_eq!(rule.action, PolicyAction::allow_u8());
+        assert_eq!(rule.action, PolicyAction::Allow as u8);
 
         let rule_key_b = PolicyRuleKey {
             ruleset_id,
-            proto: PolicyProtocol::tcp_u8(),
+            proto: PolicyProtocol::Tcp.into(),
             _pad0: [0; 3],
             port: 8081,
             _pad1: [0; 2],
         };
         let rule = rules.get(&rule_key_b).expect("expected ruleset entry");
-        assert_eq!(rule.action, PolicyAction::allow_u8());
+        assert_eq!(rule.action, PolicyAction::Allow as u8);
     }
 
     #[test]
@@ -798,11 +773,10 @@ mod tests {
         let idx_key = PolicyIndexKey {
             src_id: 42,
             dst_id: ANY_ID,
-            direction: PolicyDirection::any_u8(),
+            direction: PolicyDirection::Any.into(),
             _pad: [0; 3],
         };
-        let ruleset_id = *index.get(&idx_key).expect("expected default allow entry");
-        assert_eq!(ruleset_id, RULESET_NONE);
+        assert!(!index.contains_key(&idx_key));
         assert!(rules.is_empty());
     }
 
@@ -883,20 +857,20 @@ mod tests {
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
             dst_id: 7,
-            direction: PolicyDirection::ingress_u8(),
+            direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
         };
         let ruleset_id = *index.get(&idx_key).expect("expected any-id ingress entry");
         assert_ne!(ruleset_id, RULESET_NONE);
         let rule_key = PolicyRuleKey {
             ruleset_id,
-            proto: PolicyProtocol::tcp_u8(),
+            proto: PolicyProtocol::Tcp.into(),
             _pad0: [0; 3],
             port: 80,
             _pad1: [0; 2],
         };
         let rule = rules.get(&rule_key).expect("expected ruleset entry");
-        assert_eq!(rule.action, PolicyAction::allow_u8());
+        assert_eq!(rule.action, PolicyAction::Allow as u8);
     }
 
     #[test]
@@ -970,21 +944,16 @@ mod tests {
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
             dst_id: 9,
-            direction: PolicyDirection::ingress_u8(),
+            direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
         };
         let ruleset_id = *index.get(&idx_key).expect("expected ingress deny entry");
         assert_ne!(ruleset_id, RULESET_NONE);
 
-        let rule_key = PolicyRuleKey {
-            ruleset_id,
-            proto: PolicyProtocol::any_u8(),
-            _pad0: [0; 3],
-            port: ANY_PORT,
-            _pad1: [0; 2],
-        };
-        let rule = rules.get(&rule_key).expect("expected deny rule");
-        assert_eq!(rule.action, PolicyAction::deny_u8());
+        assert!(
+            rules.keys().all(|key| key.ruleset_id != ruleset_id),
+            "expected no allow rules for deny-by-default"
+        );
     }
 
     #[test]
@@ -1065,7 +1034,7 @@ mod tests {
         let idx_key = PolicyIndexKey {
             src_id: 11,
             dst_id: ANY_ID,
-            direction: PolicyDirection::egress_u8(),
+            direction: PolicyDirection::Egress.into(),
             _pad: [0; 3],
         };
         let ruleset_id = *index.get(&idx_key).expect("expected any-id egress entry");
@@ -1073,13 +1042,13 @@ mod tests {
 
         let rule_key = PolicyRuleKey {
             ruleset_id,
-            proto: PolicyProtocol::tcp_u8(),
+            proto: PolicyProtocol::Tcp.into(),
             _pad0: [0; 3],
             port: 443,
             _pad1: [0; 2],
         };
         let rule = rules.get(&rule_key).expect("expected ruleset entry");
-        assert_eq!(rule.action, PolicyAction::allow_u8());
+        assert_eq!(rule.action, PolicyAction::Allow as u8);
     }
 
     #[test]
@@ -1153,21 +1122,16 @@ mod tests {
         let idx_key = PolicyIndexKey {
             src_id: 12,
             dst_id: ANY_ID,
-            direction: PolicyDirection::egress_u8(),
+            direction: PolicyDirection::Egress.into(),
             _pad: [0; 3],
         };
         let ruleset_id = *index.get(&idx_key).expect("expected egress deny entry");
         assert_ne!(ruleset_id, RULESET_NONE);
 
-        let rule_key = PolicyRuleKey {
-            ruleset_id,
-            proto: PolicyProtocol::any_u8(),
-            _pad0: [0; 3],
-            port: ANY_PORT,
-            _pad1: [0; 2],
-        };
-        let rule = rules.get(&rule_key).expect("expected deny rule");
-        assert_eq!(rule.action, PolicyAction::deny_u8());
+        assert!(
+            rules.keys().all(|key| key.ruleset_id != ruleset_id),
+            "expected no allow rules for deny-by-default"
+        );
     }
 
     #[test]
@@ -1247,14 +1211,14 @@ mod tests {
         let ingress_key = PolicyIndexKey {
             src_id: ANY_ID,
             dst_id: 13,
-            direction: PolicyDirection::ingress_u8(),
+            direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
         };
         assert!(!index.contains_key(&ingress_key));
     }
 
     #[test]
-    fn reconcile_named_port_mismatch_emits_deny_rule() {
+    fn reconcile_named_port_mismatch_denies_by_default() {
         let identity = Identity::new(
             "ident-a",
             IdentitySpec {
@@ -1359,21 +1323,16 @@ mod tests {
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
             dst_id: 14,
-            direction: PolicyDirection::ingress_u8(),
+            direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
         };
         let ruleset_id = *index.get(&idx_key).expect("expected ingress entry");
         assert_ne!(ruleset_id, RULESET_NONE);
 
-        let rule_key = PolicyRuleKey {
-            ruleset_id,
-            proto: PolicyProtocol::any_u8(),
-            _pad0: [0; 3],
-            port: ANY_PORT,
-            _pad1: [0; 2],
-        };
-        let rule = rules.get(&rule_key).expect("expected deny fallback");
-        assert_eq!(rule.action, PolicyAction::deny_u8());
+        assert!(
+            rules.keys().all(|key| key.ruleset_id != ruleset_id),
+            "expected no allow rules for deny-by-default"
+        );
     }
 
     #[test]
@@ -1502,13 +1461,13 @@ mod tests {
         let allowed_key = PolicyIndexKey {
             src_id: 22,
             dst_id: 21,
-            direction: PolicyDirection::ingress_u8(),
+            direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
         };
         let denied_key = PolicyIndexKey {
             src_id: 23,
             dst_id: 21,
-            direction: PolicyDirection::ingress_u8(),
+            direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
         };
         let ruleset_id = *index.get(&allowed_key).expect("expected allowed peer");
@@ -1516,13 +1475,13 @@ mod tests {
 
         let rule_key = PolicyRuleKey {
             ruleset_id,
-            proto: PolicyProtocol::tcp_u8(),
+            proto: PolicyProtocol::Tcp.into(),
             _pad0: [0; 3],
             port: 80,
             _pad1: [0; 2],
         };
         let rule = rules.get(&rule_key).expect("expected allow rule");
-        assert_eq!(rule.action, PolicyAction::allow_u8());
+        assert_eq!(rule.action, PolicyAction::Allow as u8);
     }
 
     #[test]
@@ -1660,7 +1619,7 @@ mod tests {
         let idx_key = PolicyIndexKey {
             src_id: 42,
             dst_id: 41,
-            direction: PolicyDirection::ingress_u8(),
+            direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
         };
         let ruleset_id = *index.get(&idx_key).expect("expected peer ingress entry");
@@ -1668,13 +1627,13 @@ mod tests {
 
         let rule_key = PolicyRuleKey {
             ruleset_id,
-            proto: PolicyProtocol::tcp_u8(),
+            proto: PolicyProtocol::Tcp.into(),
             _pad0: [0; 3],
             port: 8080,
             _pad1: [0; 2],
         };
         let rule = rules.get(&rule_key).expect("expected resolved named port");
-        assert_eq!(rule.action, PolicyAction::allow_u8());
+        assert_eq!(rule.action, PolicyAction::Allow as u8);
     }
 
     #[test]
@@ -1780,7 +1739,7 @@ mod tests {
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
             dst_id: 31,
-            direction: PolicyDirection::ingress_u8(),
+            direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
         };
         let old_ruleset_id = *index_before

@@ -5,7 +5,10 @@ use aya_ebpf::{
 use aya_log_ebpf::info;
 use mesh_cni_ebpf_common::{
     conntrack::{ConntrackKeyV4, ConntrackValue},
-    policy::{Action, PolicyDirection, PolicyIndexKey, PolicyRuleKey, PolicyValue, RULESET_NONE},
+    policy::{
+        ANY_ID, ANY_PORT, Action, PolicyDirection, PolicyIndexKey, PolicyProtocol, PolicyRuleKey,
+        PolicyValue, RULESET_NONE,
+    },
 };
 use network_types::{eth::EthHdr, ip::Ipv4Hdr, tcp::TcpHdr, udp::UdpHdr};
 
@@ -86,32 +89,100 @@ pub fn handle_ipv4(ctx: TcContext, direction: PolicyDirection) -> Result<i32, i3
         let _ = CONNTRACK_V4.insert(ct_key, ConntrackValue { last_seen_ns: now }, 0);
     }
 
-    let idx_key = PolicyIndexKey {
-        src_id,
-        dst_id,
-        direction: direction as u8,
-        _pad: [0; 3],
-    };
-
-    let mut action = Action::allow_u8();
+    let mut action: u8 = Action::Allow.into();
     let mut ruleset_id = RULESET_NONE;
-    if let Some(id) = unsafe { POLICY_INDEX.get(&idx_key) } {
-        ruleset_id = *id;
-        if ruleset_id != RULESET_NONE {
-            let rule_key = PolicyRuleKey {
-                ruleset_id,
-                proto,
-                _pad0: [0; 3],
-                port: dst_port,
-                _pad1: [0; 2],
-            };
-            if let Some(PolicyValue {
-                action: rule_action,
-            }) = unsafe { POLICY_RULESET.get(&rule_key) }
-            {
-                action = *rule_action;
-            } else {
-                action = Action::deny_u8();
+
+    let direction: u8 = direction.into();
+    let idx_candidates = [
+        PolicyIndexKey {
+            src_id,
+            dst_id,
+            direction,
+            _pad: [0; 3],
+        },
+        PolicyIndexKey {
+            src_id,
+            dst_id,
+            direction: PolicyDirection::Any.into(),
+            _pad: [0; 3],
+        },
+        PolicyIndexKey {
+            src_id: ANY_ID,
+            dst_id,
+            direction,
+            _pad: [0; 3],
+        },
+        PolicyIndexKey {
+            src_id: ANY_ID,
+            dst_id,
+            direction: PolicyDirection::Any.into(),
+            _pad: [0; 3],
+        },
+        PolicyIndexKey {
+            src_id,
+            dst_id: ANY_ID,
+            direction,
+            _pad: [0; 3],
+        },
+        PolicyIndexKey {
+            src_id,
+            dst_id: ANY_ID,
+            direction: PolicyDirection::Any.into(),
+            _pad: [0; 3],
+        },
+    ];
+
+    let mut found_index = false;
+    for idx_key in idx_candidates {
+        if let Some(id) = unsafe { POLICY_INDEX.get(idx_key) } {
+            ruleset_id = *id;
+            found_index = true;
+            break;
+        }
+    }
+
+    if found_index {
+        if ruleset_id == RULESET_NONE {
+            action = Action::Deny.into();
+        } else {
+            let rule_candidates = [
+                PolicyRuleKey {
+                    ruleset_id,
+                    proto,
+                    _pad0: [0; 3],
+                    port: dst_port,
+                    _pad1: [0; 2],
+                },
+                PolicyRuleKey {
+                    ruleset_id,
+                    proto,
+                    _pad0: [0; 3],
+                    port: ANY_PORT,
+                    _pad1: [0; 2],
+                },
+                PolicyRuleKey {
+                    ruleset_id,
+                    proto: PolicyProtocol::Any.into(),
+                    _pad0: [0; 3],
+                    port: ANY_PORT,
+                    _pad1: [0; 2],
+                },
+            ];
+
+            let mut matched = false;
+            for rule_key in rule_candidates {
+                if let Some(PolicyValue {
+                    action: rule_action,
+                }) = unsafe { POLICY_RULESET.get(rule_key) }
+                {
+                    action = *rule_action;
+                    matched = true;
+                    break;
+                }
+            }
+
+            if !matched {
+                action = Action::Deny.into();
             }
         }
     }
@@ -126,6 +197,5 @@ pub fn handle_ipv4(ctx: TcContext, direction: PolicyDirection) -> Result<i32, i3
         ruleset_id,
         action,
     );
-
     Ok(TC_ACT_PIPE)
 }

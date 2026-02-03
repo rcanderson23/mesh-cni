@@ -17,17 +17,9 @@ pub enum PolicyDirection {
     Egress = 2,
 }
 
-impl PolicyDirection {
-    pub const fn any_u8() -> u8 {
-        PolicyDirection::Any as u8
-    }
-
-    pub const fn ingress_u8() -> u8 {
-        PolicyDirection::Ingress as u8
-    }
-
-    pub const fn egress_u8() -> u8 {
-        PolicyDirection::Egress as u8
+impl From<PolicyDirection> for u8 {
+    fn from(value: PolicyDirection) -> Self {
+        value as u8
     }
 }
 
@@ -91,13 +83,9 @@ pub enum Action {
     Deny = 1,
 }
 
-impl Action {
-    pub const fn allow_u8() -> u8 {
-        Action::Allow as u8
-    }
-
-    pub const fn deny_u8() -> u8 {
-        Action::Deny as u8
+impl From<Action> for u8 {
+    fn from(value: Action) -> Self {
+        value as u8
     }
 }
 
@@ -133,21 +121,9 @@ pub enum PolicyProtocol {
     Unknown = 255,
 }
 
-impl PolicyProtocol {
-    pub const fn any_u8() -> u8 {
-        PolicyProtocol::Any as u8
-    }
-
-    pub const fn tcp_u8() -> u8 {
-        PolicyProtocol::Tcp as u8
-    }
-
-    pub const fn udp_u8() -> u8 {
-        PolicyProtocol::Udp as u8
-    }
-
-    pub const fn sctp_u8() -> u8 {
-        PolicyProtocol::Sctp as u8
+impl From<PolicyProtocol> for u8 {
+    fn from(value: PolicyProtocol) -> Self {
+        value as u8
     }
 }
 
