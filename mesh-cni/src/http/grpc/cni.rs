@@ -21,7 +21,7 @@ use tracing::{error, info};
 
 use crate::{
     Result,
-    bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_INGRESS_TC},
+    bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC},
 };
 
 pub struct CniState<P: ReconcilePolicy + Send + Sync + 'static> {
@@ -104,27 +104,30 @@ impl<P: ReconcilePolicy + Send + Sync + 'static> CniApi for CniState<P> {
             .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
 
         let _ = tc::qdisc_add_clsact(&request.iface);
+
+        // Attaching to the veth on the host network means that the egress hook
+        // is traffic that is going into the pod and the reverse where the ingress
+        // hook is traffic leaving the pod
         info!("adding tc ingress progam to {}", &request.iface);
         attach_and_pin_links(
             &request.iface,
             BPF_PROGRAM_INGRESS_TC.path(),
-            TcAttachType::Ingress,
+            TcAttachType::Egress,
         )
         .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
 
         info!("adding tc egress progam to {}", &request.iface);
         if let Err(e) = attach_and_pin_links(
             &request.iface,
-            BPF_PROGRAM_INGRESS_TC.path(),
-            TcAttachType::Egress,
+            BPF_PROGRAM_EGRESS_TC.path(),
+            TcAttachType::Ingress,
         ) {
             let ingress_path = pin_path(&request.iface, TcAttachType::Ingress);
             let egress_path = pin_path(&request.iface, TcAttachType::Egress);
             for path in [ingress_path, egress_path] {
-                let Err(u) = unpin_path(path) else {
-                    continue;
+                if let Err(u) = unpin_path(path) {
+                    error!(%u, "failed to unpin path");
                 };
-                error!(%u, "failed to unpin path");
             }
 
             error!(%e, "failed to attach and pin egress link");
@@ -198,14 +201,7 @@ fn attach_and_pin_links(
 
     let link = prog.take_link(link_id)?;
     let link: FdLink = link.try_into()?;
-    let pin_path = match attach_type {
-        TcAttachType::Ingress => PathBuf::from(BPF_MESH_LINKS_DIR)
-            .join(format!("{}{}_ingress", MESH_INGRESS_LINK_PREFIX, iface)),
-        TcAttachType::Egress => PathBuf::from(BPF_MESH_LINKS_DIR)
-            .join(format!("{}{}_egress", MESH_INGRESS_LINK_PREFIX, iface)),
-        TcAttachType::Custom(_) => PathBuf::from(BPF_MESH_LINKS_DIR)
-            .join(format!("{}{}_custom", MESH_INGRESS_LINK_PREFIX, iface)),
-    };
+    let pin_path = pin_path(iface, attach_type);
     link.pin(pin_path)?;
     Ok(())
 }

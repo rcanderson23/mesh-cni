@@ -17,6 +17,7 @@ use mesh_cni_ebpf_common::IdentityId;
 use crate::{Result, bpf::ip::LpmKeyNetwork};
 
 pub(crate) const BPF_PROGRAM_INGRESS_TC: BpfNamePath = BpfNamePath::Program("mesh_cni_ingress");
+pub(crate) const BPF_PROGRAM_EGRESS_TC: BpfNamePath = BpfNamePath::Program("mesh_cni_egress");
 pub const BPF_PROGRAM_CGROUP_CONNECT_V4: BpfNamePath =
     BpfNamePath::Program("mesh_cni_cgroup_connect4");
 pub const BPF_LINK_CGROUP_CONNECT_V4_PATH: &str = "/sys/fs/bpf/mesh/links/mesh_cni_cgroup_connect4";
@@ -54,8 +55,11 @@ pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 4] = [
     BPF_MAP_ENDPOINTS_V6,
 ];
 
-pub(crate) const PROG_LIST: [BpfNamePath; 2] =
-    [BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_INGRESS_TC];
+pub(crate) const PROG_LIST: [BpfNamePath; 3] = [
+    BPF_PROGRAM_CGROUP_CONNECT_V4,
+    BPF_PROGRAM_INGRESS_TC,
+    BPF_PROGRAM_EGRESS_TC,
+];
 
 pub enum BpfNamePath {
     Map(&'static str),

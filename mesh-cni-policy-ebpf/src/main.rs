@@ -2,11 +2,19 @@
 #![no_main]
 
 use aya_ebpf::{macros::classifier, programs::TcContext};
-use mesh_cni_policy_ebpf::ingress::try_mesh_cni_ingress;
+use mesh_cni_policy_ebpf::{egress::try_mesh_cni_egress, ingress::try_mesh_cni_ingress};
 
 #[classifier]
 pub fn mesh_cni_ingress(ctx: TcContext) -> i32 {
     match try_mesh_cni_ingress(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[classifier]
+pub fn mesh_cni_egress(ctx: TcContext) -> i32 {
+    match try_mesh_cni_egress(ctx) {
         Ok(ret) => ret,
         Err(ret) => ret,
     }

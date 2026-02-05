@@ -117,7 +117,7 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         }
     }
 
-    if has_ingress_policy && ingress_rules.is_empty() {
+    if has_ingress_policy && !ingress_rules.contains_key(&ANY_ID) {
         ingress_rules.insert(ANY_ID, Vec::new());
     }
 
@@ -139,7 +139,7 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         );
     }
 
-    if has_egress_policy && egress_rules.is_empty() {
+    if has_egress_policy && !egress_rules.contains_key(&ANY_ID) {
         egress_rules.insert(ANY_ID, Vec::new());
     }
 
@@ -1634,6 +1634,21 @@ mod tests {
         };
         let rule = rules.get(&rule_key).expect("expected resolved named port");
         assert_eq!(rule.action, PolicyAction::Allow as u8);
+
+        let deny_key = PolicyIndexKey {
+            src_id: ANY_ID,
+            dst_id: 41,
+            direction: PolicyDirection::Ingress.into(),
+            _pad: [0; 3],
+        };
+        let deny_ruleset_id = *index
+            .get(&deny_key)
+            .expect("expected any-id ingress deny entry");
+        assert_ne!(deny_ruleset_id, RULESET_NONE);
+        assert!(
+            rules.keys().all(|key| key.ruleset_id != deny_ruleset_id),
+            "deny ruleset should have no rules"
+        );
     }
 
     #[test]

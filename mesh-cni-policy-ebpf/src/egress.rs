@@ -21,7 +21,7 @@ use network_types::{
 use crate::{CONNTRACK_V4, id_v4, policy::check_policy};
 
 #[inline]
-pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
+pub fn try_mesh_cni_egress(ctx: TcContext) -> Result<i32, i32> {
     let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
 
     let Ok(ether_type) = ethhdr.ether_type() else {
@@ -119,14 +119,13 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         return Ok(TC_ACT_PIPE);
     }
 
-    if check_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Egress) == Action::Deny {
+    if check_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Ingress) == Action::Deny {
         info!(
             &ctx,
             "denying traffic src: {}:{} dst: {}:{}", src_id, src_port, dst_id, dst_port
         );
         return Ok(TC_ACT_SHOT);
     }
-
     if should_insert {
         if CONNTRACK_V4
             .insert(ct_key, ConntrackValue { last_seen_ns: now }, 0)

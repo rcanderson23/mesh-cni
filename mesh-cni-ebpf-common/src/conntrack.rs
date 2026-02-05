@@ -1,3 +1,5 @@
+use crate::IdentityId;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ConntrackKeyV4 {
@@ -11,6 +13,7 @@ pub struct ConntrackKeyV4 {
     pub dst_port: u16,
     pub proto: u8,
     pub _pad: [u8; 3],
+    pub initiator_id: IdentityId,
 }
 
 #[cfg(feature = "user")]

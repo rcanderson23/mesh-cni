@@ -16,6 +16,15 @@ pub enum PolicyDirection {
     Ingress = 1,
     Egress = 2,
 }
+impl PolicyDirection {
+    pub fn opposite(&self) -> PolicyDirection {
+        match self {
+            PolicyDirection::Any => PolicyDirection::Any,
+            PolicyDirection::Ingress => PolicyDirection::Egress,
+            PolicyDirection::Egress => PolicyDirection::Ingress,
+        }
+    }
+}
 
 impl From<PolicyDirection> for u8 {
     fn from(value: PolicyDirection) -> Self {

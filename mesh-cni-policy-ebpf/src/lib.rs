@@ -1,7 +1,8 @@
 #![no_std]
 
+pub mod egress;
 pub mod ingress;
-mod ipv4;
+pub(crate) mod policy;
 
 use aya_ebpf::{
     macros::map,

@@ -76,14 +76,6 @@ pub fn try_mesh_cni_cgroup_connect4(ctx: SockAddrContext) -> Result<i32, i32> {
     unsafe {
         (*ptr).user_ip4 = endpoints_value.ip.to_be();
         (*ptr).user_port = endpoints_value.port.to_be() as u32;
-        info!(
-            &ctx,
-            "found matching service, replacing {}:{} with {}:{}",
-            Ipv4Addr::from(service_key.ip),
-            service_key.port,
-            Ipv4Addr::from(endpoints_value.ip),
-            endpoints_value.port
-        );
     }
 
     Ok(1)

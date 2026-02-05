@@ -14,8 +14,8 @@ use crate::{
     Result,
     bpf::{
         BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_FS_DIR, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR,
-        BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_INGRESS_TC, BpfNamePath,
-        POLICY_MAPS_LIST, PROG_LIST, SERVICE_MAPS_LIST,
+        BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_EGRESS_TC,
+        BPF_PROGRAM_INGRESS_TC, BpfNamePath, POLICY_MAPS_LIST, PROG_LIST, SERVICE_MAPS_LIST,
     },
 };
 
@@ -45,7 +45,10 @@ pub fn init_bpf() -> Result<()> {
     )))?;
 
     info!("ensuring ingress program loaded and pinned");
-    ensure_ingress_program(&mut policy_ebpf)?;
+    ensure_tc_program(&mut policy_ebpf, BPF_PROGRAM_INGRESS_TC)?;
+
+    info!("ensuring egress program loaded and pinned");
+    ensure_tc_program(&mut policy_ebpf, BPF_PROGRAM_EGRESS_TC)?;
 
     pin_maps(&mut policy_ebpf, &POLICY_MAPS_LIST)?;
 
@@ -108,24 +111,24 @@ fn reset_pins() -> Result<()> {
     Ok(())
 }
 
-fn ensure_ingress_program(ebpf: &mut Ebpf) -> Result<()> {
-    if fs::exists(BPF_PROGRAM_INGRESS_TC.path())? {
+fn ensure_tc_program(ebpf: &mut Ebpf, prog_path_name: BpfNamePath) -> Result<()> {
+    if fs::exists(prog_path_name.path())? {
         return Ok(());
     }
-    let ingress: &mut SchedClassifier = ebpf
-        .program_mut(BPF_PROGRAM_INGRESS_TC.name())
-        .ok_or_else(|| anyhow!("failed to get program {}", BPF_PROGRAM_INGRESS_TC.name()))?
+    let prog: &mut SchedClassifier = ebpf
+        .program_mut(prog_path_name.name())
+        .ok_or_else(|| anyhow!("failed to get program {}", prog_path_name.name()))?
         .try_into()?;
 
-    if let Err(e) = ingress.load()
+    if let Err(e) = prog.load()
         && !matches!(e, aya::programs::ProgramError::AlreadyLoaded)
     {
         return Err(e.into());
     };
 
-    if !fs::exists(BPF_PROGRAM_INGRESS_TC.path())? {
-        info!("pinning ingress program to bpffs");
-        ingress.pin(BPF_PROGRAM_INGRESS_TC.path())?;
+    if !fs::exists(prog_path_name.path())? {
+        info!("pinning program to bpffs");
+        prog.pin(prog_path_name.path())?;
     }
 
     Ok(())
@@ -141,6 +144,10 @@ fn start_ebpf_logger() -> Result<()> {
 
     let ingress = SchedClassifier::from_pin(BPF_PROGRAM_INGRESS_TC.path())?;
     let info = ingress.info()?;
+    start_ebpf_logger_from_prog_id(info.id())?;
+
+    let egress = SchedClassifier::from_pin(BPF_PROGRAM_EGRESS_TC.path())?;
+    let info = egress.info()?;
     start_ebpf_logger_from_prog_id(info.id())?;
 
     Ok(())
