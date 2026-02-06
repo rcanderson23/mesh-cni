@@ -1,12 +1,10 @@
-use core::net::Ipv4Addr;
-
 use aya_ebpf::{
     bindings::{TC_ACT_PIPE, TC_ACT_SHOT},
     helpers::bpf_ktime_get_ns,
     maps::lpm_trie::Key as LpmKey,
     programs::TcContext,
 };
-use aya_log_ebpf::{error, info, warn};
+use aya_log_ebpf::{error, info};
 use mesh_cni_ebpf_common::{
     conntrack::{ConntrackKeyV4, ConntrackValue},
     policy::{Action, PolicyDirection},
@@ -127,13 +125,10 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         return Ok(TC_ACT_SHOT);
     }
 
-    if should_insert {
-        if CONNTRACK_V4
-            .insert(ct_key, ConntrackValue { last_seen_ns: now }, 0)
-            .is_err()
-        {
-            error!(&ctx, "failed to insert into conntrack");
-        }
+    if should_insert
+        && let Err(e) = CONNTRACK_V4.insert(ct_key, ConntrackValue { last_seen_ns: now }, 0)
+    {
+        error!(&ctx, "failed to insert into conntrack: {}", e);
     }
     Ok(TC_ACT_PIPE)
 }

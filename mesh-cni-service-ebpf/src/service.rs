@@ -3,7 +3,7 @@ use core::net::Ipv4Addr;
 use aya_ebpf::{
     bindings::bpf_sock_addr, helpers::generated::bpf_get_prandom_u32, programs::SockAddrContext,
 };
-use aya_log_ebpf::{debug, info};
+use aya_log_ebpf::debug;
 use mesh_cni_ebpf_common::service::{EndpointKey, ServiceKeyV4};
 
 use crate::{ENDPOINTS_V4, SERVICES_V4};
@@ -95,12 +95,7 @@ fn build_service_key(ctx: &SockAddrContext, ptr: *mut bpf_sock_addr) -> Result<S
 }
 
 #[inline]
-fn get_random() -> u32 {
-    unsafe { bpf_get_prandom_u32() }
-}
-
-#[inline]
 fn get_position(count: u16) -> u16 {
-    let rand = get_random() as u16;
+    let rand = unsafe { bpf_get_prandom_u32() as u16 };
     rand % count
 }

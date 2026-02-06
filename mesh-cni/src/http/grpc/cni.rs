@@ -3,7 +3,6 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::bail;
 use aya::programs::{
     SchedClassifier, TcAttachType,
     links::{FdLink, LinkError, PinnedLink},
@@ -16,6 +15,7 @@ use mesh_cni_api::cni::v1::{
 use mesh_cni_crds::v1alpha1::identity::Identity;
 use mesh_cni_k8s_utils::sanitize_pod_labels;
 use mesh_cni_policy_controller::{Context, PolicyControllerBpf, reconcile_identity};
+use tokio::time::{Duration, sleep};
 use tonic::{Code, Request, Response, Status};
 use tracing::{error, info};
 
@@ -34,47 +34,6 @@ const MESH_INGRESS_LINK_PREFIX: &str = "mesh_cni_ingress_";
 impl<P: ReconcilePolicy + Send + Sync + 'static> CniState<P> {
     pub fn new(policy_reconciler: P) -> Self {
         Self { policy_reconciler }
-    }
-}
-
-pub trait ReconcilePolicy {
-    fn reconcile_policy(&self, pod_name: &str, pod_namespace: &str) -> Result<()>;
-}
-
-impl<P: PolicyControllerBpf + Send + Sync + 'static> ReconcilePolicy for Arc<Context<P>> {
-    fn reconcile_policy(&self, pod_name: &str, pod_namespace: &str) -> Result<()> {
-        let Some(pod) = self
-            .pod_store
-            .get(&ObjectRef::new(pod_name).within(pod_namespace))
-        else {
-            bail!("faild to find pod in store");
-        };
-
-        let identities: Vec<Arc<Identity>> = self
-            .identity_store
-            .state()
-            .iter()
-            .filter(|i| {
-                let mut pod_labels = pod.labels().to_owned();
-                sanitize_pod_labels(&mut pod_labels);
-                i.namespace() == pod.namespace() && i.spec.pod_labels == pod_labels
-            })
-            .cloned()
-            .collect();
-
-        if identities.len() != 1 {
-            bail!(
-                "expected only one matching Identity, found {} for {}/{}",
-                identities.len(),
-                pod_name,
-                pod_namespace,
-            );
-        };
-
-        let identity = identities.first().unwrap().clone();
-
-        reconcile_identity(identity, self.clone())?;
-        Ok(())
     }
 }
 
@@ -97,11 +56,31 @@ impl<P: ReconcilePolicy + Send + Sync + 'static> CniApi for CniState<P> {
         let request = request.into_inner();
         info!("received add request {:?}", request);
 
-        // TODO: consider a retrying 2 or 3 times here with a short backoff to handle
-        // pods that generate new Identity CRs
-        self.policy_reconciler
-            .reconcile_policy(&request.pod_name, &request.pod_namespace)
-            .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
+        let mut last_error = None;
+        for attempt in 0..5 {
+            match self
+                .policy_reconciler
+                .reconcile_policy(&request.pod_name, &request.pod_namespace)
+            {
+                Ok(()) => {
+                    last_error = None;
+                    break;
+                }
+                Err(e @ PolicyReconcileError::PodNotFound { .. })
+                | Err(e @ PolicyReconcileError::IdentityError { .. }) => {
+                    last_error = Some(e);
+                    let backoff_ms = 500u64.saturating_mul(1 + attempt);
+                    sleep(Duration::from_millis(backoff_ms)).await;
+                }
+                Err(err) => {
+                    return Err(tonic::Status::new(Code::Internal, err.to_string()));
+                }
+            }
+        }
+
+        if let Some(e) = last_error {
+            return Err(tonic::Status::new(Code::Internal, e.to_string()));
+        }
 
         let _ = tc::qdisc_add_clsact(&request.iface);
 
@@ -205,3 +184,78 @@ fn attach_and_pin_links(
     link.pin(pin_path)?;
     Ok(())
 }
+
+pub trait ReconcilePolicy {
+    fn reconcile_policy(
+        &self,
+        pod_name: &str,
+        pod_namespace: &str,
+    ) -> std::result::Result<(), PolicyReconcileError>;
+}
+
+impl<P: PolicyControllerBpf + Send + Sync + 'static> ReconcilePolicy for Arc<Context<P>> {
+    fn reconcile_policy(
+        &self,
+        pod_name: &str,
+        pod_namespace: &str,
+    ) -> std::result::Result<(), PolicyReconcileError> {
+        let Some(pod) = self
+            .pod_store
+            .get(&ObjectRef::new(pod_name).within(pod_namespace))
+        else {
+            return Err(PolicyReconcileError::PodNotFound {
+                name: pod_name.to_string(),
+                namespace: pod_namespace.to_string(),
+            });
+        };
+
+        let identities: Vec<Arc<Identity>> = self
+            .identity_store
+            .state()
+            .iter()
+            .filter(|i| {
+                let mut pod_labels = pod.labels().to_owned();
+                sanitize_pod_labels(&mut pod_labels);
+                i.namespace() == pod.namespace() && i.spec.pod_labels == pod_labels
+            })
+            .cloned()
+            .collect();
+
+        match identities.as_slice() {
+            [] => Err(PolicyReconcileError::IdentityError(
+                "no identity found".to_string(),
+            )),
+            [identity] => {
+                reconcile_identity(identity.clone(), self.clone())
+                    .map_err(|e| PolicyReconcileError::Other(e.into()))?;
+                Ok(())
+            }
+            _ => Err(PolicyReconcileError::IdentityError(
+                "more than one identity found".to_string(),
+            )),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum PolicyReconcileError {
+    PodNotFound { name: String, namespace: String },
+    IdentityError(String),
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Display for PolicyReconcileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PolicyReconcileError::PodNotFound { name, namespace } => {
+                write!(f, "failed to find pod in store: {namespace}/{name}")
+            }
+            PolicyReconcileError::IdentityError(error) => {
+                write!(f, "{error}")
+            }
+            PolicyReconcileError::Other(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for PolicyReconcileError {}
