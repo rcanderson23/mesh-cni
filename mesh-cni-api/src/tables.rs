@@ -39,7 +39,7 @@ impl Tabled for crate::service::v1::ServiceWithEndpoints {
 }
 
 impl Tabled for crate::conntrack::v1::Connection {
-    const LENGTH: usize = 3;
+    const LENGTH: usize = 4;
 
     fn fields(&self) -> Vec<Cow<'_, str>> {
         let source = format!("{}:{}", self.src_ip, self.src_port);
@@ -49,6 +49,7 @@ impl Tabled for crate::conntrack::v1::Connection {
             Cow::Owned(source),
             Cow::Owned(destination),
             Cow::Borrowed(&self.proto),
+            Cow::Owned(self.initiator_id.to_string()),
         ]
     }
 
@@ -57,6 +58,7 @@ impl Tabled for crate::conntrack::v1::Connection {
             Cow::Borrowed("SOURCE"),
             Cow::Borrowed("DESTINATION"),
             Cow::Borrowed("PROTO"),
+            Cow::Borrowed("INITIATOR"),
         ]
     }
 }

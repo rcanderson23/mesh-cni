@@ -70,5 +70,6 @@ fn connection_from_keyv4(key: &ConntrackKeyV4) -> Result<Connection> {
         dst_ip,
         dst_port: key.dst_port as u32,
         proto: proto.to_string(),
+        initiator_id: key.initiator_id,
     })
 }

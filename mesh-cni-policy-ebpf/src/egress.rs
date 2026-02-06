@@ -4,7 +4,7 @@ use aya_ebpf::{
     maps::lpm_trie::Key as LpmKey,
     programs::TcContext,
 };
-use aya_log_ebpf::{error, info};
+use aya_log_ebpf::error;
 use mesh_cni_ebpf_common::{
     conntrack::{ConntrackKeyV4, ConntrackValue},
     policy::{Action, PolicyDirection},
@@ -16,7 +16,10 @@ use network_types::{
     udp::UdpHdr,
 };
 
-use crate::{CONNTRACK_V4, id_v4, policy::check_policy};
+use crate::{
+    CONNTRACK_V4, id_v4,
+    policy::{check_policy, conntrack_hit},
+};
 
 #[inline]
 pub fn try_mesh_cni_egress(ctx: TcContext) -> Result<i32, i32> {
@@ -38,13 +41,13 @@ pub fn try_mesh_cni_egress(ctx: TcContext) -> Result<i32, i32> {
 fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
 
-    let src = u32::from_be_bytes(ipv4hdr.src_addr);
-    let dst = u32::from_be_bytes(ipv4hdr.dst_addr);
+    let src_ip = u32::from_be_bytes(ipv4hdr.src_addr);
+    let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
     // LpmTrie expects big endian order for comparisons
     let (Some(src_id), Some(dst_id)) = (
-        id_v4(LpmKey::new(32, src.to_be())),
-        id_v4(LpmKey::new(32, dst.to_be())),
+        id_v4(LpmKey::new(32, src_ip.to_be())),
+        id_v4(LpmKey::new(32, dst_ip.to_be())),
     ) else {
         return Ok(TC_ACT_PIPE);
     };
@@ -79,8 +82,8 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     };
 
     let ct_key = ConntrackKeyV4 {
-        src_ip: src,
-        dst_ip: dst,
+        src_ip,
+        dst_ip,
         src_port,
         dst_port,
         proto,
@@ -88,8 +91,8 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         initiator_id: src_id,
     };
     let ct_rev = ConntrackKeyV4 {
-        src_ip: dst,
-        dst_ip: src,
+        src_ip,
+        dst_ip,
         src_port: dst_port,
         dst_port: src_port,
         proto,
@@ -98,34 +101,27 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     };
 
     let now = unsafe { bpf_ktime_get_ns() };
-    if unsafe { CONNTRACK_V4.get(ct_key) }.is_some() {
-        if CONNTRACK_V4
-            .insert(ct_key, ConntrackValue { last_seen_ns: now }, 0)
-            .is_err()
-        {
-            error!(&ctx, "failed to insert into conntrack");
-        };
-        return Ok(TC_ACT_PIPE);
-    }
-    if unsafe { CONNTRACK_V4.get(ct_rev) }.is_some() {
-        if CONNTRACK_V4
-            .insert(ct_rev, ConntrackValue { last_seen_ns: now }, 0)
-            .is_err()
-        {
-            error!(&ctx, "failed to insert into conntrack");
-        };
+    if conntrack_hit(&ctx, ct_key, ct_rev, now) {
         return Ok(TC_ACT_PIPE);
     }
 
-    if check_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Ingress) == Action::Deny {
-        info!(
-            &ctx,
-            "denying traffic src: {}:{} dst: {}:{}", src_id, src_port, dst_id, dst_port
-        );
+    if check_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Egress) == Action::Deny {
         return Ok(TC_ACT_SHOT);
     }
     if should_insert
-        && let Err(e) = CONNTRACK_V4.insert(ct_key, ConntrackValue { last_seen_ns: now }, 0)
+        && let Err(e) = CONNTRACK_V4.insert(
+            ConntrackKeyV4 {
+                src_ip,
+                dst_ip,
+                src_port,
+                dst_port,
+                proto,
+                _pad: [0; 3],
+                initiator_id: src_id,
+            },
+            ConntrackValue { last_seen_ns: now },
+            0,
+        )
     {
         error!(&ctx, "failed to insert into conntrack: {}", e);
     }

@@ -18,5 +18,5 @@ message Connection {
   string dst_ip = 3;
   uint32 dst_port  = 4;
   string proto = 5;
+  uint32 initiator_id = 6;
 }
-

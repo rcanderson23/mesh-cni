@@ -1,12 +1,43 @@
+use aya_ebpf::programs::TcContext;
+use aya_log_ebpf::error;
 use mesh_cni_ebpf_common::{
     IdentityId,
+    conntrack::{ConntrackKeyV4, ConntrackValue},
     policy::{
         ANY_ID, ANY_PORT, Action, PolicyDirection, PolicyIndexKey, PolicyProtocol, PolicyRuleKey,
         RULESET_NONE,
     },
 };
 
-use crate::{POLICY_INDEX, POLICY_RULESET};
+use crate::{CONNTRACK_V4, POLICY_INDEX, POLICY_RULESET};
+
+#[inline]
+pub(crate) fn conntrack_hit(
+    ctx: &TcContext,
+    ct_key: ConntrackKeyV4,
+    ct_rev: ConntrackKeyV4,
+    now: u64,
+) -> bool {
+    if unsafe { CONNTRACK_V4.get(ct_key) }.is_some() {
+        if CONNTRACK_V4
+            .insert(ct_key, ConntrackValue { last_seen_ns: now }, 0)
+            .is_err()
+        {
+            error!(ctx, "failed to insert into conntrack");
+        };
+        return true;
+    }
+    if unsafe { CONNTRACK_V4.get(ct_rev) }.is_some() {
+        if CONNTRACK_V4
+            .insert(ct_rev, ConntrackValue { last_seen_ns: now }, 0)
+            .is_err()
+        {
+            error!(ctx, "failed to insert into conntrack");
+        };
+        return true;
+    }
+    false
+}
 
 #[inline]
 pub(crate) fn check_policy(
