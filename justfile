@@ -22,7 +22,9 @@ test target=host_target:
   cargo test --target {{target}}
 
 kind-up:
-  -kind create cluster --name={{name}} --config={{kind_path}}
+  kind create cluster --name={{name}} --config={{kind_path}}
+  # Set to version of kindnet that does not support network policy
+  kubectl -n kube-system set image ds kindnet kindnet-cni=docker.io/kindest/kindnetd:v20230809-80a64d96
 
 kind-down:
   kind delete cluster --name={{name}}
