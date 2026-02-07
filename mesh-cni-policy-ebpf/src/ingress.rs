@@ -4,7 +4,7 @@ use aya_ebpf::{
     maps::lpm_trie::Key as LpmKey,
     programs::TcContext,
 };
-use aya_log_ebpf::{error, info};
+use aya_log_ebpf::error;
 use mesh_cni_ebpf_common::{
     conntrack::{ConntrackKeyV4, ConntrackValue},
     policy::{Action, PolicyDirection},
@@ -12,6 +12,7 @@ use mesh_cni_ebpf_common::{
 use network_types::{
     eth::{EthHdr, EtherType},
     ip::Ipv4Hdr,
+    sctp::SctpHdr,
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -77,14 +78,19 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
                 true,
             )
         }
-        network_types::ip::IpProto::Sctp => return Ok(TC_ACT_PIPE),
+        network_types::ip::IpProto::Sctp => {
+            let sctphdr: SctpHdr = ctx
+                .load(EthHdr::LEN + SctpHdr::LEN)
+                .map_err(|_| TC_ACT_PIPE)?;
+            (
+                network_types::ip::IpProto::Sctp as u8,
+                u16::from_be_bytes(sctphdr.src),
+                u16::from_be_bytes(sctphdr.dst),
+                true,
+            )
+        }
         _ => return Ok(TC_ACT_PIPE),
     };
-
-    info!(
-        &ctx,
-        "checking conntrack for src {}:{}; dst {}:{};", src_id, src_port, dst_id, dst_port
-    );
 
     let ct_key = ConntrackKeyV4 {
         src_ip,

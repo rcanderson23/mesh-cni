@@ -12,6 +12,7 @@ use mesh_cni_ebpf_common::{
 use network_types::{
     eth::{EthHdr, EtherType},
     ip::Ipv4Hdr,
+    sctp::SctpHdr,
     tcp::TcpHdr,
     udp::UdpHdr,
 };
@@ -77,7 +78,17 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
                 true,
             )
         }
-        network_types::ip::IpProto::Sctp => return Ok(TC_ACT_PIPE),
+        network_types::ip::IpProto::Sctp => {
+            let sctphdr: SctpHdr = ctx
+                .load(EthHdr::LEN + SctpHdr::LEN)
+                .map_err(|_| TC_ACT_PIPE)?;
+            (
+                network_types::ip::IpProto::Sctp as u8,
+                u16::from_be_bytes(sctphdr.src),
+                u16::from_be_bytes(sctphdr.dst),
+                true,
+            )
+        }
         _ => return Ok(TC_ACT_PIPE),
     };
 
