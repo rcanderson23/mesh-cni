@@ -18,6 +18,7 @@ use mesh_cni_ebpf_common::{
         PolicyRuleKey, PolicyValue, RULESET_NONE,
     },
 };
+use tracing::info;
 
 use crate::{
     PolicyControllerBpf, Result,
@@ -52,7 +53,10 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         .collect();
 
     if selected_netpols.is_empty() {
-        return Ok(Action::requeue(DEFAULT_REQUEUE_DURATION));
+        info!(
+            identity_id = identity.spec.id,
+            "reconcile: no policies selected for identity"
+        );
     }
 
     let identity_id = identity.spec.id;
@@ -167,17 +171,34 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         .map(|(key, value)| (*key, *value))
         .collect();
 
+    info!(
+        identity_id,
+        selected_policies = selected_netpols.len(),
+        current_index = current_index.len(),
+        desired_index = desired_index.len(),
+        "reconcile: computed policy index diff"
+    );
+
+    let mut deleted_count = 0usize;
+    let mut updated_count = 0usize;
+    let mut unchanged_count = 0usize;
+    let mut added_count = 0usize;
+
     for (key, current_ruleset_id) in &current_index {
         match desired_index.get(key) {
-            Some(desired_ruleset_id) if *desired_ruleset_id == *current_ruleset_id => {}
+            Some(desired_ruleset_id) if *desired_ruleset_id == *current_ruleset_id => {
+                unchanged_count += 1;
+            }
             Some(desired_ruleset_id) => {
                 ctx.policy_bpf_state
                     .update_index(*key, *desired_ruleset_id)?;
                 release_ruleset_if_unused(&ctx, *current_ruleset_id)?;
+                updated_count += 1;
             }
             None => {
                 ctx.policy_bpf_state.delete_index(key)?;
                 release_ruleset_if_unused(&ctx, *current_ruleset_id)?;
+                deleted_count += 1;
             }
         }
     }
@@ -187,7 +208,17 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
             continue;
         }
         ctx.policy_bpf_state.update_index(key, ruleset_id)?;
+        added_count += 1;
     }
+
+    info!(
+        identity_id,
+        deleted = deleted_count,
+        updated = updated_count,
+        unchanged = unchanged_count,
+        added = added_count,
+        "reconcile: applied policy index diff"
+    );
 
     Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
 }
