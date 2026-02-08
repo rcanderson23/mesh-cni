@@ -1,6 +1,8 @@
 use core::fmt::Display;
 
-pub const ANY_ID: u32 = 1;
+pub const ANY_ID: u32 = 0;
+pub const WORLD_ID: u32 = 1;
+pub const RESERVED_IDENTITY_IDS: &[u32] = &[ANY_ID, WORLD_ID];
 
 pub const ANY_PORT: u16 = 0;
 

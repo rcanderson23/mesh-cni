@@ -7,6 +7,7 @@ use kube::{
     runtime::{controller::Action, reflector::ObjectRef},
 };
 use mesh_cni_crds::v1alpha1::identity::{Identity, IdentitySpec};
+use mesh_cni_ebpf_common::policy::RESERVED_IDENTITY_IDS;
 use rand::Rng;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -110,7 +111,7 @@ fn get_or_generate_identity(ctx: &Context, ns: &Namespace, pod: &Pod) -> Result<
     let mut rng = rand::rng();
     spec.id = loop {
         let candidate = rng.random();
-        if !used_ids.contains(&candidate) {
+        if !RESERVED_IDENTITY_IDS.contains(&candidate) && !used_ids.contains(&candidate) {
             break candidate;
         }
     };

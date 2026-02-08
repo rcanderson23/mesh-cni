@@ -1843,6 +1843,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "mesh-cni-crds",
+ "mesh-cni-ebpf-common",
  "mesh-cni-k8s-utils",
  "rand",
  "schemars",

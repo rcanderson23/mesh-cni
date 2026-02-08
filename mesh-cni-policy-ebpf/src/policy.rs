@@ -40,6 +40,37 @@ pub(crate) fn conntrack_hit(
 }
 
 #[inline]
+pub(crate) fn conntrack_keys(
+    src_ip: u32,
+    dst_ip: u32,
+    src_port: u16,
+    dst_port: u16,
+    proto: u8,
+    initiator_id: IdentityId,
+) -> (ConntrackKeyV4, ConntrackKeyV4) {
+    (
+        ConntrackKeyV4 {
+            src_ip,
+            dst_ip,
+            src_port,
+            dst_port,
+            proto,
+            _pad: [0; 3],
+            initiator_id,
+        },
+        ConntrackKeyV4 {
+            src_ip: dst_ip,
+            dst_ip: src_ip,
+            src_port: dst_port,
+            dst_port: src_port,
+            proto,
+            _pad: [0; 3],
+            initiator_id,
+        },
+    )
+}
+
+#[inline]
 pub(crate) fn check_policy(
     src_id: IdentityId,
     dst_id: IdentityId,

@@ -4,10 +4,10 @@ use aya_ebpf::{
     maps::lpm_trie::Key as LpmKey,
     programs::TcContext,
 };
-use aya_log_ebpf::error;
+use aya_log_ebpf::{error, warn};
 use mesh_cni_ebpf_common::{
-    conntrack::{ConntrackKeyV4, ConntrackValue},
-    policy::{Action, PolicyDirection},
+    conntrack::ConntrackValue,
+    policy::{Action, PolicyDirection, WORLD_ID},
 };
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -19,7 +19,7 @@ use network_types::{
 
 use crate::{
     CONNTRACK_V4, id_v4,
-    policy::{check_policy, conntrack_hit},
+    policy::{check_policy, conntrack_hit, conntrack_keys},
 };
 
 #[inline]
@@ -45,12 +45,17 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     let src_ip = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
-    // LpmTrie expects big endian order for comparisons
-    let (Some(src_id), Some(dst_id)) = (
-        id_v4(LpmKey::new(32, src_ip.to_be())),
-        id_v4(LpmKey::new(32, dst_ip.to_be())),
-    ) else {
-        return Ok(TC_ACT_PIPE);
+    // LpmTrie expects big endian order for comparisons.
+    // Local endpoint identity must exist; unresolved peer identity is treated as world.
+    let src_id = id_v4(LpmKey::new(32, src_ip.to_be())).unwrap_or(WORLD_ID);
+    let Some(dst_id) = id_v4(LpmKey::new(32, dst_ip.to_be())) else {
+        warn!(
+            &ctx,
+            "dropping ingress packet with unknown dst identity src_ip: {}; dst_ip: {}",
+            src_ip,
+            dst_ip
+        );
+        return Ok(TC_ACT_SHOT);
     };
 
     let (proto, src_port, dst_port, should_insert) = match ipv4hdr.proto {
@@ -92,30 +97,17 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         _ => return Ok(TC_ACT_PIPE),
     };
 
-    let ct_key = ConntrackKeyV4 {
-        src_ip,
-        dst_ip,
-        src_port,
-        dst_port,
-        proto,
-        _pad: [0; 3],
-        initiator_id: dst_id,
-    };
-    let ct_rev = ConntrackKeyV4 {
-        src_ip: dst_ip,
-        dst_ip: src_ip,
-        src_port: dst_port,
-        dst_port: src_port,
-        proto,
-        _pad: [0; 3],
-        initiator_id: dst_id,
-    };
+    let (ct_key, ct_rev) = conntrack_keys(src_ip, dst_ip, src_port, dst_port, proto, dst_id);
 
     let now = unsafe { bpf_ktime_get_ns() };
     if conntrack_hit(&ctx, ct_key, ct_rev, now) {
         return Ok(TC_ACT_PIPE);
     }
     if check_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Ingress) == Action::Deny {
+        warn!(
+            &ctx,
+            "denied src: {}:{}; dst: {}:{}; proto: {}", src_id, src_port, dst_id, dst_port, proto
+        );
         return Ok(TC_ACT_SHOT);
     }
 

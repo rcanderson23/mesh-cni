@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 mesh-cni-crds = { path = "../mesh-cni-crds" }
+mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common" }
 mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils/"}
 
 futures = { workspace = true }
