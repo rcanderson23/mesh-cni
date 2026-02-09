@@ -1,5 +1,5 @@
 [package]
-name = "mesh-cni-service-ebpf"
+name = "mesh-cni-ebpf"
 version = "0.1.0"
 edition.workspace = true
 
@@ -9,11 +9,11 @@ mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common" }
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
 network-types = { workspace = true }
-memoffset = { workspace = true } 
+memoffset = { workspace = true }
 
 [build-dependencies]
 which = { workspace = true }
 
 [[bin]]
-name = "mesh-cni-service"
+name = "mesh-ebpf"
 path = "src/main.rs"

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicy};
 use kube::{
-    Api, Client, Resource, ResourceExt,
+    Api, Client, ResourceExt,
     runtime::{Config, Controller, reflector::ObjectRef, watcher::Config as WatcherConfig},
 };
 use mesh_cni_crds::v1alpha1::identity::Identity;

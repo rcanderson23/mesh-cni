@@ -8,12 +8,10 @@ fn main() -> anyhow::Result<()> {
         .context("MetadataCommand::exec")?;
     let packages: Vec<Package> = packages
         .into_iter()
-        .filter(|cargo_metadata::Package { name, .. }| {
-            name.as_str() == "mesh-cni-service-ebpf" || name.as_str() == "mesh-cni-policy-ebpf"
-        })
+        .filter(|cargo_metadata::Package { name, .. }| name.as_str() == "mesh-cni-ebpf")
         .collect();
     if packages.is_empty() {
-        bail!("failed to find service or policy ebpf packages");
+        bail!("failed to find mesh-cni-ebpf package");
     }
     aya_build::build_ebpf(packages, aya_build::Toolchain::default())
 }

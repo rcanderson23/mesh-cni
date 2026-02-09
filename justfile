@@ -40,3 +40,5 @@ load-image:
     kind load docker-image {{container_image}}:latest --name={{name}}
 
 run-local: container kind-up load-image install restart
+
+reset-cluster: kind-down run-local

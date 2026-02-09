@@ -29,28 +29,22 @@ pub fn init_bpf() -> Result<()> {
     }
     reset_pins()?;
 
-    let mut service_ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
+    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("OUT_DIR"),
-        "/mesh-cni-service"
+        "/mesh-ebpf"
     )))?;
 
     info!("ensuring cgroupsockaddr program loaded and pinned");
-    attach_cgroup_connect_bpf_program(&mut service_ebpf)?;
-
-    pin_maps(&mut service_ebpf, &SERVICE_MAPS_LIST)?;
-
-    let mut policy_ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("OUT_DIR"),
-        "/mesh-cni-policy"
-    )))?;
+    attach_cgroup_connect_bpf_program(&mut ebpf)?;
 
     info!("ensuring ingress program loaded and pinned");
-    ensure_tc_program(&mut policy_ebpf, BPF_PROGRAM_INGRESS_TC)?;
+    ensure_tc_program(&mut ebpf, BPF_PROGRAM_INGRESS_TC)?;
 
     info!("ensuring egress program loaded and pinned");
-    ensure_tc_program(&mut policy_ebpf, BPF_PROGRAM_EGRESS_TC)?;
+    ensure_tc_program(&mut ebpf, BPF_PROGRAM_EGRESS_TC)?;
 
-    pin_maps(&mut policy_ebpf, &POLICY_MAPS_LIST)?;
+    pin_maps(&mut ebpf, &SERVICE_MAPS_LIST)?;
+    pin_maps(&mut ebpf, &POLICY_MAPS_LIST)?;
 
     start_ebpf_logger()?;
     Ok(())

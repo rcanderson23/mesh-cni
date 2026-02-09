@@ -1,8 +1,22 @@
 #![no_std]
 #![no_main]
 
-use aya_ebpf::{macros::classifier, programs::TcContext};
-use mesh_cni_policy_ebpf::{egress::try_mesh_cni_egress, ingress::try_mesh_cni_ingress};
+use aya_ebpf::{
+    macros::{cgroup_sock_addr, classifier},
+    programs::{SockAddrContext, TcContext},
+};
+use mesh_cni_ebpf::{
+    egress::try_mesh_cni_egress, ingress::try_mesh_cni_ingress,
+    service::try_mesh_cni_cgroup_connect4,
+};
+
+#[cgroup_sock_addr(connect4)]
+pub fn mesh_cni_cgroup_connect4(ctx: SockAddrContext) -> i32 {
+    match try_mesh_cni_cgroup_connect4(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
 
 #[classifier]
 pub fn mesh_cni_ingress(ctx: TcContext) -> i32 {

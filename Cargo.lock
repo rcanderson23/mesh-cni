@@ -1809,6 +1809,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-cni-ebpf"
+version = "0.1.0"
+dependencies = [
+ "aya-ebpf",
+ "aya-log-ebpf",
+ "memoffset 0.9.1",
+ "mesh-cni-ebpf-common",
+ "network-types",
+ "which 8.0.0",
+]
+
+[[package]]
 name = "mesh-cni-ebpf-common"
 version = "0.1.0"
 dependencies = [
@@ -1908,18 +1920,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh-cni-policy-ebpf"
-version = "0.1.0"
-dependencies = [
- "aya-ebpf",
- "aya-log-ebpf",
- "memoffset 0.9.1",
- "mesh-cni-ebpf-common",
- "network-types",
- "which 8.0.0",
-]
-
-[[package]]
 name = "mesh-cni-service-bpf-controller"
 version = "0.1.0"
 dependencies = [
@@ -1958,18 +1958,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-opentelemetry",
-]
-
-[[package]]
-name = "mesh-cni-service-ebpf"
-version = "0.1.0"
-dependencies = [
- "aya-ebpf",
- "aya-log-ebpf",
- "memoffset 0.9.1",
- "mesh-cni-ebpf-common",
- "network-types",
- "which 8.0.0",
 ]
 
 [[package]]
