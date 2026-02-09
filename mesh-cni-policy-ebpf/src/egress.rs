@@ -85,10 +85,10 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         }
         network_types::ip::IpProto::Sctp => {
             let sctphdr: SctpHdr = ctx
-                .load(EthHdr::LEN + SctpHdr::LEN)
+                .load(EthHdr::LEN + Ipv4Hdr::LEN)
                 .map_err(|_| TC_ACT_PIPE)?;
             (
-                network_types::ip::IpProto::Sctp as u8,
+                ipv4hdr.proto as u8,
                 u16::from_be_bytes(sctphdr.src),
                 u16::from_be_bytes(sctphdr.dst),
                 true,
