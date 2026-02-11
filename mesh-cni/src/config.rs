@@ -64,13 +64,17 @@ pub struct AgentArgs {
     #[arg(long, env = "CNI_PLUGIN_BIN", default_value = "/app/mesh-cni-plugin")]
     pub cni_plugin_bin: PathBuf,
 
-    /// Agent socket path
+    /// Netns directory
     #[arg(
         long,
         env = "AGENT_SOCKET_PATH",
         default_value = "/var/run/mesh/mesh.sock"
     )]
     pub agent_socket_path: PathBuf,
+
+    /// Agent socket path
+    #[arg(long, env = "NETNS_DIR", default_value = "/var/run/mesh/netns")]
+    pub netns_dir: PathBuf,
 
     /// Determines if CNI should be configured as chained
     #[arg(long, env = "CHAINED", default_value = "false")]

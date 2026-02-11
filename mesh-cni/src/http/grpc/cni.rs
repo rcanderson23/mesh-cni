@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use anyhow::bail;
 use aya::programs::{
     SchedClassifier, TcAttachType,
     links::{FdLink, LinkError, PinnedLink},
@@ -15,6 +16,7 @@ use mesh_cni_api::cni::v1::{
 use mesh_cni_crds::v1alpha1::identity::Identity;
 use mesh_cni_k8s_utils::sanitize_pod_labels;
 use mesh_cni_policy_controller::{Context, PolicyControllerBpf, reconcile_identity};
+use netns_rs::get_from_path;
 use tokio::time::{Duration, sleep};
 use tonic::{Code, Request, Response, Status};
 use tracing::{error, info};
@@ -26,14 +28,17 @@ use crate::{
 
 pub struct CniState<P: ReconcilePolicy + Send + Sync + 'static> {
     policy_reconciler: P,
+    netns_dir: PathBuf,
 }
 
-const _NET_NS_DIR: &str = "/var/run/mesh/netns";
-const MESH_INGRESS_LINK_PREFIX: &str = "mesh_cni_ingress_";
+const MESH_LINK_PREFIX: &str = "mesh_cni_link_";
 
 impl<P: ReconcilePolicy + Send + Sync + 'static> CniState<P> {
-    pub fn new(policy_reconciler: P) -> Self {
-        Self { policy_reconciler }
+    pub fn new(policy_reconciler: P, netns_dir: PathBuf) -> Self {
+        Self {
+            policy_reconciler,
+            netns_dir,
+        }
     }
 }
 
@@ -53,72 +58,19 @@ impl<P: ReconcilePolicy + Send + Sync + 'static> CniApi for CniState<P> {
         &self,
         request: Request<AddPodRequest>,
     ) -> std::result::Result<Response<AddPodReply>, Status> {
-        let request = request.into_inner();
+        // TODO: replace logging here with request middleware on the tonic server
         info!("received add request {:?}", request);
-
-        let mut last_error = None;
-        for attempt in 0..5 {
-            match self
-                .policy_reconciler
-                .reconcile_policy(&request.pod_name, &request.pod_namespace)
-            {
-                Ok(()) => {
-                    last_error = None;
-                    break;
-                }
-                Err(e @ PolicyReconcileError::PodNotFound { .. })
-                | Err(e @ PolicyReconcileError::IdentityError { .. }) => {
-                    last_error = Some(e);
-                    let backoff_ms = 500u64.saturating_mul(1 + attempt);
-                    sleep(Duration::from_millis(backoff_ms)).await;
-                }
-                Err(err) => {
-                    return Err(tonic::Status::new(Code::Internal, err.to_string()));
-                }
-            }
-        }
-
-        if let Some(e) = last_error {
-            return Err(tonic::Status::new(Code::Internal, e.to_string()));
-        }
-
-        let _ = tc::qdisc_add_clsact(&request.iface);
-
-        // Attaching to the veth on the host network means that the egress hook
-        // is traffic that is going into the pod and the reverse where the ingress
-        // hook is traffic leaving the pod
-        info!("adding tc ingress progam to {}", &request.iface);
-        attach_and_pin_links(
-            &request.iface,
-            BPF_PROGRAM_INGRESS_TC.path(),
-            TcAttachType::Egress,
+        let reply = add_pod(
+            &self.policy_reconciler,
+            request.into_inner(),
+            self.netns_dir.clone(),
         )
-        .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
-
-        info!("adding tc egress progam to {}", &request.iface);
-        if let Err(e) = attach_and_pin_links(
-            &request.iface,
-            BPF_PROGRAM_EGRESS_TC.path(),
-            TcAttachType::Ingress,
-        ) {
-            let ingress_path = pin_path(&request.iface, TcAttachType::Ingress);
-            let egress_path = pin_path(&request.iface, TcAttachType::Egress);
-            for path in [ingress_path, egress_path] {
-                if let Err(u) = unpin_path(path) {
-                    error!(%u, "failed to unpin path");
-                };
-            }
-
-            error!(%e, "failed to attach and pin egress link");
-            Err(tonic::Status::new(Code::Internal, e.to_string()))
-        } else {
-            Ok(Response::new(AddPodReply {
-                interfaces: Vec::new(),
-                ips: Vec::new(),
-                routes: Vec::new(),
-                dns: None,
-            }))
-        }
+        .await
+        .map_err(|e| {
+            error!(%e, "failed to add pod");
+            Status::new(Code::Internal, e.to_string())
+        })?;
+        Ok(Response::new(reply))
     }
 
     async fn delete_pod(
@@ -128,15 +80,83 @@ impl<P: ReconcilePolicy + Send + Sync + 'static> CniApi for CniState<P> {
         let request = request.into_inner();
         info!("received delete request {:?}", request);
 
-        let ingress_path = pin_path(&request.iface, TcAttachType::Ingress);
-        let egress_path = pin_path(&request.iface, TcAttachType::Egress);
-
-        for path in [ingress_path, egress_path] {
-            unpin_path(path).map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
+        for iface in [&request.iface, "lo"] {
+            unpin_iface_paths(&request.container_id, iface)
+                .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
         }
 
         Ok(Response::new(DeletePodReply {}))
     }
+}
+
+async fn add_pod<P: ReconcilePolicy>(
+    reconciler: &P,
+    request: AddPodRequest,
+    mut netns_dir: PathBuf,
+) -> Result<AddPodReply> {
+    let mut last_error = None;
+    for attempt in 0..5 {
+        match reconciler.reconcile_policy(&request.pod_name, &request.pod_namespace) {
+            Ok(()) => {
+                last_error = None;
+                break;
+            }
+            Err(e @ PolicyReconcileError::PodNotFound { .. })
+            | Err(e @ PolicyReconcileError::IdentityError { .. }) => {
+                last_error = Some(e);
+                let backoff_ms = 500u64.saturating_mul(1 + attempt);
+                sleep(Duration::from_millis(backoff_ms)).await;
+            }
+            Err(err) => {
+                bail!(err);
+            }
+        }
+    }
+
+    if let Some(e) = last_error {
+        bail!(e);
+    }
+
+    let Some(netns) = &request.net_namespace else {
+        bail!("recieved add request for interface not in a network namespace");
+    };
+    let netns_name = PathBuf::from(netns);
+    let netns_name = netns_name
+        .file_name()
+        .ok_or(anyhow::anyhow!("failed to get file name from netns path"))?
+        .to_str()
+        .ok_or(anyhow::anyhow!("failed to convert netns path file to str"))?;
+    netns_dir.push(netns_name);
+
+    let ns = get_from_path(netns_dir)?;
+    let _ = ns.run(|_| {
+        let mut attached = Vec::new();
+        for iface in [&request.iface, "lo"] {
+            if let Err(e) = attach_for_iface(
+                iface,
+                &request.container_id,
+                TcAttachType::Ingress,
+                TcAttachType::Egress,
+            ) {
+                error!(%e, "failed to attach tc programs");
+                for attached_iface in attached {
+                    if let Err(u) = unpin_iface_paths(&request.container_id, attached_iface) {
+                        error!(%u, "failed to unpin path");
+                    };
+                }
+                return Err(e);
+            }
+            attached.push(iface);
+        }
+        Ok(())
+    })?;
+
+    Ok(AddPodReply {
+        interfaces: Vec::new(),
+        ips: Vec::new(),
+        routes: Vec::new(),
+        dns: None,
+    })
 }
 
 fn unpin_path(path: impl AsRef<Path>) -> Result<()> {
@@ -158,30 +178,82 @@ fn unpin_path(path: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
-fn pin_path(iface: &str, attach_type: TcAttachType) -> PathBuf {
+fn link_name(container_id: &str, iface: &str) -> String {
+    let container_id = container_id.replace('/', "_");
+    let iface = iface.replace('/', "_");
+    format!("{}_{}", container_id, iface)
+}
+
+fn pin_path(container_id: &str, iface: &str, attach_type: TcAttachType) -> PathBuf {
+    let link_name = link_name(container_id, iface);
     match attach_type {
         TcAttachType::Ingress => PathBuf::from(BPF_MESH_LINKS_DIR)
-            .join(format!("{}{}_ingress", MESH_INGRESS_LINK_PREFIX, iface)),
+            .join(format!("{}{link_name}_ingress", MESH_LINK_PREFIX)),
         TcAttachType::Egress => PathBuf::from(BPF_MESH_LINKS_DIR)
-            .join(format!("{}{}_egress", MESH_INGRESS_LINK_PREFIX, iface)),
+            .join(format!("{}{link_name}_egress", MESH_LINK_PREFIX)),
         TcAttachType::Custom(_) => PathBuf::from(BPF_MESH_LINKS_DIR)
-            .join(format!("{}{}_custom", MESH_INGRESS_LINK_PREFIX, iface)),
+            .join(format!("{}{link_name}_custom", MESH_LINK_PREFIX)),
     }
 }
 
 fn attach_and_pin_links(
     iface: &str,
+    container_id: &str,
     path: impl AsRef<Path>,
     attach_type: TcAttachType,
 ) -> Result<()> {
+    let pin_path = pin_path(container_id, iface, attach_type);
+    if pin_path.try_exists()? {
+        return Ok(());
+    }
+
     let mut prog = SchedClassifier::from_pin(path)?;
 
     let link_id = prog.attach(iface, attach_type)?;
 
     let link = prog.take_link(link_id)?;
     let link: FdLink = link.try_into()?;
-    let pin_path = pin_path(iface, attach_type);
     link.pin(pin_path)?;
+    Ok(())
+}
+
+fn unpin_iface_paths(container_id: &str, iface: &str) -> Result<()> {
+    let ingress_path = pin_path(container_id, iface, TcAttachType::Ingress);
+    let egress_path = pin_path(container_id, iface, TcAttachType::Egress);
+
+    for path in [ingress_path, egress_path] {
+        unpin_path(path)?;
+    }
+    Ok(())
+}
+
+fn attach_for_iface(
+    iface: &str,
+    container_id: &str,
+    ingress_attach_type: TcAttachType,
+    egress_attach_type: TcAttachType,
+) -> Result<()> {
+    let _ = tc::qdisc_add_clsact(iface);
+
+    attach_and_pin_links(
+        iface,
+        container_id,
+        BPF_PROGRAM_INGRESS_TC.path(),
+        ingress_attach_type,
+    )?;
+
+    if let Err(e) = attach_and_pin_links(
+        iface,
+        container_id,
+        BPF_PROGRAM_EGRESS_TC.path(),
+        egress_attach_type,
+    ) {
+        if let Err(u) = unpin_iface_paths(container_id, iface) {
+            error!(%u, "failed to unpin path");
+        };
+        return Err(e);
+    }
+
     Ok(())
 }
 

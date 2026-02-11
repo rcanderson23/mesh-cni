@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use mesh_cni_api::cni::v1::{AddPodReply, AddPodRequest, cni_client::CniClient};
 use serde::Deserialize;
@@ -70,6 +70,7 @@ pub fn add(args: &Args, input: Input) -> Response {
                 return Error::Ebpf(e.to_string()).into_response(CNI_VERSION);
             }
         };
+
         let interfaces = r.interfaces.iter().map(|i| i.to_owned()).collect();
         let success = Success {
             cni_version: CNI_VERSION,
@@ -97,20 +98,37 @@ pub fn add(args: &Args, input: Input) -> Response {
         return Error::MissingInterfaces.into_response(CNI_VERSION);
     }
 
+    let mut reqs = Vec::new();
+    let mut seen_iface = HashSet::new();
+
     for interface in &prev.interfaces {
-        if interface.sandbox.is_some() {
+        let Some(netns) = &interface.sandbox else {
             continue;
         };
+        let netns = netns.clone();
 
-        let iface = interface.name.clone();
-        let req = AddPodRequest {
-            iface,
-            net_namespace: None,
-            container_id: args.container_id.clone(),
-            chained: true,
-            pod_name: pod_name.clone(),
-            pod_namespace: pod_namespace.clone(),
-        };
+        let iface_key = format!("{netns}:{}", interface.name);
+        if seen_iface.insert(iface_key) {
+            reqs.push(AddPodRequest {
+                iface: interface.name.clone(),
+                net_namespace: Some(netns.clone()),
+                container_id: args.container_id.clone(),
+                chained: true,
+                pod_name: pod_name.clone(),
+                pod_namespace: pod_namespace.clone(),
+            });
+        }
+
+    }
+
+    if reqs.is_empty() {
+        return Error::Parse(
+            "previous response is missing pod netns interface entries".to_string(),
+        )
+        .into_response(CNI_VERSION);
+    }
+
+    for req in reqs {
         let resp = tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(request(req));
