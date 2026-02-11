@@ -112,6 +112,7 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     }
 
     if should_insert
+        && src_ip != dst_ip
         && let Err(e) = CONNTRACK_V4.insert(ct_key, ConntrackValue { last_seen_ns: now }, 0)
     {
         error!(&ctx, "failed to insert into conntrack: {}", e);
