@@ -1,7 +1,4 @@
-use std::{
-    net::IpAddr,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use aya::maps::lpm_trie::Key as LpmKey;
 use ipnetwork::IpNetwork;
@@ -95,15 +92,17 @@ where
     }
 
     // LpmTrie expects big endian order for comparisons
-    pub fn delete(&self, ip: IpAddr) -> Result<()> {
+    pub fn delete_network(&self, ip_net: IpNetwork) -> Result<()> {
         let mut state = self.state.shared.lock().unwrap();
-        match ip {
-            IpAddr::V4(ipv4_addr) => state
-                .ipv4_state
-                .delete(&LpmKey::new(32, ipv4_addr.to_bits().to_be()))?,
-            IpAddr::V6(ipv6_addr) => state
-                .ipv6_state
-                .delete(&LpmKey::new(128, ipv6_addr.to_bits().to_be()))?,
+        match ip_net {
+            IpNetwork::V4(ipv4_network) => state.ipv4_state.delete(&LpmKey::new(
+                ipv4_network.prefix() as u32,
+                ipv4_network.ip().to_bits().to_be(),
+            ))?,
+            IpNetwork::V6(ipv6_network) => state.ipv6_state.delete(&LpmKey::new(
+                ipv6_network.prefix() as u32,
+                ipv6_network.ip().to_bits().to_be(),
+            ))?,
         }
         Ok(())
     }
@@ -132,6 +131,15 @@ where
     ) -> mesh_cni_identity_controller::Result<()> {
         self.update(key, value)
             .map_err(|e| mesh_cni_identity_controller::Error::OpError(e.to_string()))
+    }
+
+    fn delete(&self, key: IpNetwork) -> mesh_cni_identity_controller::Result<()> {
+        self.delete_network(key)
+            .map_err(|e| mesh_cni_identity_controller::Error::OpError(e.to_string()))
+    }
+
+    fn state(&self) -> mesh_cni_identity_controller::Result<Vec<(IpNetwork, IdentityId)>> {
+        Ok(self.state())
     }
 }
 

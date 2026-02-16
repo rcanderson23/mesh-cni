@@ -49,6 +49,7 @@ rules:
   resources:
   - meshendpoints
   - identities
+  - cidridentities
   verbs:
   - list
   - watch

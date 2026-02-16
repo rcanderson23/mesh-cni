@@ -1,27 +1,41 @@
-use core::hash::Hasher;
+use core::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 use ahash::HashMap;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicy};
 use kube::runtime::reflector::Store;
-use mesh_cni_crds::v1alpha1::identity::Identity;
-use mesh_cni_ebpf_common::policy::{PolicyIndexKey, PolicyRuleKey, PolicyValue};
+use mesh_cni_crds::v1alpha1::{cidridentity::CIDRIdentity, identity::Identity};
+use mesh_cni_ebpf_common::policy::{
+    CidrPolicyMapKeyV4, CidrPolicyMapKeyV6, PolicyIndexKey, PolicyRuleKey, PolicyValue, RulesetId,
+};
 
 use crate::PolicyControllerBpf;
 
-pub type RulesetId = u32;
 pub type RulesetHash = u64;
+
+pub fn hash_rule_triples<I>(triples: I) -> RulesetHash
+where
+    // (Proto, Port, Action)
+    I: IntoIterator<Item = (u8, u16, u8)>,
+{
+    let mut hasher = ahash::AHasher::default();
+    for triple in triples {
+        triple.hash(&mut hasher);
+    }
+    hasher.finish()
+}
 
 pub struct Context<P: PolicyControllerBpf> {
     pub pod_store: Store<Pod>,
     pub policy_store: Store<NetworkPolicy>,
     pub identity_store: Store<Identity>,
+    pub cidr_identity_store: Store<CIDRIdentity>,
     pub policy_bpf_state: P,
     pub ruleset_state: RulesetState,
 }
 
 #[derive(Clone, Debug)]
-pub struct RulesetEntry {
+pub(crate) struct RulesetEntry {
     ruleset_id: RulesetId,
     refcount: usize,
     rules: Vec<(PolicyRuleKey, PolicyValue)>,
@@ -32,19 +46,33 @@ pub struct RulesetState {
 }
 
 impl RulesetState {
-    pub fn new(
+    #[cfg(test)]
+    pub(crate) fn new(
         index_state: &HashMap<PolicyIndexKey, RulesetId>,
+        ruleset_state: &HashMap<PolicyRuleKey, PolicyValue>,
+    ) -> Self {
+        let cidr_v4_state = HashMap::default();
+        let cidr_v6_state = HashMap::default();
+        Self::new_with_cidr(index_state, &cidr_v4_state, &cidr_v6_state, ruleset_state)
+    }
+
+    pub(crate) fn new_with_cidr(
+        index_state: &HashMap<PolicyIndexKey, RulesetId>,
+        cidr_v4_state: &HashMap<CidrPolicyMapKeyV4, RulesetId>,
+        cidr_v6_state: &HashMap<CidrPolicyMapKeyV6, RulesetId>,
         ruleset_state: &HashMap<PolicyRuleKey, PolicyValue>,
     ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(RulesetStateInner::new(
                 index_state,
+                cidr_v4_state,
+                cidr_v6_state,
                 ruleset_state,
             ))),
         }
     }
 
-    pub fn acquire_ruleset(
+    pub(crate) fn acquire_ruleset(
         &self,
         hash: RulesetHash,
         rules: Vec<(PolicyRuleKey, PolicyValue)>,
@@ -53,7 +81,7 @@ impl RulesetState {
         guard.acquire_ruleset(hash, rules)
     }
 
-    pub fn release_ruleset(
+    pub(crate) fn release_ruleset(
         &self,
         ruleset_id: RulesetId,
     ) -> Option<Vec<(PolicyRuleKey, PolicyValue)>> {
@@ -67,13 +95,17 @@ pub struct RulesetStateInner {
     by_hash: HashMap<RulesetHash, RulesetEntry>,
     // by_id lets us resolve an existing ruleset_id (from pinned maps) back to its hash.
     by_id: HashMap<RulesetId, RulesetHash>,
+    // free_ids is the ids that have recently been freed so that they can be re-used
     free_ids: Vec<RulesetId>,
+    // next_id tracks the next RulesetId to use
     next_id: RulesetId,
 }
 
 impl RulesetStateInner {
     fn new(
         index_state: &HashMap<PolicyIndexKey, RulesetId>,
+        cidr_v4_state: &HashMap<CidrPolicyMapKeyV4, RulesetId>,
+        cidr_v6_state: &HashMap<CidrPolicyMapKeyV6, RulesetId>,
         ruleset_state: &HashMap<PolicyRuleKey, PolicyValue>,
     ) -> Self {
         let mut by_hash: HashMap<RulesetHash, RulesetEntry> = HashMap::default();
@@ -81,6 +113,12 @@ impl RulesetStateInner {
         let mut refcounts: HashMap<RulesetId, usize> = HashMap::default();
 
         for ruleset_id in index_state.values().copied().filter(|id| *id != 0) {
+            *refcounts.entry(ruleset_id).or_default() += 1;
+        }
+        for ruleset_id in cidr_v4_state.values().copied().filter(|id| *id != 0) {
+            *refcounts.entry(ruleset_id).or_default() += 1;
+        }
+        for ruleset_id in cidr_v6_state.values().copied().filter(|id| *id != 0) {
             *refcounts.entry(ruleset_id).or_default() += 1;
         }
 
@@ -100,13 +138,11 @@ impl RulesetStateInner {
             }
             rules.sort_by_key(|(key, value)| (key.proto, key.port, value.action));
 
-            let mut hasher = ahash::AHasher::default();
-            for (key, value) in &rules {
-                hasher.write_u8(key.proto);
-                hasher.write_u16(key.port);
-                hasher.write_u8(value.action);
-            }
-            let hash: RulesetHash = hasher.finish();
+            let hash = hash_rule_triples(
+                rules
+                    .iter()
+                    .map(|(key, value)| (key.proto, key.port, value.action)),
+            );
 
             by_id.insert(ruleset_id, hash);
             by_hash.entry(hash).or_insert(RulesetEntry {
@@ -117,6 +153,16 @@ impl RulesetStateInner {
         }
 
         for ruleset_id in index_state.values().copied().filter(|id| *id != 0) {
+            if ruleset_id > max_id {
+                max_id = ruleset_id;
+            }
+        }
+        for ruleset_id in cidr_v4_state.values().copied().filter(|id| *id != 0) {
+            if ruleset_id > max_id {
+                max_id = ruleset_id;
+            }
+        }
+        for ruleset_id in cidr_v6_state.values().copied().filter(|id| *id != 0) {
             if ruleset_id > max_id {
                 max_id = ruleset_id;
             }

@@ -118,7 +118,6 @@ pub fn add(args: &Args, input: Input) -> Response {
                 pod_namespace: pod_namespace.clone(),
             });
         }
-
     }
 
     if reqs.is_empty() {

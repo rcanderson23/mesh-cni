@@ -3,7 +3,7 @@ use mesh_cni_api::policy::v1::{
     policy_server::{Policy as PolicyApi, PolicyServer},
 };
 use mesh_cni_ebpf_common::policy::{
-    Action, PolicyDirection, PolicyIndexKey, PolicyProtocol, PolicyRuleKey, PolicyValue,
+    Action, PolicyDirection, PolicyIndexKey, PolicyProtocol, PolicyRuleKey, PolicyValue, RulesetId,
 };
 use tonic::{Code, Request, Response, Status};
 use tracing::info;
@@ -12,7 +12,7 @@ use crate::bpf::{SharedBpfMap, policy::PolicyState};
 
 pub fn server<PI, PR>(state: PolicyState<PI, PR>) -> PolicyServer<Policy<PI, PR>>
 where
-    PI: SharedBpfMap<Key = PolicyIndexKey, Value = u32, KeyOutput = PolicyIndexKey>,
+    PI: SharedBpfMap<Key = PolicyIndexKey, Value = RulesetId, KeyOutput = PolicyIndexKey>,
     PR: SharedBpfMap<Key = PolicyRuleKey, Value = PolicyValue, KeyOutput = PolicyRuleKey>,
 {
     PolicyServer::new(Policy::new(state))
@@ -21,7 +21,7 @@ where
 #[derive(Clone)]
 pub struct Policy<PI, PR>
 where
-    PI: SharedBpfMap<Key = PolicyIndexKey, Value = u32, KeyOutput = PolicyIndexKey>,
+    PI: SharedBpfMap<Key = PolicyIndexKey, Value = RulesetId, KeyOutput = PolicyIndexKey>,
     PR: SharedBpfMap<Key = PolicyRuleKey, Value = PolicyValue, KeyOutput = PolicyRuleKey>,
 {
     state: PolicyState<PI, PR>,
@@ -29,7 +29,7 @@ where
 
 impl<PI, PR> Policy<PI, PR>
 where
-    PI: SharedBpfMap<Key = PolicyIndexKey, Value = u32, KeyOutput = PolicyIndexKey>,
+    PI: SharedBpfMap<Key = PolicyIndexKey, Value = RulesetId, KeyOutput = PolicyIndexKey>,
     PR: SharedBpfMap<Key = PolicyRuleKey, Value = PolicyValue, KeyOutput = PolicyRuleKey>,
 {
     pub fn new(state: PolicyState<PI, PR>) -> Self {
@@ -40,7 +40,7 @@ where
 #[tonic::async_trait]
 impl<PI, PR> PolicyApi for Policy<PI, PR>
 where
-    PI: SharedBpfMap<Key = PolicyIndexKey, Value = u32, KeyOutput = PolicyIndexKey>,
+    PI: SharedBpfMap<Key = PolicyIndexKey, Value = RulesetId, KeyOutput = PolicyIndexKey>,
     PR: SharedBpfMap<Key = PolicyRuleKey, Value = PolicyValue, KeyOutput = PolicyRuleKey>,
 {
     async fn list_policy(

@@ -19,7 +19,7 @@ use network_types::{
 
 use crate::{
     CONNTRACK_V4, id_v4,
-    policy::{check_policy, conntrack_hit, conntrack_keys},
+    policy::{check_cidr_policy_v4, check_identity_policy, conntrack_hit, conntrack_keys},
 };
 
 #[inline]
@@ -103,7 +103,11 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     if conntrack_hit(&ctx, ct_key, ct_rev, now) {
         return Ok(TC_ACT_PIPE);
     }
-    if check_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Ingress) == Action::Deny {
+    if check_identity_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Ingress)
+        == Action::Deny
+        && check_cidr_policy_v4(dst_id, src_ip, dst_port, proto, PolicyDirection::Ingress)
+            == Action::Deny
+    {
         warn!(
             &ctx,
             "denied src: {}:{}; dst: {}:{}; proto: {}", src_id, src_port, dst_id, dst_port, proto

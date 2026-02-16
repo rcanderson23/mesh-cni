@@ -2,15 +2,13 @@ use std::{net::IpAddr, str::FromStr, sync::Arc};
 
 use k8s_openapi::api::core::v1::Node;
 use kube::{ResourceExt, runtime::controller::Action};
+use mesh_cni_ebpf_common::policy::{LOCAL_NODE_ID, REMOTE_NODE_ID};
 use tracing::{debug, info};
 
 use crate::{
     IdentityBpfState, IdentityControllerExt, Result, context::Context,
     controller::DEFAULT_REQUEUE_DURATION,
 };
-
-const LOCAL_NODE_ID: u32 = 10;
-const REMOTE_NODE_ID: u32 = 11;
 
 impl IdentityControllerExt for Node {
     async fn reconcile<B: IdentityBpfState>(&self, ctx: Arc<Context<B>>) -> Result<Action> {

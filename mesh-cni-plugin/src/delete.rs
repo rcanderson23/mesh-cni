@@ -69,7 +69,6 @@ pub fn delete(args: &Args, input: Input) -> Response {
                 chained: true,
             });
         }
-
     }
 
     if reqs.is_empty() {

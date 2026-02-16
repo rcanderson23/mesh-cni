@@ -42,3 +42,10 @@ load-image:
 run-local: container kind-up load-image install restart
 
 reset-cluster: kind-down run-local
+
+gen-crds:
+  mkdir -p charts/mesh-cni/crds
+  cargo run --target {{host_target}} -p mesh-cni-crds-gen -- --kind mesh-endpoint > charts/mesh-cni/crds/meshendpoint.yaml
+  cargo run --target {{host_target}} -p mesh-cni-crds-gen -- --kind identity > charts/mesh-cni/crds/identity.yaml
+  cargo run --target {{host_target}} -p mesh-cni-crds-gen -- --kind cidr-identity > charts/mesh-cni/crds/cidridentity.yaml
+  cargo run --target {{host_target}} -p mesh-cni-crds-gen -- --kind cluster > charts/mesh-cni/crds/cluster.yaml

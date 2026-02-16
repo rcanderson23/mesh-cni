@@ -31,7 +31,12 @@ pub async fn start(
 
     info!("starting policy service");
     let policy_state = PolicyBpfState::try_new()?;
-    let policy_state = PolicyState::new(policy_state.index(), policy_state.ruleset());
+    let policy_state = PolicyState::new(
+        policy_state.index(),
+        policy_state.ruleset(),
+        policy_state.cidr_v4(),
+        policy_state.cidr_v6(),
+    );
     let policy_context =
         bpf::policy::run(kube_client.clone(), policy_state.clone(), cancel.clone()).await?;
     let policy_server = http::grpc::policy::server(policy_state.clone());

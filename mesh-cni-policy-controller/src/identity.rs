@@ -1,33 +1,34 @@
-use core::hash::Hasher;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use ahash::{HashMap, HashSet};
+use ipnetwork::IpNetwork;
 use k8s_openapi::{
     api::{
         core::v1::{ContainerPort, Pod},
-        networking::v1::{NetworkPolicy, NetworkPolicyPeer, NetworkPolicyPort},
+        networking::v1::{IPBlock, NetworkPolicy, NetworkPolicyPeer, NetworkPolicyPort},
     },
     apimachinery::pkg::util::intstr::IntOrString,
 };
 use kube::{ResourceExt, runtime::controller::Action};
-use mesh_cni_crds::v1alpha1::identity::Identity;
+use mesh_cni_crds::v1alpha1::{cidridentity::CIDRIdentity, identity::Identity};
 use mesh_cni_ebpf_common::{
     IdentityId,
     policy::{
-        ANY_ID, ANY_PORT, Action as PolicyAction, PolicyDirection, PolicyIndexKey, PolicyProtocol,
-        PolicyRuleKey, PolicyValue, RULESET_NONE,
+        ANY_ID, ANY_PORT, Action as PolicyAction, CidrPolicyMapKeyV4, CidrPolicyMapKeyV6,
+        PolicyDirection, PolicyIndexKey, PolicyProtocol, PolicyRuleKey, PolicyValue, RULESET_NONE,
+        RulesetId,
     },
 };
 use tracing::info;
 
 use crate::{
     PolicyControllerBpf, Result,
-    context::{Context, RulesetId},
+    context::{Context, hash_rule_triples},
     controller::DEFAULT_REQUEUE_DURATION,
     selector::{PolicyType, peer_selects_identity, policy_affects_type, policy_selects_identity},
 };
 
-pub async fn reconcile_policy_with_identity<P: PolicyControllerBpf>(
+pub(crate) async fn reconcile_policy_with_identity<P: PolicyControllerBpf>(
     identity: Arc<Identity>,
     ctx: Arc<Context<P>>,
 ) -> Result<Action> {
@@ -52,80 +53,73 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         .filter(|np| policy_selects_identity(np, &identity))
         .collect();
 
-    if selected_netpols.is_empty() {
-        info!(
-            identity_id = identity.spec.id,
-            "reconcile: no policies selected for identity"
-        );
-    }
-
     let identity_id = identity.spec.id;
-    let index_state = ctx.policy_bpf_state.index_state()?;
     let identities = ctx.identity_store.state();
+    let cidr_identities = ctx.cidr_identity_store.state();
     let pods = ctx.pod_store.state();
-    let identity_by_id: HashMap<u32, Arc<Identity>> = identities
-        .iter()
-        .map(|id| (id.spec.id, id.clone()))
-        .collect();
-    let mut desired_index: HashMap<PolicyIndexKey, u32> = HashMap::default();
-    let mut written_rulesets: HashSet<u32> = HashSet::default();
-    let mut has_ingress_policy = false;
-    let mut has_egress_policy = false;
 
-    let mut ingress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
-    let mut egress_rules: HashMap<u32, Vec<RuleSpec>> = HashMap::default();
+    let mut generated_rules = generate_rules_maps(
+        selected_netpols.as_slice(),
+        &identity,
+        &identities,
+        &cidr_identities,
+        &pods,
+    );
 
-    for policy in &selected_netpols {
-        let Some(spec) = &policy.spec else {
-            continue;
+    let index_state = ctx.policy_bpf_state.index_state()?;
+    let cidr_v4_state = ctx.policy_bpf_state.cidr_v4_index_state()?;
+    let cidr_v6_state = ctx.policy_bpf_state.cidr_v6_index_state()?;
+    let mut written_rulesets: HashSet<RulesetId> = HashSet::default();
+
+    reconcile_identity_phase(
+        ctx.as_ref(),
+        identity_id,
+        &selected_netpols,
+        &index_state,
+        &mut generated_rules,
+        &mut written_rulesets,
+    )?;
+    reconcile_cidr_phase(
+        ctx.as_ref(),
+        identity_id,
+        &selected_netpols,
+        &cidr_v4_state,
+        &cidr_v6_state,
+        &mut generated_rules,
+        &mut written_rulesets,
+    )?;
+
+    Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
+}
+
+fn reconcile_identity_phase<P: PolicyControllerBpf>(
+    ctx: &Context<P>,
+    identity_id: IdentityId,
+    selected_netpols: &[&Arc<NetworkPolicy>],
+    index_state: &HashMap<PolicyIndexKey, RulesetId>,
+    generated_rules: &mut GeneratedRules,
+    written_rulesets: &mut HashSet<RulesetId>,
+) -> Result<()> {
+    let has_ingress_policy = selected_netpols.iter().any(|np| {
+        let Some(spec) = &np.spec else {
+            return false;
         };
-
-        let Some(policy_ns) = policy.namespace() else {
-            continue;
+        policy_affects_type(spec, PolicyType::Ingress)
+    });
+    let has_egress_policy = selected_netpols.iter().any(|np| {
+        let Some(spec) = &np.spec else {
+            return false;
         };
+        policy_affects_type(spec, PolicyType::Egress)
+    });
 
-        if policy_affects_type(spec, PolicyType::Ingress) {
-            has_ingress_policy = true;
-            let rules = spec.ingress.as_deref().unwrap_or(&[]);
-            for rule in rules {
-                let peer_ids = peer_ids_for_rule(&policy_ns, rule.from.as_ref(), &identities);
-                for peer_id in peer_ids {
-                    let rule_specs = rule_specs_for_peer(
-                        peer_id,
-                        &identity,
-                        &identity_by_id,
-                        &pods,
-                        rule.ports.as_ref(),
-                    );
-                    add_rule_specs(&mut ingress_rules, &[peer_id], &rule_specs);
-                }
-            }
-        }
+    let mut desired_index: HashMap<PolicyIndexKey, RulesetId> = HashMap::default();
 
-        if policy_affects_type(spec, PolicyType::Egress) {
-            has_egress_policy = true;
-            let rules = spec.egress.as_deref().unwrap_or(&[]);
-            for rule in rules {
-                let peer_ids = peer_ids_for_rule(&policy_ns, rule.to.as_ref(), &identities);
-                for peer_id in peer_ids {
-                    let rule_specs = rule_specs_for_peer(
-                        peer_id,
-                        &identity,
-                        &identity_by_id,
-                        &pods,
-                        rule.ports.as_ref(),
-                    );
-                    add_rule_specs(&mut egress_rules, &[peer_id], &rule_specs);
-                }
-            }
-        }
+    let mut ingress_identity_rules = std::mem::take(&mut generated_rules.ingress_identity_rules);
+    if has_ingress_policy && !ingress_identity_rules.contains_key(&ANY_ID) {
+        ingress_identity_rules.insert(ANY_ID, Vec::new());
     }
-
-    if has_ingress_policy && !ingress_rules.contains_key(&ANY_ID) {
-        ingress_rules.insert(ANY_ID, Vec::new());
-    }
-
-    for (peer_id, rule_specs) in ingress_rules {
+    for (peer_id, rule_specs) in ingress_identity_rules {
         let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
         if written_rulesets.insert(ruleset_id) {
             for (key, value) in &ruleset_entries {
@@ -143,11 +137,11 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         );
     }
 
-    if has_egress_policy && !egress_rules.contains_key(&ANY_ID) {
-        egress_rules.insert(ANY_ID, Vec::new());
+    let mut egress_identity_rules = std::mem::take(&mut generated_rules.egress_identity_rules);
+    if has_egress_policy && !egress_identity_rules.contains_key(&ANY_ID) {
+        egress_identity_rules.insert(ANY_ID, Vec::new());
     }
-
-    for (peer_id, rule_specs) in egress_rules {
+    for (peer_id, rule_specs) in egress_identity_rules {
         let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
         if written_rulesets.insert(ruleset_id) {
             for (key, value) in &ruleset_entries {
@@ -165,7 +159,7 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         );
     }
 
-    let current_index: HashMap<PolicyIndexKey, u32> = index_state
+    let current_index: HashMap<PolicyIndexKey, RulesetId> = index_state
         .iter()
         .filter(|(key, _)| identity_key_applies(identity_id, key))
         .map(|(key, value)| (*key, *value))
@@ -176,13 +170,13 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         selected_policies = selected_netpols.len(),
         current_index = current_index.len(),
         desired_index = desired_index.len(),
-        "reconcile: computed policy index diff"
+        "reconcile: identity phase computed diff"
     );
 
-    let mut deleted_count = 0usize;
-    let mut updated_count = 0usize;
-    let mut unchanged_count = 0usize;
-    let mut added_count = 0usize;
+    let mut deleted_count: u32 = 0;
+    let mut updated_count: u32 = 0;
+    let mut unchanged_count: u32 = 0;
+    let mut added_count: u32 = 0;
 
     for (key, current_ruleset_id) in &current_index {
         match desired_index.get(key) {
@@ -192,12 +186,12 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
             Some(desired_ruleset_id) => {
                 ctx.policy_bpf_state
                     .update_index(*key, *desired_ruleset_id)?;
-                release_ruleset_if_unused(&ctx, *current_ruleset_id)?;
+                release_ruleset_if_unused(ctx, *current_ruleset_id)?;
                 updated_count += 1;
             }
             None => {
                 ctx.policy_bpf_state.delete_index(key)?;
-                release_ruleset_if_unused(&ctx, *current_ruleset_id)?;
+                release_ruleset_if_unused(ctx, *current_ruleset_id)?;
                 deleted_count += 1;
             }
         }
@@ -217,10 +211,272 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         updated = updated_count,
         unchanged = unchanged_count,
         added = added_count,
-        "reconcile: applied policy index diff"
+        "reconcile: identity phase applied diff"
+    );
+    Ok(())
+}
+
+fn reconcile_cidr_phase<P: PolicyControllerBpf>(
+    ctx: &Context<P>,
+    identity_id: IdentityId,
+    selected_netpols: &[&Arc<NetworkPolicy>],
+    cidr_v4_state: &HashMap<CidrPolicyMapKeyV4, RulesetId>,
+    cidr_v6_state: &HashMap<CidrPolicyMapKeyV6, RulesetId>,
+    generated_rules: &mut GeneratedRules,
+    written_rulesets: &mut HashSet<RulesetId>,
+) -> Result<()> {
+    let mut raw_cidr_v4_rules: HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>> = HashMap::default();
+    let mut raw_cidr_v6_rules: HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>> = HashMap::default();
+
+    for (key, rule_specs) in std::mem::take(&mut generated_rules.ingress_cidr_rules_v4) {
+        raw_cidr_v4_rules.entry(key).or_default().extend(rule_specs);
+    }
+    for (key, rule_specs) in std::mem::take(&mut generated_rules.egress_cidr_rules_v4) {
+        raw_cidr_v4_rules.entry(key).or_default().extend(rule_specs);
+    }
+    for (key, rule_specs) in std::mem::take(&mut generated_rules.ingress_cidr_rules_v6) {
+        raw_cidr_v6_rules.entry(key).or_default().extend(rule_specs);
+    }
+    for (key, rule_specs) in std::mem::take(&mut generated_rules.egress_cidr_rules_v6) {
+        raw_cidr_v6_rules.entry(key).or_default().extend(rule_specs);
+    }
+
+    let desired_cidr_v4_rules = expand_cidr_rule_specs_v4(&raw_cidr_v4_rules);
+    let desired_cidr_v6_rules = expand_cidr_rule_specs_v6(&raw_cidr_v6_rules);
+
+    let mut desired_cidr_v4: HashMap<CidrPolicyMapKeyV4, RulesetId> = HashMap::default();
+    let mut desired_cidr_v6: HashMap<CidrPolicyMapKeyV6, RulesetId> = HashMap::default();
+
+    for (key, rule_specs) in desired_cidr_v4_rules {
+        let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs, &ctx.ruleset_state);
+        if written_rulesets.insert(ruleset_id) {
+            for (rule_key, rule_value) in &ruleset_entries {
+                ctx.policy_bpf_state.update_rule(*rule_key, *rule_value)?;
+            }
+        }
+        desired_cidr_v4.insert(key, ruleset_id);
+    }
+
+    for (key, rule_specs) in desired_cidr_v6_rules {
+        let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs, &ctx.ruleset_state);
+        if written_rulesets.insert(ruleset_id) {
+            for (rule_key, rule_value) in &ruleset_entries {
+                ctx.policy_bpf_state.update_rule(*rule_key, *rule_value)?;
+            }
+        }
+        desired_cidr_v6.insert(key, ruleset_id);
+    }
+
+    let current_cidr_v4: HashMap<CidrPolicyMapKeyV4, RulesetId> = cidr_v4_state
+        .iter()
+        .filter(|(key, _)| cidr_key_applies(identity_id, key.selected_id))
+        .map(|(key, value)| (*key, *value))
+        .collect();
+    let current_cidr_v6: HashMap<CidrPolicyMapKeyV6, RulesetId> = cidr_v6_state
+        .iter()
+        .filter(|(key, _)| cidr_key_applies(identity_id, key.selected_id))
+        .map(|(key, value)| (*key, *value))
+        .collect();
+
+    info!(
+        identity_id,
+        selected_policies = selected_netpols.len(),
+        current_cidr_v4 = current_cidr_v4.len(),
+        desired_cidr_v4 = desired_cidr_v4.len(),
+        current_cidr_v6 = current_cidr_v6.len(),
+        desired_cidr_v6 = desired_cidr_v6.len(),
+        "reconcile: cidr phase computed diff"
     );
 
-    Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
+    let mut cidr_v4_deleted_count: u32 = 0;
+    let mut cidr_v4_updated_count: u32 = 0;
+    let mut cidr_v4_unchanged_count: u32 = 0;
+    let mut cidr_v4_added_count: u32 = 0;
+
+    for (key, current_ruleset_id) in &current_cidr_v4 {
+        match desired_cidr_v4.get(key) {
+            Some(desired_ruleset_id) if *desired_ruleset_id == *current_ruleset_id => {
+                cidr_v4_unchanged_count += 1;
+            }
+            Some(desired_ruleset_id) => {
+                ctx.policy_bpf_state
+                    .update_cidr_v4_index(*key, *desired_ruleset_id)?;
+                release_ruleset_if_unused(ctx, *current_ruleset_id)?;
+                cidr_v4_updated_count += 1;
+            }
+            None => {
+                ctx.policy_bpf_state.delete_cidr_v4_index(key)?;
+                release_ruleset_if_unused(ctx, *current_ruleset_id)?;
+                cidr_v4_deleted_count += 1;
+            }
+        }
+    }
+    for (key, ruleset_id) in desired_cidr_v4 {
+        if current_cidr_v4.contains_key(&key) {
+            continue;
+        }
+        ctx.policy_bpf_state.update_cidr_v4_index(key, ruleset_id)?;
+        cidr_v4_added_count += 1;
+    }
+
+    let mut cidr_v6_deleted_count: u32 = 0;
+    let mut cidr_v6_updated_count: u32 = 0;
+    let mut cidr_v6_unchanged_count: u32 = 0;
+    let mut cidr_v6_added_count: u32 = 0;
+
+    for (key, current_ruleset_id) in &current_cidr_v6 {
+        match desired_cidr_v6.get(key) {
+            Some(desired_ruleset_id) if *desired_ruleset_id == *current_ruleset_id => {
+                cidr_v6_unchanged_count += 1;
+            }
+            Some(desired_ruleset_id) => {
+                ctx.policy_bpf_state
+                    .update_cidr_v6_index(*key, *desired_ruleset_id)?;
+                release_ruleset_if_unused(ctx, *current_ruleset_id)?;
+                cidr_v6_updated_count += 1;
+            }
+            None => {
+                ctx.policy_bpf_state.delete_cidr_v6_index(key)?;
+                release_ruleset_if_unused(ctx, *current_ruleset_id)?;
+                cidr_v6_deleted_count += 1;
+            }
+        }
+    }
+    for (key, ruleset_id) in desired_cidr_v6 {
+        if current_cidr_v6.contains_key(&key) {
+            continue;
+        }
+        ctx.policy_bpf_state.update_cidr_v6_index(key, ruleset_id)?;
+        cidr_v6_added_count += 1;
+    }
+
+    info!(
+        identity_id,
+        cidr_v4_deleted = cidr_v4_deleted_count,
+        cidr_v4_updated = cidr_v4_updated_count,
+        cidr_v4_unchanged = cidr_v4_unchanged_count,
+        cidr_v4_added = cidr_v4_added_count,
+        cidr_v6_deleted = cidr_v6_deleted_count,
+        cidr_v6_updated = cidr_v6_updated_count,
+        cidr_v6_unchanged = cidr_v6_unchanged_count,
+        cidr_v6_added = cidr_v6_added_count,
+        "reconcile: cidr phase applied diff"
+    );
+    Ok(())
+}
+
+#[derive(Default)]
+struct GeneratedRules {
+    ingress_identity_rules: HashMap<IdentityId, Vec<RuleSpec>>,
+    egress_identity_rules: HashMap<IdentityId, Vec<RuleSpec>>,
+    ingress_cidr_rules_v4: HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>>,
+    ingress_cidr_rules_v6: HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>>,
+    egress_cidr_rules_v4: HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>>,
+    egress_cidr_rules_v6: HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>>,
+}
+
+fn generate_rules_maps(
+    selected_netpols: &[&Arc<NetworkPolicy>],
+    identity: &Identity,
+    identities: &[Arc<Identity>],
+    cidr_identities: &[Arc<CIDRIdentity>],
+    pods: &[Arc<Pod>],
+) -> GeneratedRules {
+    let identity_by_id: HashMap<u32, Arc<Identity>> = identities
+        .iter()
+        .map(|id| (id.spec.id, id.clone()))
+        .collect();
+    let mut generated_rules = GeneratedRules::default();
+
+    for policy in selected_netpols {
+        let Some(spec) = &policy.spec else {
+            continue;
+        };
+
+        let Some(policy_ns) = policy.namespace() else {
+            continue;
+        };
+
+        if policy_affects_type(spec, PolicyType::Ingress) {
+            let rules = spec.ingress.as_deref().unwrap_or(&[]);
+            for rule in rules {
+                let peer_ids = peer_ids_for_rule(&policy_ns, rule.from.as_ref(), identities);
+                for peer_id in peer_ids {
+                    let rule_specs = rule_specs_for_peer(
+                        peer_id,
+                        identity,
+                        &identity_by_id,
+                        pods,
+                        rule.ports.as_ref(),
+                    );
+                    add_rule_specs(
+                        &mut generated_rules.ingress_identity_rules,
+                        &[peer_id],
+                        &rule_specs,
+                    );
+                }
+
+                if let Some(peers) = rule.from.as_ref() {
+                    let rule_specs = rule_specs_from_ports(identity, pods, rule.ports.as_ref());
+                    for peer in peers {
+                        let Some(ip_block) = &peer.ip_block else {
+                            continue;
+                        };
+                        add_cidr_rule_specs_for_ip_block(
+                            ip_block,
+                            cidr_identities,
+                            identity.spec.id,
+                            PolicyDirection::Ingress,
+                            &rule_specs,
+                            &mut generated_rules.ingress_cidr_rules_v4,
+                            &mut generated_rules.ingress_cidr_rules_v6,
+                        );
+                    }
+                }
+            }
+        }
+
+        if policy_affects_type(spec, PolicyType::Egress) {
+            let rules = spec.egress.as_deref().unwrap_or(&[]);
+            for rule in rules {
+                let peer_ids = peer_ids_for_rule(&policy_ns, rule.to.as_ref(), identities);
+                for peer_id in peer_ids {
+                    let rule_specs = rule_specs_for_peer(
+                        peer_id,
+                        identity,
+                        &identity_by_id,
+                        pods,
+                        rule.ports.as_ref(),
+                    );
+                    add_rule_specs(
+                        &mut generated_rules.egress_identity_rules,
+                        &[peer_id],
+                        &rule_specs,
+                    );
+                }
+
+                if let Some(peers) = rule.to.as_ref() {
+                    let rule_specs = rule_specs_from_ports(identity, pods, rule.ports.as_ref());
+                    for peer in peers {
+                        let Some(ip_block) = &peer.ip_block else {
+                            continue;
+                        };
+                        add_cidr_rule_specs_for_ip_block(
+                            ip_block,
+                            cidr_identities,
+                            identity.spec.id,
+                            PolicyDirection::Egress,
+                            &rule_specs,
+                            &mut generated_rules.egress_cidr_rules_v4,
+                            &mut generated_rules.egress_cidr_rules_v6,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    generated_rules
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -239,8 +495,6 @@ impl Default for RuleSpec {
         }
     }
 }
-
-impl RuleSpec {}
 
 fn rule_specs_from_ports(
     identity: &Identity,
@@ -305,9 +559,9 @@ fn rule_specs_from_ports(
 }
 
 fn rule_specs_for_peer(
-    peer_id: u32,
+    peer_id: IdentityId,
     self_identity: &Identity,
-    identities: &HashMap<u32, Arc<Identity>>,
+    identities: &HashMap<IdentityId, Arc<Identity>>,
     pods: &[Arc<Pod>],
     ports: Option<&Vec<NetworkPolicyPort>>,
 ) -> Vec<RuleSpec> {
@@ -390,7 +644,7 @@ fn peer_ids_for_rule(
     policy_ns: &str,
     peers: Option<&Vec<NetworkPolicyPeer>>,
     identities: &[Arc<Identity>],
-) -> Vec<u32> {
+) -> Vec<IdentityId> {
     let Some(peers) = peers else {
         return vec![ANY_ID];
     };
@@ -400,6 +654,10 @@ fn peer_ids_for_rule(
 
     let mut ids = Vec::new();
     for peer in peers {
+        if peer.ip_block.is_some() {
+            continue;
+        }
+
         let same_namespace_only = peer.namespace_selector.is_none() && peer.pod_selector.is_some();
 
         for identity in identities {
@@ -417,6 +675,189 @@ fn peer_ids_for_rule(
     }
 
     ids
+}
+
+fn cidr_prefixes_for_ip_block(
+    ip_block: &IPBlock,
+    cidr_identities: &[Arc<CIDRIdentity>],
+) -> Vec<IpNetwork> {
+    let mut except = ip_block.except.clone().unwrap_or_default();
+    except.sort();
+    except.dedup();
+
+    let mut prefixes: HashSet<IpNetwork> = HashSet::default();
+    cidr_identities
+        .iter()
+        .filter(|cidr_identity| {
+            if cidr_identity.spec.cidr.as_deref() != Some(ip_block.cidr.as_str()) {
+                return false;
+            }
+
+            let mut cidr_except = cidr_identity.spec.except.clone();
+            cidr_except.sort();
+            cidr_except.dedup();
+            cidr_except == except
+        })
+        .for_each(|cidr_identity| {
+            for prefix in &cidr_identity.spec.cidr_prefixes {
+                if let Ok(parsed) = IpNetwork::from_str(prefix) {
+                    prefixes.insert(parsed);
+                }
+            }
+        });
+
+    prefixes.into_iter().collect()
+}
+
+fn add_cidr_rule_specs_for_ip_block(
+    ip_block: &IPBlock,
+    cidr_identities: &[Arc<CIDRIdentity>],
+    selected_id: IdentityId,
+    direction: PolicyDirection,
+    rule_specs: &[RuleSpec],
+    cidr_v4_map: &mut HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>>,
+    cidr_v6_map: &mut HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>>,
+) {
+    for prefix in cidr_prefixes_for_ip_block(ip_block, cidr_identities) {
+        match prefix {
+            IpNetwork::V4(prefix_v4) => {
+                let key = CidrPolicyMapKeyV4 {
+                    prefix_len: 64 + u32::from(prefix_v4.prefix()),
+                    selected_id,
+                    direction: direction.into(),
+                    _pad: [0; 3],
+                    addr: u32::from(prefix_v4.network()).to_be(),
+                };
+                cidr_v4_map
+                    .entry(key)
+                    .or_default()
+                    .extend_from_slice(rule_specs);
+            }
+            IpNetwork::V6(prefix_v6) => {
+                let key = CidrPolicyMapKeyV6 {
+                    prefix_len: 64 + u32::from(prefix_v6.prefix()),
+                    selected_id,
+                    direction: direction.into(),
+                    _pad: [0; 3],
+                    addr: u128::from(prefix_v6.network()).to_be_bytes(),
+                };
+                cidr_v6_map
+                    .entry(key)
+                    .or_default()
+                    .extend_from_slice(rule_specs);
+            }
+        }
+    }
+}
+
+fn expand_cidr_rule_specs_v4(
+    source_rules: &HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>>,
+) -> HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>> {
+    let mut expanded_rules: HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>> = HashMap::default();
+
+    for key in source_rules.keys() {
+        let mut effective_rules = Vec::new();
+        for (ancestor_key, ancestor_rules) in source_rules {
+            if cidr_v4_key_contains(ancestor_key, key) {
+                effective_rules.extend_from_slice(ancestor_rules);
+            }
+        }
+        expanded_rules.insert(*key, effective_rules);
+    }
+
+    expanded_rules
+}
+
+fn expand_cidr_rule_specs_v6(
+    source_rules: &HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>>,
+) -> HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>> {
+    let mut expanded_rules: HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>> = HashMap::default();
+
+    for key in source_rules.keys() {
+        let mut effective_rules = Vec::new();
+        for (ancestor_key, ancestor_rules) in source_rules {
+            if cidr_v6_key_contains(ancestor_key, key) {
+                effective_rules.extend_from_slice(ancestor_rules);
+            }
+        }
+        expanded_rules.insert(*key, effective_rules);
+    }
+
+    expanded_rules
+}
+
+fn cidr_v4_key_contains(
+    ancestor_key: &CidrPolicyMapKeyV4,
+    descendant_key: &CidrPolicyMapKeyV4,
+) -> bool {
+    if ancestor_key.selected_id != descendant_key.selected_id
+        || ancestor_key.direction != descendant_key.direction
+        || ancestor_key.prefix_len > descendant_key.prefix_len
+    {
+        return false;
+    }
+
+    let Some(prefix_bits) = ancestor_key.prefix_len.checked_sub(64) else {
+        return false;
+    };
+    if prefix_bits > 32 {
+        return false;
+    }
+
+    prefix_matches(
+        ancestor_key.addr.to_ne_bytes().as_slice(),
+        descendant_key.addr.to_ne_bytes().as_slice(),
+        prefix_bits,
+    )
+}
+
+fn cidr_v6_key_contains(
+    ancestor_key: &CidrPolicyMapKeyV6,
+    descendant_key: &CidrPolicyMapKeyV6,
+) -> bool {
+    if ancestor_key.selected_id != descendant_key.selected_id
+        || ancestor_key.direction != descendant_key.direction
+        || ancestor_key.prefix_len > descendant_key.prefix_len
+    {
+        return false;
+    }
+
+    let Some(prefix_bits) = ancestor_key.prefix_len.checked_sub(64) else {
+        return false;
+    };
+    if prefix_bits > 128 {
+        return false;
+    }
+
+    prefix_matches(
+        ancestor_key.addr.as_slice(),
+        descendant_key.addr.as_slice(),
+        prefix_bits,
+    )
+}
+
+fn prefix_matches(prefix_addr: &[u8], candidate_addr: &[u8], prefix_bits: u32) -> bool {
+    let full_bytes = (prefix_bits / 8) as usize;
+    let partial_bits = (prefix_bits % 8) as u8;
+
+    if full_bytes > prefix_addr.len() || full_bytes > candidate_addr.len() {
+        return false;
+    }
+
+    if prefix_addr[..full_bytes] != candidate_addr[..full_bytes] {
+        return false;
+    }
+
+    if partial_bits == 0 {
+        return true;
+    }
+
+    if full_bytes >= prefix_addr.len() || full_bytes >= candidate_addr.len() {
+        return false;
+    }
+
+    let mask = (!0u8) << (8 - partial_bits);
+    (prefix_addr[full_bytes] & mask) == (candidate_addr[full_bytes] & mask)
 }
 
 fn add_rule_specs(
@@ -437,13 +878,11 @@ fn build_ruleset(
     rules.sort_by_key(|rule| (rule.proto, rule.port, rule.action));
     rules.dedup();
 
-    let mut hasher = ahash::AHasher::default();
-    for rule in &rules {
-        hasher.write_u8(rule.proto);
-        hasher.write_u16(rule.port);
-        hasher.write_u8(rule.action);
-    }
-    let hash = hasher.finish();
+    let hash = hash_rule_triples(
+        rules
+            .iter()
+            .map(|rule| (rule.proto, rule.port, rule.action)),
+    );
 
     let ruleset_id = ruleset_state.acquire_ruleset(
         hash,
@@ -495,6 +934,10 @@ fn identity_key_applies(identity_id: IdentityId, key: &PolicyIndexKey) -> bool {
     }
 }
 
+fn cidr_key_applies(identity_id: IdentityId, selected_id: IdentityId) -> bool {
+    selected_id == identity_id
+}
+
 fn release_ruleset_if_unused<P: PolicyControllerBpf>(
     ctx: &Context<P>,
     ruleset_id: RulesetId,
@@ -516,7 +959,7 @@ mod tests {
 
     use k8s_openapi::{
         api::{
-            core::v1::{Container, ContainerPort, Pod, PodSpec},
+            core::v1::{Container, ContainerPort, Pod, PodIP, PodSpec, PodStatus},
             networking::v1::{
                 NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyIngressRule,
                 NetworkPolicyPort, NetworkPolicySpec,
@@ -534,7 +977,10 @@ mod tests {
             watcher,
         },
     };
-    use mesh_cni_crds::v1alpha1::identity::IdentitySpec;
+    use mesh_cni_crds::v1alpha1::{
+        cidridentity::{CIDRIdentity, CidrIdentitySpec},
+        identity::IdentitySpec,
+    };
 
     use super::*;
     use crate::{
@@ -543,8 +989,10 @@ mod tests {
     };
 
     struct TestPolicyBpfState {
-        index: Mutex<HashMap<PolicyIndexKey, u32>>,
+        index: Mutex<HashMap<PolicyIndexKey, RulesetId>>,
         ruleset: Mutex<HashMap<PolicyRuleKey, PolicyValue>>,
+        cidr_v4: Mutex<HashMap<CidrPolicyMapKeyV4, RulesetId>>,
+        cidr_v6: Mutex<HashMap<CidrPolicyMapKeyV6, RulesetId>>,
     }
 
     impl TestPolicyBpfState {
@@ -552,12 +1000,14 @@ mod tests {
             Self {
                 index: Mutex::new(HashMap::default()),
                 ruleset: Mutex::new(HashMap::default()),
+                cidr_v4: Mutex::new(HashMap::default()),
+                cidr_v6: Mutex::new(HashMap::default()),
             }
         }
     }
 
     impl PolicyControllerBpf for TestPolicyBpfState {
-        fn update_index(&self, key: PolicyIndexKey, ruleset_id: u32) -> Result<()> {
+        fn update_index(&self, key: PolicyIndexKey, ruleset_id: RulesetId) -> Result<()> {
             self.index.lock().unwrap().insert(key, ruleset_id);
             Ok(())
         }
@@ -577,12 +1027,48 @@ mod tests {
             Ok(())
         }
 
-        fn index_state(&self) -> Result<HashMap<PolicyIndexKey, u32>> {
+        fn index_state(&self) -> Result<HashMap<PolicyIndexKey, RulesetId>> {
             Ok(self.index.lock().unwrap().clone())
         }
 
         fn ruleset_state(&self) -> Result<HashMap<PolicyRuleKey, PolicyValue>> {
             Ok(self.ruleset.lock().unwrap().clone())
+        }
+
+        fn update_cidr_v4_index(
+            &self,
+            key: CidrPolicyMapKeyV4,
+            ruleset_id: RulesetId,
+        ) -> Result<()> {
+            self.cidr_v4.lock().unwrap().insert(key, ruleset_id);
+            Ok(())
+        }
+
+        fn delete_cidr_v4_index(&self, key: &CidrPolicyMapKeyV4) -> Result<()> {
+            self.cidr_v4.lock().unwrap().remove(key);
+            Ok(())
+        }
+
+        fn cidr_v4_index_state(&self) -> Result<HashMap<CidrPolicyMapKeyV4, RulesetId>> {
+            Ok(self.cidr_v4.lock().unwrap().clone())
+        }
+
+        fn update_cidr_v6_index(
+            &self,
+            key: CidrPolicyMapKeyV6,
+            ruleset_id: RulesetId,
+        ) -> Result<()> {
+            self.cidr_v6.lock().unwrap().insert(key, ruleset_id);
+            Ok(())
+        }
+
+        fn delete_cidr_v6_index(&self, key: &CidrPolicyMapKeyV6) -> Result<()> {
+            self.cidr_v6.lock().unwrap().remove(key);
+            Ok(())
+        }
+
+        fn cidr_v6_index_state(&self) -> Result<HashMap<CidrPolicyMapKeyV6, RulesetId>> {
+            Ok(self.cidr_v6.lock().unwrap().clone())
         }
     }
 
@@ -591,6 +1077,22 @@ mod tests {
         K::DynamicType: Eq + Hash + Clone,
     {
         writer.apply_watcher_event(&watcher::Event::Apply(obj));
+    }
+
+    fn pod_with_ip(namespace: &str, name: &str, labels: BTreeMap<String, String>, ip: &str) -> Pod {
+        Pod {
+            metadata: ObjectMeta {
+                name: Some(name.into()),
+                namespace: Some(namespace.into()),
+                labels: Some(labels),
+                ..Default::default()
+            },
+            status: Some(PodStatus {
+                pod_ips: Some(vec![PodIP { ip: ip.into() }]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -698,6 +1200,7 @@ mod tests {
         let (pod_store, mut pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut pod_writer, pod_a);
         insert(&mut pod_writer, pod_b);
@@ -713,6 +1216,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -778,6 +1282,7 @@ mod tests {
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, _policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut identity_writer, identity.clone());
 
@@ -790,6 +1295,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -862,6 +1368,7 @@ mod tests {
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -875,6 +1382,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -948,6 +1456,7 @@ mod tests {
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -961,6 +1470,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1038,6 +1548,7 @@ mod tests {
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1051,6 +1562,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1126,6 +1638,7 @@ mod tests {
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1139,6 +1652,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1216,6 +1730,7 @@ mod tests {
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1229,6 +1744,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1326,6 +1842,7 @@ mod tests {
         let (pod_store, mut pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut pod_writer, pod);
         insert(&mut policy_writer, policy);
@@ -1340,6 +1857,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1463,6 +1981,7 @@ mod tests {
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1478,6 +1997,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1621,6 +2141,7 @@ mod tests {
         let (pod_store, mut pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut pod_writer, pod);
         insert(&mut policy_writer, policy);
@@ -1636,6 +2157,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1679,6 +2201,782 @@ mod tests {
         assert!(
             rules.keys().all(|key| key.ruleset_id != deny_ruleset_id),
             "deny ruleset should have no rules"
+        );
+    }
+
+    #[test]
+    fn reconcile_ingress_ipblock_uses_cidr_policy_map() {
+        let identity = Identity::new(
+            "ident-a",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                },
+                id: 501,
+            },
+        );
+        let mut identity = identity;
+        identity.metadata.namespace = Some("x".into());
+
+        let cidr_identity = CIDRIdentity::new(
+            "cidr-10-244-0-0-24",
+            CidrIdentitySpec {
+                id: 777,
+                cidr_prefixes: vec!["10.244.0.0/24".into()],
+                cidr: Some("10.244.0.0/24".into()),
+                except: vec![],
+            },
+        );
+
+        let policy = NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some("allow-ipblock-ingress".into()),
+                namespace: Some("x".into()),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("pod".into(), "a".into());
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                ingress: Some(vec![NetworkPolicyIngressRule {
+                    from: Some(vec![NetworkPolicyPeer {
+                        ip_block: Some(k8s_openapi::api::networking::v1::IPBlock {
+                            cidr: "10.244.0.0/24".into(),
+                            except: None,
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        protocol: Some("TCP".into()),
+                        port: Some(IntOrString::Int(80)),
+                        ..Default::default()
+                    }]),
+                }]),
+                ..Default::default()
+            }),
+        };
+
+        let (pod_store, _pod_writer) = store::<Pod>();
+        let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
+        let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, mut cidr_identity_writer) = store::<CIDRIdentity>();
+
+        insert(&mut policy_writer, policy);
+        insert(&mut identity_writer, identity.clone());
+        insert(&mut cidr_identity_writer, cidr_identity);
+
+        let policy_bpf_state = TestPolicyBpfState::new();
+        let index_state = policy_bpf_state.index_state().unwrap();
+        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
+        let ctx = Context {
+            pod_store,
+            policy_store,
+            identity_store,
+            cidr_identity_store,
+            policy_bpf_state,
+            ruleset_state,
+        };
+
+        let ctx = Arc::new(ctx);
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
+
+        let cidr_v4 = ctx.policy_bpf_state.cidr_v4_index_state().unwrap();
+        let allow_key = CidrPolicyMapKeyV4 {
+            prefix_len: 64 + 24,
+            selected_id: 501,
+            direction: PolicyDirection::Ingress.into(),
+            _pad: [0; 3],
+            addr: u32::from(std::net::Ipv4Addr::from_str("10.244.0.0").expect("valid ipv4"))
+                .to_be(),
+        };
+        assert!(cidr_v4.contains_key(&allow_key));
+    }
+
+    #[test]
+    fn reconcile_egress_ipblock_uses_cidr_policy_map() {
+        let identity = Identity::new(
+            "ident-a",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                },
+                id: 601,
+            },
+        );
+        let mut identity = identity;
+        identity.metadata.namespace = Some("x".into());
+
+        let cidr_identity = CIDRIdentity::new(
+            "cidr-10-244-0-0-24-e",
+            CidrIdentitySpec {
+                id: 888,
+                cidr_prefixes: vec!["10.244.0.0/24".into()],
+                cidr: Some("10.244.0.0/24".into()),
+                except: vec![],
+            },
+        );
+
+        let policy = NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some("allow-ipblock-egress".into()),
+                namespace: Some("x".into()),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("pod".into(), "a".into());
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                egress: Some(vec![NetworkPolicyEgressRule {
+                    to: Some(vec![NetworkPolicyPeer {
+                        ip_block: Some(k8s_openapi::api::networking::v1::IPBlock {
+                            cidr: "10.244.0.0/24".into(),
+                            except: None,
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        protocol: Some("TCP".into()),
+                        port: Some(IntOrString::Int(80)),
+                        ..Default::default()
+                    }]),
+                }]),
+                ..Default::default()
+            }),
+        };
+
+        let (pod_store, _pod_writer) = store::<Pod>();
+        let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
+        let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, mut cidr_identity_writer) = store::<CIDRIdentity>();
+
+        insert(&mut policy_writer, policy);
+        insert(&mut identity_writer, identity.clone());
+        insert(&mut cidr_identity_writer, cidr_identity);
+
+        let policy_bpf_state = TestPolicyBpfState::new();
+        let index_state = policy_bpf_state.index_state().unwrap();
+        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
+        let ctx = Context {
+            pod_store,
+            policy_store,
+            identity_store,
+            cidr_identity_store,
+            policy_bpf_state,
+            ruleset_state,
+        };
+
+        let ctx = Arc::new(ctx);
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
+
+        let cidr_v4 = ctx.policy_bpf_state.cidr_v4_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let allow_key = CidrPolicyMapKeyV4 {
+            prefix_len: 64 + 24,
+            selected_id: 601,
+            direction: PolicyDirection::Egress.into(),
+            _pad: [0; 3],
+            addr: u32::from(std::net::Ipv4Addr::from_str("10.244.0.0").expect("valid ipv4"))
+                .to_be(),
+        };
+        assert!(cidr_v4.contains_key(&allow_key));
+        let ruleset_id = cidr_v4.get(&allow_key).copied().unwrap();
+        let rule_key = PolicyRuleKey {
+            ruleset_id,
+            proto: PolicyProtocol::Tcp.into(),
+            _pad0: [0; 3],
+            port: 80,
+            _pad1: [0; 2],
+        };
+        let rule = rules.get(&rule_key).expect("expected CIDR peer allow rule");
+        assert_eq!(rule.action, PolicyAction::Allow as u8);
+    }
+
+    #[test]
+    fn reconcile_ingress_ipblock_overlapping_prefixes_are_additive() {
+        let identity = Identity::new(
+            "ident-a",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                },
+                id: 911,
+            },
+        );
+        let mut identity = identity;
+        identity.metadata.namespace = Some("x".into());
+
+        let broad_cidr_identity = CIDRIdentity::new(
+            "cidr-10-0-0-0-8",
+            CidrIdentitySpec {
+                id: 9011,
+                cidr_prefixes: vec!["10.0.0.0/8".into()],
+                cidr: Some("10.0.0.0/8".into()),
+                except: vec![],
+            },
+        );
+        let narrow_cidr_identity = CIDRIdentity::new(
+            "cidr-10-1-0-0-16",
+            CidrIdentitySpec {
+                id: 9012,
+                cidr_prefixes: vec!["10.1.0.0/16".into()],
+                cidr: Some("10.1.0.0/16".into()),
+                except: vec![],
+            },
+        );
+
+        let policy = NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some("allow-overlapping-ipblocks".into()),
+                namespace: Some("x".into()),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("pod".into(), "a".into());
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                ingress: Some(vec![
+                    NetworkPolicyIngressRule {
+                        from: Some(vec![NetworkPolicyPeer {
+                            ip_block: Some(k8s_openapi::api::networking::v1::IPBlock {
+                                cidr: "10.0.0.0/8".into(),
+                                except: None,
+                            }),
+                            ..Default::default()
+                        }]),
+                        ports: Some(vec![NetworkPolicyPort {
+                            protocol: Some("TCP".into()),
+                            port: Some(IntOrString::Int(80)),
+                            ..Default::default()
+                        }]),
+                    },
+                    NetworkPolicyIngressRule {
+                        from: Some(vec![NetworkPolicyPeer {
+                            ip_block: Some(k8s_openapi::api::networking::v1::IPBlock {
+                                cidr: "10.1.0.0/16".into(),
+                                except: None,
+                            }),
+                            ..Default::default()
+                        }]),
+                        ports: Some(vec![NetworkPolicyPort {
+                            protocol: Some("TCP".into()),
+                            port: Some(IntOrString::Int(443)),
+                            ..Default::default()
+                        }]),
+                    },
+                ]),
+                ..Default::default()
+            }),
+        };
+
+        let (pod_store, _pod_writer) = store::<Pod>();
+        let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
+        let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, mut cidr_identity_writer) = store::<CIDRIdentity>();
+
+        insert(&mut policy_writer, policy);
+        insert(&mut identity_writer, identity.clone());
+        insert(&mut cidr_identity_writer, broad_cidr_identity);
+        insert(&mut cidr_identity_writer, narrow_cidr_identity);
+
+        let policy_bpf_state = TestPolicyBpfState::new();
+        let index_state = policy_bpf_state.index_state().unwrap();
+        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
+        let ctx = Context {
+            pod_store,
+            policy_store,
+            identity_store,
+            cidr_identity_store,
+            policy_bpf_state,
+            ruleset_state,
+        };
+
+        let ctx = Arc::new(ctx);
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
+
+        let cidr_v4 = ctx.policy_bpf_state.cidr_v4_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+
+        let broad_key = CidrPolicyMapKeyV4 {
+            prefix_len: 64 + 8,
+            selected_id: 911,
+            direction: PolicyDirection::Ingress.into(),
+            _pad: [0; 3],
+            addr: u32::from(std::net::Ipv4Addr::from_str("10.0.0.0").expect("valid ipv4")).to_be(),
+        };
+        let narrow_key = CidrPolicyMapKeyV4 {
+            prefix_len: 64 + 16,
+            selected_id: 911,
+            direction: PolicyDirection::Ingress.into(),
+            _pad: [0; 3],
+            addr: u32::from(std::net::Ipv4Addr::from_str("10.1.0.0").expect("valid ipv4")).to_be(),
+        };
+
+        let broad_ruleset_id = *cidr_v4.get(&broad_key).expect("expected broad key");
+        let narrow_ruleset_id = *cidr_v4.get(&narrow_key).expect("expected narrow key");
+
+        let broad_80_key = PolicyRuleKey {
+            ruleset_id: broad_ruleset_id,
+            proto: PolicyProtocol::Tcp.into(),
+            _pad0: [0; 3],
+            port: 80,
+            _pad1: [0; 2],
+        };
+        let broad_443_key = PolicyRuleKey {
+            ruleset_id: broad_ruleset_id,
+            proto: PolicyProtocol::Tcp.into(),
+            _pad0: [0; 3],
+            port: 443,
+            _pad1: [0; 2],
+        };
+        assert!(rules.contains_key(&broad_80_key));
+        assert!(!rules.contains_key(&broad_443_key));
+
+        let narrow_80_key = PolicyRuleKey {
+            ruleset_id: narrow_ruleset_id,
+            proto: PolicyProtocol::Tcp.into(),
+            _pad0: [0; 3],
+            port: 80,
+            _pad1: [0; 2],
+        };
+        let narrow_443_key = PolicyRuleKey {
+            ruleset_id: narrow_ruleset_id,
+            proto: PolicyProtocol::Tcp.into(),
+            _pad0: [0; 3],
+            port: 443,
+            _pad1: [0; 2],
+        };
+        assert!(rules.contains_key(&narrow_80_key));
+        assert!(rules.contains_key(&narrow_443_key));
+    }
+
+    #[test]
+    fn reconcile_ingress_ipblock_does_not_expand_to_pod_identity() {
+        let target_identity = Identity::new(
+            "ident-a",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                },
+                id: 701,
+            },
+        );
+        let mut target_identity = target_identity;
+        target_identity.metadata.namespace = Some("x".into());
+
+        let source_identity = Identity::new(
+            "ident-b",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "b".into());
+                    labels
+                },
+                id: 702,
+            },
+        );
+        let mut source_identity = source_identity;
+        source_identity.metadata.namespace = Some("x".into());
+
+        let pod_b = pod_with_ip(
+            "x",
+            "pod-b",
+            {
+                let mut labels = BTreeMap::new();
+                labels.insert("pod".into(), "b".into());
+                labels
+            },
+            "10.244.0.6",
+        );
+
+        let policy = NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some("allow-ipblock-ingress-live-pod".into()),
+                namespace: Some("x".into()),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("pod".into(), "a".into());
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                ingress: Some(vec![NetworkPolicyIngressRule {
+                    from: Some(vec![NetworkPolicyPeer {
+                        ip_block: Some(k8s_openapi::api::networking::v1::IPBlock {
+                            cidr: "10.244.0.0/24".into(),
+                            except: None,
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        protocol: Some("TCP".into()),
+                        port: Some(IntOrString::Int(80)),
+                        ..Default::default()
+                    }]),
+                }]),
+                ..Default::default()
+            }),
+        };
+
+        let (pod_store, mut pod_writer) = store::<Pod>();
+        let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
+        let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+
+        insert(&mut pod_writer, pod_b);
+        insert(&mut policy_writer, policy);
+        insert(&mut identity_writer, target_identity.clone());
+        insert(&mut identity_writer, source_identity.clone());
+
+        let policy_bpf_state = TestPolicyBpfState::new();
+        let index_state = policy_bpf_state.index_state().unwrap();
+        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
+        let ctx = Context {
+            pod_store,
+            policy_store,
+            identity_store,
+            cidr_identity_store,
+            policy_bpf_state,
+            ruleset_state,
+        };
+
+        let ctx = Arc::new(ctx);
+        inner_reconcile_policy_with_identity(Arc::new(target_identity), ctx.clone()).unwrap();
+
+        let index = ctx.policy_bpf_state.index_state().unwrap();
+        let allow_key = PolicyIndexKey {
+            src_id: 702,
+            dst_id: 701,
+            direction: PolicyDirection::Ingress.into(),
+            _pad: [0; 3],
+        };
+        assert!(!index.contains_key(&allow_key));
+    }
+
+    #[test]
+    fn reconcile_egress_ipblock_does_not_expand_to_pod_identity() {
+        let source_identity = Identity::new(
+            "ident-a",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                },
+                id: 751,
+            },
+        );
+        let mut source_identity = source_identity;
+        source_identity.metadata.namespace = Some("x".into());
+
+        let dst_identity = Identity::new(
+            "ident-b",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "b".into());
+                    labels
+                },
+                id: 752,
+            },
+        );
+        let mut dst_identity = dst_identity;
+        dst_identity.metadata.namespace = Some("x".into());
+
+        let pod_b = pod_with_ip(
+            "x",
+            "pod-b",
+            {
+                let mut labels = BTreeMap::new();
+                labels.insert("pod".into(), "b".into());
+                labels
+            },
+            "10.244.0.6",
+        );
+
+        let policy = NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some("allow-ipblock-egress-live-pod".into()),
+                namespace: Some("x".into()),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("pod".into(), "a".into());
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                egress: Some(vec![NetworkPolicyEgressRule {
+                    to: Some(vec![NetworkPolicyPeer {
+                        ip_block: Some(k8s_openapi::api::networking::v1::IPBlock {
+                            cidr: "10.244.0.0/24".into(),
+                            except: None,
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        protocol: Some("TCP".into()),
+                        port: Some(IntOrString::Int(80)),
+                        ..Default::default()
+                    }]),
+                }]),
+                ..Default::default()
+            }),
+        };
+
+        let (pod_store, mut pod_writer) = store::<Pod>();
+        let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
+        let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+
+        insert(&mut pod_writer, pod_b);
+        insert(&mut policy_writer, policy);
+        insert(&mut identity_writer, source_identity.clone());
+        insert(&mut identity_writer, dst_identity.clone());
+
+        let policy_bpf_state = TestPolicyBpfState::new();
+        let index_state = policy_bpf_state.index_state().unwrap();
+        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
+        let ctx = Context {
+            pod_store,
+            policy_store,
+            identity_store,
+            cidr_identity_store,
+            policy_bpf_state,
+            ruleset_state,
+        };
+
+        let ctx = Arc::new(ctx);
+        inner_reconcile_policy_with_identity(Arc::new(source_identity), ctx.clone()).unwrap();
+
+        let index = ctx.policy_bpf_state.index_state().unwrap();
+        let allow_key = PolicyIndexKey {
+            src_id: 751,
+            dst_id: 752,
+            direction: PolicyDirection::Egress.into(),
+            _pad: [0; 3],
+        };
+        assert!(!index.contains_key(&allow_key));
+    }
+
+    #[test]
+    fn reconcile_egress_ipblock_excludes_matching_pod_identity_when_in_except() {
+        let source_identity = Identity::new(
+            "ident-a",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                },
+                id: 801,
+            },
+        );
+        let mut source_identity = source_identity;
+        source_identity.metadata.namespace = Some("x".into());
+
+        let dst_identity = Identity::new(
+            "ident-b",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "b".into());
+                    labels
+                },
+                id: 802,
+            },
+        );
+        let mut dst_identity = dst_identity;
+        dst_identity.metadata.namespace = Some("x".into());
+
+        let pod_b = pod_with_ip(
+            "x",
+            "pod-b",
+            {
+                let mut labels = BTreeMap::new();
+                labels.insert("pod".into(), "b".into());
+                labels
+            },
+            "10.244.0.6",
+        );
+
+        let policy = NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some("allow-ipblock-egress-live-pod".into()),
+                namespace: Some("x".into()),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("pod".into(), "a".into());
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                egress: Some(vec![NetworkPolicyEgressRule {
+                    to: Some(vec![NetworkPolicyPeer {
+                        ip_block: Some(k8s_openapi::api::networking::v1::IPBlock {
+                            cidr: "10.244.0.0/24".into(),
+                            except: Some(vec!["10.244.0.0/28".into()]),
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        protocol: Some("TCP".into()),
+                        port: Some(IntOrString::Int(80)),
+                        ..Default::default()
+                    }]),
+                }]),
+                ..Default::default()
+            }),
+        };
+
+        let (pod_store, mut pod_writer) = store::<Pod>();
+        let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
+        let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+
+        insert(&mut pod_writer, pod_b);
+        insert(&mut policy_writer, policy);
+        insert(&mut identity_writer, source_identity.clone());
+        insert(&mut identity_writer, dst_identity.clone());
+
+        let policy_bpf_state = TestPolicyBpfState::new();
+        let index_state = policy_bpf_state.index_state().unwrap();
+        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
+        let ctx = Context {
+            pod_store,
+            policy_store,
+            identity_store,
+            cidr_identity_store,
+            policy_bpf_state,
+            ruleset_state,
+        };
+
+        let ctx = Arc::new(ctx);
+        inner_reconcile_policy_with_identity(Arc::new(source_identity), ctx.clone()).unwrap();
+
+        let index = ctx.policy_bpf_state.index_state().unwrap();
+        let allow_key = PolicyIndexKey {
+            src_id: 801,
+            dst_id: 802,
+            direction: PolicyDirection::Egress.into(),
+            _pad: [0; 3],
+        };
+        assert!(!index.contains_key(&allow_key));
+    }
+
+    #[test]
+    fn cidr_prefixes_for_ip_block_matches_cidr_identity() {
+        let ip_block = k8s_openapi::api::networking::v1::IPBlock {
+            cidr: "10.244.0.0/24".into(),
+            except: None,
+        };
+        let cidr_identity = CIDRIdentity::new(
+            "cidr-10-244-0-0-24-test",
+            CidrIdentitySpec {
+                id: 990,
+                cidr_prefixes: vec!["10.244.0.0/24".into()],
+                cidr: Some("10.244.0.0/24".into()),
+                except: vec![],
+            },
+        );
+
+        let prefixes = cidr_prefixes_for_ip_block(&ip_block, &[Arc::new(cidr_identity)]);
+        assert_eq!(
+            prefixes,
+            vec![IpNetwork::from_str("10.244.0.0/24").unwrap()]
         );
     }
 
@@ -1760,6 +3058,7 @@ mod tests {
         let (pod_store, _pod_writer) = store::<Pod>();
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
 
         insert(&mut policy_writer, policy_v1);
         insert(&mut identity_writer, identity.clone());
@@ -1773,6 +3072,7 @@ mod tests {
             pod_store,
             policy_store,
             identity_store,
+            cidr_identity_store,
             policy_bpf_state,
             ruleset_state,
         };

@@ -12,7 +12,10 @@ use aya_ebpf::{
 use mesh_cni_ebpf_common::{
     IdentityId,
     conntrack::{ConntrackKeyV4, ConntrackValue},
-    policy::{PolicyIndexKey, PolicyRuleKey, PolicyValue},
+    policy::{
+        CidrPolicyMapDataV4, CidrPolicyMapDataV6, PolicyIndexKey, PolicyRuleKey, PolicyValue,
+        RulesetId,
+    },
     service::{
         EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
@@ -29,10 +32,18 @@ static CONNTRACK_V4: LruHashMap<ConntrackKeyV4, ConntrackValue> =
     LruHashMap::with_max_entries(65535, 0);
 
 #[map(name = "policy_index")]
-static POLICY_INDEX: HashMap<PolicyIndexKey, u32> = HashMap::with_max_entries(65535, 0);
+static POLICY_INDEX: HashMap<PolicyIndexKey, RulesetId> = HashMap::with_max_entries(65535, 0);
 
 #[map(name = "policy_ruleset")]
 static POLICY_RULESET: HashMap<PolicyRuleKey, PolicyValue> = HashMap::with_max_entries(65535, 0);
+
+#[map(name = "policy_cidr_v4")]
+static POLICY_CIDR_V4: LpmTrie<CidrPolicyMapDataV4, RulesetId> =
+    LpmTrie::with_max_entries(65535, 0);
+
+#[map(name = "policy_cidr_v6")]
+static POLICY_CIDR_V6: LpmTrie<CidrPolicyMapDataV6, RulesetId> =
+    LpmTrie::with_max_entries(65535, 0);
 
 #[map(name = "services_v4")]
 static SERVICES_V4: HashMap<ServiceKeyV4, ServiceValue> = HashMap::with_max_entries(65535, 0);

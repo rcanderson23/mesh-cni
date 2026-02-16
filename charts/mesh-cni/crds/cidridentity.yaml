@@ -1,0 +1,54 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cidridentities.mesh-cni.dev
+spec:
+  group: mesh-cni.dev
+  names:
+    categories: []
+    kind: CIDRIdentity
+    plural: cidridentities
+    shortNames: []
+    singular: cidridentity
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for CidrIdentitySpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              cidr:
+                description: Maps to the ipBlock configured in NetworkPolicy
+                nullable: true
+                type: string
+              cidrPrefixes:
+                description: |-
+                  Generated prefixes based on all network policies in the cluster and mapped to
+                  the id in the policy map
+                items:
+                  type: string
+                type: array
+              except:
+                description: Maps to the except in an ipBlock configured in NetworkPolicy
+                items:
+                  type: string
+                type: array
+              id:
+                description: Stable CIDR identity id. Unique within CIDRIdentity custom resources.
+                format: uint32
+                minimum: 0.0
+                type: integer
+            required:
+            - id
+            type: object
+        required:
+        - spec
+        title: CIDRIdentity
+        type: object
+    served: true
+    storage: true
+    subresources: {}

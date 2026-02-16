@@ -17,6 +17,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub trait IdentityBpfState {
     fn update(&self, key: ipnetwork::IpNetwork, value: u32) -> Result<()>;
+    fn delete(&self, key: ipnetwork::IpNetwork) -> Result<()>;
+    fn state(&self) -> Result<Vec<(ipnetwork::IpNetwork, u32)>>;
 }
 
 pub(crate) trait IdentityControllerExt {

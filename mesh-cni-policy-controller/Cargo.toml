@@ -11,6 +11,7 @@ mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common" }
 
 ahash = { workspace = true }
 futures = { workspace = true }
+ipnetwork = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true}
 serde = { workspace = true }
@@ -25,4 +26,3 @@ path = "src/lib.rs"
 
 [dev-dependencies]
 k8s-openapi = { workspace = true, features = ["v1_34"] }
-

@@ -3,7 +3,7 @@ mod state;
 use std::sync::Arc;
 
 use kube::Client;
-use mesh_cni_ebpf_common::policy::{PolicyIndexKey, PolicyRuleKey, PolicyValue};
+use mesh_cni_ebpf_common::policy::{PolicyIndexKey, PolicyRuleKey, PolicyValue, RulesetId};
 use mesh_cni_policy_controller::Context;
 pub use state::{PolicyBpfState, PolicyIndexBpfState, PolicyRulesetBpfState, PolicyState};
 use tokio_util::sync::CancellationToken;
@@ -16,7 +16,7 @@ pub async fn run<PI, PR>(
     cancel: CancellationToken,
 ) -> Result<Arc<Context<PolicyState<PI, PR>>>>
 where
-    PI: SharedBpfMap<Key = PolicyIndexKey, Value = u32, KeyOutput = PolicyIndexKey>,
+    PI: SharedBpfMap<Key = PolicyIndexKey, Value = RulesetId, KeyOutput = PolicyIndexKey>,
     PR: SharedBpfMap<Key = PolicyRuleKey, Value = PolicyValue, KeyOutput = PolicyRuleKey>,
 {
     let policy_context =

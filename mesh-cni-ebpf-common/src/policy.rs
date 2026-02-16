@@ -1,15 +1,21 @@
 use core::fmt::Display;
 
+use crate::IdentityId;
+
 pub const ANY_ID: u32 = 0;
 pub const WORLD_ID: u32 = 1;
 pub const LOCAL_ID: u32 = 2;
-pub const RESERVED_IDENTITY_IDS: &[u32] = &[ANY_ID, WORLD_ID, LOCAL_ID];
+pub const LOCAL_NODE_ID: u32 = 10;
+pub const REMOTE_NODE_ID: u32 = 11;
+pub const RESERVED_IDENTITY_IDS: &[u32] =
+    &[ANY_ID, WORLD_ID, LOCAL_ID, LOCAL_NODE_ID, REMOTE_NODE_ID];
 
 pub const ANY_PORT: u16 = 0;
 
 pub const ANY_DIR: u8 = 0;
 
-pub const RULESET_NONE: u32 = 0;
+pub type RulesetId = u32;
+pub const RULESET_NONE: RulesetId = 0;
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
@@ -58,8 +64,8 @@ impl From<u8> for PolicyDirection {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct PolicyIndexKey {
-    pub src_id: u32,
-    pub dst_id: u32,
+    pub src_id: IdentityId,
+    pub dst_id: IdentityId,
     pub direction: u8,
     pub _pad: [u8; 3],
 }
@@ -70,7 +76,7 @@ unsafe impl aya::Pod for PolicyIndexKey {}
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct PolicyRuleKey {
-    pub ruleset_id: u32,
+    pub ruleset_id: RulesetId,
     pub proto: u8,
     pub _pad0: [u8; 3],
     pub port: u16,
@@ -79,6 +85,48 @@ pub struct PolicyRuleKey {
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for PolicyRuleKey {}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct CidrPolicyMapDataV4 {
+    pub selected_id: IdentityId,
+    pub direction: u8,
+    pub _pad: [u8; 3],
+    pub addr: u32,
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for CidrPolicyMapDataV4 {}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct CidrPolicyMapDataV6 {
+    pub selected_id: IdentityId,
+    pub direction: u8,
+    pub _pad: [u8; 3],
+    pub addr: [u8; 16],
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for CidrPolicyMapDataV6 {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct CidrPolicyMapKeyV4 {
+    pub prefix_len: u32,
+    pub selected_id: IdentityId,
+    pub direction: u8,
+    pub _pad: [u8; 3],
+    pub addr: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct CidrPolicyMapKeyV6 {
+    pub prefix_len: u32,
+    pub selected_id: IdentityId,
+    pub direction: u8,
+    pub _pad: [u8; 3],
+    pub addr: [u8; 16],
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

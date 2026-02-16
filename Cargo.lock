@@ -1809,6 +1809,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-cni-crds-gen"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "k8s-openapi",
+ "mesh-cni-crds",
+]
+
+[[package]]
 name = "mesh-cni-ebpf"
 version = "0.1.0"
 dependencies = [
@@ -1838,6 +1847,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "mesh-cni-crds",
+ "mesh-cni-ebpf-common",
  "mesh-cni-k8s-utils",
  "serde",
  "thiserror 2.0.17",
@@ -1852,6 +1862,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "http",
+ "ipnetwork",
  "k8s-openapi",
  "kube",
  "mesh-cni-crds",
@@ -1873,6 +1884,7 @@ dependencies = [
 name = "mesh-cni-k8s-utils"
 version = "0.1.0"
 dependencies = [
+ "async-broadcast",
  "futures",
  "k8s-openapi",
  "kube",
@@ -1907,6 +1919,7 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "futures",
+ "ipnetwork",
  "k8s-openapi",
  "kube",
  "mesh-cni-crds",

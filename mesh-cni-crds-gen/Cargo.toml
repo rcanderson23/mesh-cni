@@ -1,0 +1,11 @@
+[package]
+name = "mesh-cni-crds-gen"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+k8s-openapi = { workspace = true, features = ["v1_34"] }
+mesh-cni-crds = { path = "../mesh-cni-crds" }
+

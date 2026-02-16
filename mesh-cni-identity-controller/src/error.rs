@@ -17,6 +17,9 @@ pub enum Error {
     #[error("invalid ip network construction: {0}")]
     InvalidIPNetwork(#[from] ipnetwork::IpNetworkError),
 
+    #[error("other error: {0}")]
+    Other(String),
+
     #[error("update/delete error: {0}")]
     OpError(String),
 }

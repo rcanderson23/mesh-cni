@@ -1,6 +1,8 @@
 mod context;
 mod controller;
 mod error;
+mod namespace;
+mod networkpolicy;
 mod runtime;
 
 pub use error::Error;

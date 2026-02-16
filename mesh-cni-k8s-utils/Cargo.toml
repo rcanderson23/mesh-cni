@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+async-broadcast = { workspace = true }
 futures = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }

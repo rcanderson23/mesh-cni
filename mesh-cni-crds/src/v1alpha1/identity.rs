@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{CustomResource, KubeSchema, ResourceExt};
+use mesh_cni_ebpf_common::IdentityId;
 use mesh_cni_k8s_utils::sanitize_pod_labels;
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +21,7 @@ use serde::{Deserialize, Serialize};
 pub struct IdentitySpec {
     pub namespace_labels: BTreeMap<String, String>,
     pub pod_labels: BTreeMap<String, String>,
-    pub id: u32,
+    pub id: IdentityId,
 }
 
 impl Identity {

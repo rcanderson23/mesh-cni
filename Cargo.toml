@@ -4,6 +4,7 @@ members = [
     "mesh-cni-api",
     "mesh-cni",
     "mesh-cni-cli",
+    "mesh-cni-crds-gen",
     "mesh-cni-ebpf",
     "mesh-cni-ebpf-common",
     "mesh-cni-cluster-controller",
@@ -20,6 +21,7 @@ default-members = [
     "mesh-cni-api",
     "mesh-cni",
     "mesh-cni-cli",
+    "mesh-cni-crds-gen",
     "mesh-cni-ebpf-common",
     "mesh-cni-cluster-controller",
     "mesh-cni-identity-gen-controller",
@@ -38,6 +40,7 @@ edition = "2024"
 
 [workspace.dependencies]
 ahash = { version = "0.8" }
+async-broadcast = "0.7.2"
 async-stream = "0.3.6"
 aya = { git = "https://github.com/aya-rs/aya", branch = "main"}
 aya-ebpf = { git = "https://github.com/aya-rs/aya", branch = "main"}

@@ -11,6 +11,7 @@ ipnetwork = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }
 mesh-cni-crds = { path = "../mesh-cni-crds" }
+mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common" }
 mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
 serde = { workspace = true }
 thiserror = { workspace = true }

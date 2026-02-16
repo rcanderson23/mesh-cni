@@ -30,6 +30,14 @@ pub fn crd_gen_identity() -> Result<()> {
     Ok(())
 }
 
+pub fn crd_gen_cidridentity() -> Result<()> {
+    print!(
+        "---\n{}",
+        serde_yaml::to_string(&v1alpha1::cidridentity::CIDRIdentity::crd())?
+    );
+    Ok(())
+}
+
 pub fn crd_gen_cluster() -> Result<()> {
     print!(
         "---\n{}",
@@ -42,6 +50,7 @@ pub fn crd_gen_all() -> Result<()> {
     let crds = vec![
         v1alpha1::meshendpoint::MeshEndpoint::crd(),
         v1alpha1::identity::Identity::crd(),
+        v1alpha1::cidridentity::CIDRIdentity::crd(),
         v1alpha1::cluster::Cluster::crd(),
     ];
     for crd in crds {
