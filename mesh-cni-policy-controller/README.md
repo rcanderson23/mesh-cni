@@ -8,8 +8,8 @@
 flowchart TD
   A[Reconcile Identity] --> B[Select NetworkPolicies that select Identity]
   B --> C[Generate Identity Peer Rules]
-  C --> D[Identity Diff and Update Identiy Rulesets Entries]
-  D --> E[IPBlock Diff and Update CIDR Rulesets Entries]
+  C --> D[Identity Diff and Update Rulesets Entries]
+  D --> E[IPBlock Diff and Update Rulesets Entries]
 ```
 
 ## Policy Map Layout
