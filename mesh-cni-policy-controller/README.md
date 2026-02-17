@@ -21,26 +21,17 @@ flowchart TD
 ```mermaid
 flowchart LR
   subgraph IndexMaps["Index maps"]
-    PI["policy_index\nHashMap\nkey: {src_id,dst_id,direction}\nvalue: ruleset_id"]
-    PC4["policy_cidr_v4\nLPM Trie\nkey: {prefix_len,selected_id,direction,addr_v4}\nvalue: ruleset_id"]
-    PC6["policy_cidr_v6\nLPM Trie\nkey: {prefix_len,selected_id,direction,addr_v6}\nvalue: ruleset_id"]
+    POLICYINDEX["policy_index<br>HashMap<br>Key: {src_id,dst_id,direction}<br>Value: ruleset_id"]
+    CIDR4["policy_cidr_v4<br>LPM Trie<br>Key: {prefix_len,selected_id,direction,addr_v4}<br>Value: ruleset_id"]
+    CIDR6["policy_cidr_v6<br>LPM Trie<br>Key: {prefix_len,selected_id,direction,addr_v6}<br>Value: ruleset_id"]
   end
 
-  PR["policy_ruleset\nHashMap\nkey: {ruleset_id,proto,port}\nvalue: action(allow/deny)"]
+  RULESET["policy_ruleset<br>HashMap<br>Key: {ruleset_id,proto,port}<br>Value: action(allow/deny)"]
 
-  PI --> PR
-  PC4 --> PR
-  PC6 --> PR
+  POLICYINDEX --> RULESET
+  CIDR4 --> RULESET
+  CIDR6 --> RULESET
 ```
-
-Notes:
-
-- For CIDR keys, `prefix_len` is encoded as:
-- `64 + ipv4_prefix_bits` for v4
-- `64 + ipv6_prefix_bits` for v6
-- `selected_id` is the identity the policy selects:
-- ingress CIDR rules: selected destination identity
-- egress CIDR rules: selected source identity
 
 ## Datapath Lookup Model
 
