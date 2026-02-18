@@ -1,5 +1,5 @@
 [package]
-name = "mesh-cni-service-controller"
+name = "mesh-cni-meshendpoint-gen-controller"
 version = "0.1.0"
 license.workspace = true
 edition.workspace = true

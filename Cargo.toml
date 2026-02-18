@@ -13,7 +13,7 @@ members = [
     "mesh-cni-k8s-utils",
     "mesh-cni-plugin",
     "mesh-cni-policy-controller",
-    "mesh-cni-service-controller",
+    "mesh-cni-meshendpoint-gen-controller",
     "mesh-cni-crds", 
     "mesh-cni-service-bpf-controller",
 ]
@@ -29,7 +29,7 @@ default-members = [
     "mesh-cni-k8s-utils",
     "mesh-cni-plugin",
     "mesh-cni-policy-controller",
-    "mesh-cni-service-controller",
+    "mesh-cni-meshendpoint-gen-controller",
     "mesh-cni-crds",
     "mesh-cni-service-bpf-controller",
 ]

@@ -11,6 +11,9 @@ pub enum Error {
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("invalid resource")]
+    InvalidResource,
+
     #[error("{0}")]
     Other(String),
 }

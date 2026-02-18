@@ -26,7 +26,7 @@ COPY mesh-cni-policy-controller mesh-cni-policy-controller
 COPY mesh-cni-k8s-utils mesh-cni-k8s-utils
 COPY mesh-cni-crds mesh-cni-crds
 COPY mesh-cni-crds-gen mesh-cni-crds-gen
-COPY mesh-cni-service-controller mesh-cni-service-controller
+COPY mesh-cni-meshendpoint-gen-controller mesh-cni-meshendpoint-gen-controller
 COPY mesh-cni-service-bpf-controller mesh-cni-service-bpf-controller
 COPY mesh-cni-cluster-controller mesh-cni-cluster-controller
 

@@ -1715,10 +1715,10 @@ dependencies = [
  "mesh-cni-identity-controller",
  "mesh-cni-identity-gen-controller",
  "mesh-cni-k8s-utils",
+ "mesh-cni-meshendpoint-gen-controller",
  "mesh-cni-plugin",
  "mesh-cni-policy-controller",
  "mesh-cni-service-bpf-controller",
- "mesh-cni-service-controller",
  "netns-rs",
  "network-types",
  "nix 0.31.1",
@@ -1894,6 +1894,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-cni-meshendpoint-gen-controller"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "mesh-cni-crds",
+ "mesh-cni-k8s-utils",
+ "opentelemetry",
+ "prometheus-client",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-opentelemetry",
+]
+
+[[package]]
 name = "mesh-cni-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1945,27 +1966,6 @@ dependencies = [
  "opentelemetry",
  "prometheus-client",
  "serde",
- "thiserror 2.0.17",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-opentelemetry",
-]
-
-[[package]]
-name = "mesh-cni-service-controller"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "futures",
- "k8s-openapi",
- "kube",
- "mesh-cni-crds",
- "mesh-cni-k8s-utils",
- "opentelemetry",
- "prometheus-client",
- "serde",
- "serde_json",
  "thiserror 2.0.17",
  "tokio",
  "tokio-util",
