@@ -18,13 +18,14 @@ use crate::{
 };
 
 pub async fn start_meshendpoint_gen_controller(
-    client: Client,
+    local_client: Client,
+    source_client: Client,
     cluster_name: String,
     cancel: CancellationToken,
 ) -> Result<()> {
-    let service_api: Api<Service> = Api::all(client.clone());
-    let endpoint_slice_api: Api<EndpointSlice> = Api::all(client.clone());
-    let mesh_ep_api: Api<MeshEndpoint> = Api::all(client.clone());
+    let service_api: Api<Service> = Api::all(local_client.clone());
+    let endpoint_slice_api: Api<EndpointSlice> = Api::all(source_client.clone());
+    let mesh_ep_api: Api<MeshEndpoint> = Api::all(local_client.clone());
 
     let (endpoint_slice_state, endpoint_slice_subscriber) = create_store_and_touched_subscriber(
         endpoint_slice_api.clone(),
@@ -34,7 +35,7 @@ pub async fn start_meshendpoint_gen_controller(
     let (mesh_endpoint_state, mesh_endpoint_subscriber) =
         create_store_and_touched_subscriber(mesh_ep_api, Some(Duration::from_secs(30))).await?;
     let context = Context {
-        client,
+        client: local_client,
         endpoint_slice_state,
         mesh_endpoint_state,
         cluster_name,
