@@ -69,7 +69,7 @@ jobs:
       - name: Run Cyclonus conformance
         run: |
           set -euo pipefail
-          kubectl apply -f cyclonus/job.yaml
+          kubectl apply -f test/cyclonus/job.yaml
           kubectl wait --for=condition=complete --timeout=75m job/cyclonus -n cyclonus
           kubectl logs job/cyclonus -n cyclonus | tee cyclonus.log
 
