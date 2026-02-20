@@ -1,0 +1,15 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  kubeProxyMode: none
+  podSubnet: 10.241.0.0/16
+  serviceSubnet: 10.97.0.0/16
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: KubeletConfiguration
+    registerWithTaints:
+      - effect: NoSchedule
+        key: mesh-cni.dev/startup
+        value: "true"
