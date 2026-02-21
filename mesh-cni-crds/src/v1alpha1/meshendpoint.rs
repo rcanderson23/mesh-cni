@@ -33,15 +33,21 @@ pub const NAME_GROUP_MESHENDPOINT: &str = "meshendpoints.mesh-cni.dev";
     namespaced
 )]
 pub struct MeshEndpointSpec {
+    /// The ClusterIPs defined in the Service
     pub service_ips: Vec<IpAddr>,
+    /// The backend IP, service port, backend port, and protocol
     pub backend_port_mappings: Vec<BackendPortMapping>,
 }
 
 #[derive(KubeSchema, Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct BackendPortMapping {
+    /// Backend IP
     pub ip: IpAddr,
+    /// Port defined in Service
     pub service_port: u16,
+    /// The target port defined in the Service
     pub backend_port: u16,
+    /// The protocol of the defined port
     pub protocol: String,
 }
 

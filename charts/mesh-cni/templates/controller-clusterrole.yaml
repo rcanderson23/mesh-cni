@@ -50,6 +50,7 @@ rules:
   - meshendpoints
   - identities
   - cidridentities
+  - clusters
   verbs:
   - list
   - watch

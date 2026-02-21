@@ -9,8 +9,23 @@ pub enum Error {
     #[error("yaml error: {0}")]
     YamlError(#[from] serde_yaml::Error),
 
+    #[error("kube utils error: {0}")]
+    KubeUtils(#[from] mesh_cni_k8s_utils::Error),
+
     #[error("other error: {0}")]
     Other(String),
+
+    #[error("resource {kind}/{name} not found")]
+    ResourceNotFound { kind: String, name: String },
+
+    #[error("kubeconfig not found in secret {name} at key {key}")]
+    KubeconfigNotFound { name: String, key: String },
+
+    #[error("failed to start controller {0}")]
+    StartUpFailed(String),
+
+    #[error("child controller still running")]
+    ControllerRunning,
 }
 
 impl From<finalizer::Error<Error>> for Error {

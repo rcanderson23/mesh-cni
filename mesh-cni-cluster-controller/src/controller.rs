@@ -1,18 +1,23 @@
 use std::{sync::Arc, time::Duration};
 
+use k8s_openapi::api::core::v1::Secret;
 use kube::{
-    Api, ResourceExt,
-    runtime::{controller::Action, finalizer},
+    Api, Client, Config, ResourceExt,
+    api::{DeleteParams, ListParams},
+    config::{KubeConfigOptions, Kubeconfig},
+    runtime::{controller::Action, finalizer, reflector::ObjectRef},
 };
-use mesh_cni_crds::v1alpha1::cluster::Cluster;
+use mesh_cni_crds::v1alpha1::{cluster::Cluster, meshendpoint::MeshEndpoint};
+use mesh_cni_meshendpoint_gen_controller::start_meshendpoint_gen_controller;
 use serde::de::DeserializeOwned;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use crate::{Error, Result, context::Context};
 
 const CLUSTER_FINALIZER: &str = "clusters.mesh-cni.dev/cleanup";
-const SHUTDOWN_REQUEUE: Duration = Duration::from_secs(5);
 const DEFAULT_REQUEUE: Duration = Duration::from_secs(300);
+const ERROR_REQUEUE: Duration = Duration::from_secs(5);
 
 pub(crate) async fn reconcile(cluster: Arc<Cluster>, ctx: Arc<Context>) -> Result<Action> {
     let name = cluster.name_any();
@@ -30,20 +35,95 @@ pub(crate) async fn reconcile(cluster: Arc<Cluster>, ctx: Arc<Context>) -> Resul
     Ok(Action::requeue(DEFAULT_REQUEUE))
 }
 
-async fn reconcile_cluster(_cluster: Arc<Cluster>, _ctx: Arc<Context>) -> Result<Action> {
+async fn reconcile_cluster(cluster: Arc<Cluster>, ctx: Arc<Context>) -> Result<Action> {
+    {
+        let reader = ctx.controllers.read().unwrap();
+        if reader.get(&cluster.name_any()).is_some() {
+            return Ok(Action::requeue(DEFAULT_REQUEUE));
+        }
+    }
+
+    let secret_name = cluster.spec.secret.name.clone();
+    let secret_key = cluster
+        .spec
+        .secret
+        .key
+        .clone()
+        .unwrap_or("config".to_string());
+    let Some(secret) = ctx
+        .secrets
+        .get(&ObjectRef::new(&secret_name).within(&ctx.namespace))
+    else {
+        return Err(Error::ResourceNotFound {
+            kind: "Secret".to_string(),
+            name: secret_name.clone(),
+        });
+    };
+
+    let kubeconfig = kubeconfig_from_secret_data(&secret, &secret_name, &secret_key)?;
+    let source_client = client_from_kubeconfig(kubeconfig).await?;
+    let local_client = ctx.client.clone();
+    let cancel = CancellationToken::new();
+
+    let handle = start_meshendpoint_gen_controller(
+        local_client,
+        source_client,
+        cluster.name_any(),
+        cancel.child_token(),
+    )
+    .await
+    .map_err(|e| Error::StartUpFailed(e.to_string()))?;
+
+    let mut guard = ctx.controllers.write().unwrap();
+
+    guard.insert(cluster.name_any(), (cancel, handle));
+
     Ok(Action::requeue(DEFAULT_REQUEUE))
+}
+
+fn kubeconfig_from_secret_data(
+    secret: &Secret,
+    secret_name: &str,
+    key: &str,
+) -> Result<Kubeconfig> {
+    let kubeconfig =
+        secret
+            .data
+            .as_ref()
+            .and_then(|data| data.get(key))
+            .ok_or(Error::KubeconfigNotFound {
+                name: secret_name.to_string(),
+                key: key.to_string(),
+            })?;
+
+    Ok(serde_yaml::from_slice(&kubeconfig.0)?)
+}
+
+async fn client_from_kubeconfig(kubeconfig: Kubeconfig) -> Result<Client> {
+    let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
+        .await
+        .map_err(|e| Error::Other(e.to_string()))?;
+    Ok(Client::try_from(config)?)
 }
 
 async fn cleanup(cluster: Arc<Cluster>, ctx: Arc<Context>) -> Result<Action> {
     let name = cluster.name_any();
-    let mut controllers = ctx.controllers.lock().unwrap();
-    if let Some(cancellation) = controllers.get(&name) {
-        cancellation.request_shutdown();
-        if !cancellation.is_shutdown_complete() {
-            return Ok(Action::requeue(SHUTDOWN_REQUEUE));
+    {
+        let reader = ctx.controllers.read().unwrap();
+        let Some((cancellation, handle)) = reader.get(&name) else {
+            return Ok(Action::await_change());
+        };
+        cancellation.cancel();
+        if !handle.is_finished() {
+            info!("controller handle for {name} is not finished, requeuing");
+            return Err(Error::ControllerRunning);
         }
     }
-    controllers.remove(&name);
+
+    delete_all_meshendpoints(ctx.client.clone()).await?;
+
+    let mut writer = ctx.controllers.write().unwrap();
+    writer.remove(&name);
     Ok(Action::await_change())
 }
 
@@ -54,5 +134,22 @@ where
 {
     let name = resource.name_any();
     error!(?error, "reconcile error for Cluster {}", name);
-    Action::requeue(Duration::from_secs(5))
+    Action::requeue(ERROR_REQUEUE)
+}
+
+async fn delete_all_meshendpoints(client: Client) -> Result<()> {
+    let meshendpoint: Api<MeshEndpoint> = Api::all(client.clone());
+
+    let lp = ListParams::default();
+    let meps = meshendpoint.list_metadata(&lp).await?;
+
+    let dp = DeleteParams::default();
+    for obj in meps.iter() {
+        let Some(ns) = obj.namespace() else {
+            return Ok(());
+        };
+        let meshendpoint: Api<MeshEndpoint> = Api::namespaced(client.clone(), &ns);
+        meshendpoint.delete(&obj.name_any(), &dp).await?;
+    }
+    Ok(())
 }

@@ -41,7 +41,7 @@ kind-up:
 kind-down:
   kind delete cluster --name={{name}}
 
-install: 
+install:
   helm upgrade --install {{name}} ./charts/mesh-cni -n kube-system --set=agent.image.tag=latest --kube-context=kind-{{name}}
 
 restart:
@@ -83,13 +83,17 @@ multi-create-kubeconfig-secrets:
   kubectl --kubeconfig {{cluster1_kubeconfig}} -n kube-system create secret generic {{cluster1_remote_secret}} --from-file=config={{cluster2_internal_kubeconfig}} --dry-run=client -o yaml | kubectl --kubeconfig {{cluster1_kubeconfig}} apply -f -
   kubectl --kubeconfig {{cluster2_kubeconfig}} -n kube-system create secret generic {{cluster2_remote_secret}} --from-file=config={{cluster1_internal_kubeconfig}} --dry-run=client -o yaml | kubectl --kubeconfig {{cluster2_kubeconfig}} apply -f -
 
+multi-apply-cluster-crs:
+  kubectl --kubeconfig {{cluster1_kubeconfig}} apply -f kind/cluster-cr-cluster2.yaml
+  kubectl --kubeconfig {{cluster2_kubeconfig}} apply -f kind/cluster-cr-cluster1.yaml
+
 multi-restart:
   kubectl --kubeconfig {{cluster1_kubeconfig}} rollout restart daemonset -n kube-system {{name}}-agent
   kubectl --kubeconfig {{cluster1_kubeconfig}} rollout restart deployment -n kube-system {{name}}-controller
   kubectl --kubeconfig {{cluster2_kubeconfig}} rollout restart daemonset -n kube-system {{name}}-agent
   kubectl --kubeconfig {{cluster2_kubeconfig}} rollout restart deployment -n kube-system {{name}}-controller
 
-multi-run-local: container multi-kind-up multi-load-image multi-install multi-create-kubeconfig-secrets multi-restart
+multi-run-local: container multi-kind-up multi-load-image multi-install multi-create-kubeconfig-secrets multi-restart multi-apply-cluster-crs
 
 multi-reset-cluster: multi-kind-down multi-run-local
 
