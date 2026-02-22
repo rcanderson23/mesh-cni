@@ -1,0 +1,8 @@
+apiVersion: mesh-cni.dev/v1alpha1
+kind: Cluster
+metadata:
+  name: cluster2
+spec:
+  secret:
+    name: mesh-remote-cluster2-kubeconfig
+    key: config

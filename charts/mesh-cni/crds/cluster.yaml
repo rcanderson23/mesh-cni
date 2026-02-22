@@ -21,17 +21,21 @@ spec:
         properties:
           spec:
             properties:
-              configMapName:
+              secret:
                 description: Name of the ConfigMap storing the kubeconfig for the cluster
-                type: string
-              id:
-                description: Unique ID for the cluster
-                format: uint32
-                minimum: 0.0
-                type: integer
+                properties:
+                  key:
+                    description: Key in secret to get kubeconfig
+                    nullable: true
+                    type: string
+                  name:
+                    description: Name of the secret
+                    type: string
+                required:
+                - name
+                type: object
             required:
-            - configMapName
-            - id
+            - secret
             type: object
         required:
         - spec

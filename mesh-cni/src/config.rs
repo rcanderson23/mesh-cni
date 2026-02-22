@@ -86,4 +86,8 @@ pub struct ControllerArgs {
     /// Metrics listener for agent
     #[arg(long, default_value = "0.0.0.0:9090")]
     pub metrics_address: SocketAddr,
+
+    /// Namespace the controller is running in
+    #[arg(long, env = "NAMESPACE")]
+    pub namespace: String,
 }

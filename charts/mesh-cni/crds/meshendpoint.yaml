@@ -22,19 +22,24 @@ spec:
           spec:
             properties:
               backend_port_mappings:
+                description: The backend IP, service port, backend port, and protocol
                 items:
                   properties:
                     backend_port:
+                      description: The target port defined in the Service
                       format: uint16
                       maximum: 65535.0
                       minimum: 0.0
                       type: integer
                     ip:
+                      description: Backend IP
                       format: ip
                       type: string
                     protocol:
+                      description: The protocol of the defined port
                       type: string
                     service_port:
+                      description: Port defined in Service
                       format: uint16
                       maximum: 65535.0
                       minimum: 0.0
@@ -47,6 +52,7 @@ spec:
                   type: object
                 type: array
               service_ips:
+                description: The ClusterIPs defined in the Service
                 items:
                   format: ip
                   type: string
