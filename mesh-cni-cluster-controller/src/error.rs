@@ -26,6 +26,15 @@ pub enum Error {
 
     #[error("child controller still running")]
     ControllerRunning,
+
+    #[error("resource is not valid")]
+    InvalidResource,
+
+    #[error("cluster owned resources still remaining")]
+    CleanupPending,
+
+    #[error("timeout on condition")]
+    Timeout,
 }
 
 impl From<finalizer::Error<Error>> for Error {
