@@ -5,10 +5,16 @@ use kube::{
     Api, Client, Config, ResourceExt,
     api::{DeleteParams, ListParams},
     config::{KubeConfigOptions, Kubeconfig},
+    core::{Expression, Selector},
     runtime::{controller::Action, finalizer, reflector::ObjectRef},
 };
-use mesh_cni_crds::v1alpha1::{cluster::Cluster, meshendpoint::MeshEndpoint};
-use mesh_cni_meshendpoint_gen_controller::start_meshendpoint_gen_controller;
+use mesh_cni_crds::v1alpha1::{
+    cluster::{self, Cluster},
+    meshendpoint::MeshEndpoint,
+};
+use mesh_cni_meshendpoint_gen_controller::{
+    LABEL_CLUSTER_OWNER, start_meshendpoint_gen_controller,
+};
 use serde::de::DeserializeOwned;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -120,7 +126,7 @@ async fn cleanup(cluster: Arc<Cluster>, ctx: Arc<Context>) -> Result<Action> {
         }
     }
 
-    delete_all_meshendpoints(ctx.client.clone()).await?;
+    delete_owned_meshendpoints(ctx.client.clone(), name.clone()).await?;
 
     let mut writer = ctx.controllers.write().unwrap();
     writer.remove(&name);
@@ -137,10 +143,12 @@ where
     Action::requeue(ERROR_REQUEUE)
 }
 
-async fn delete_all_meshendpoints(client: Client) -> Result<()> {
+async fn delete_owned_meshendpoints(client: Client, cluster_name: String) -> Result<()> {
     let meshendpoint: Api<MeshEndpoint> = Api::all(client.clone());
 
-    let lp = ListParams::default();
+    let selector: Selector =
+        Expression::Equal(LABEL_CLUSTER_OWNER.to_string(), cluster_name).into();
+    let lp = ListParams::default().labels_from(&selector);
     let meps = meshendpoint.list_metadata(&lp).await?;
 
     let dp = DeleteParams::default();

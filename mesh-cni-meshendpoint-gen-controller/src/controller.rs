@@ -16,7 +16,7 @@ use tracing::{error, info, instrument};
 use crate::{Error, MESH_SERVICE, Result, context::Context};
 
 const MANANGER: &str = "service-meshendpoint-controller";
-const LABEL_CLUSTER_OWNER: &str = "mesh-cni.dev/cluster-owner";
+pub const LABEL_CLUSTER_OWNER: &str = "mesh-cni.dev/cluster-owner";
 
 #[instrument(skip(ctx, service), fields(trace_id))]
 pub async fn reconcile(service: Arc<Service>, ctx: Arc<Context>) -> Result<Action> {
