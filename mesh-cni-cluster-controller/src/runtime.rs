@@ -53,14 +53,18 @@ pub async fn start_cluster_controller(
     });
 
     let cluster_mapper: Store<Cluster> = clusters.clone();
-    let secret_mapper = move |secret: Arc<Secret>| -> Option<ObjectRef<Cluster>> {
-        cluster_mapper.state().iter().find_map(|c| {
-            if c.spec.secret.name == secret.name_any() {
-                Some(ObjectRef::new(&c.name_any()))
-            } else {
-                None
-            }
-        })
+    let secret_mapper = move |secret: Arc<Secret>| -> Vec<ObjectRef<Cluster>> {
+        cluster_mapper
+            .state()
+            .iter()
+            .filter_map(|c| {
+                if c.spec.secret.name == secret.name_any() {
+                    Some(ObjectRef::new(&c.name_any()))
+                } else {
+                    None
+                }
+            })
+            .collect()
     };
     let controller_config = runtime::Config::default().concurrency(5);
     Controller::for_shared_stream(cluster_subscriber, clusters)
