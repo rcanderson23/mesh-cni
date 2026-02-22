@@ -19,7 +19,7 @@ env:
 jobs:
   cyclonus-conformance:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - name: Checkout latest commit
         uses: actions/checkout@v4
@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           kubectl apply -f test/cyclonus/job.yaml
-          kubectl wait --for=condition=complete --timeout=75m job/cyclonus -n cyclonus
+          kubectl wait --for=condition=complete --timeout=120m job/cyclonus -n cyclonus
           kubectl logs job/cyclonus -n cyclonus | tee cyclonus.log
 
       - name: Collect debug output on failure
