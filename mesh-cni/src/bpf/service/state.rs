@@ -408,6 +408,14 @@ where
         ServiceEndpointState::remove(self, key)
             .map_err(|e| BpfControllerError::BpfState(e.to_string()))
     }
+
+    fn state(
+        &self,
+    ) -> std::result::Result<ahash::HashMap<ServiceKey, Vec<EndpointValue>>, BpfControllerError>
+    {
+        ServiceEndpointState::state_from_map(self)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
 }
 
 #[cfg(test)]

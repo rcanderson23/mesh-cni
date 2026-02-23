@@ -1,38 +1,45 @@
-use std::{fmt::Debug, sync::Arc};
+use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
 use kube::{
-    Api, ResourceExt,
-    core::{Expression, Selector},
-    runtime::{
-        Controller,
-        reflector::{ReflectHandle, Store as KubeStore},
-    },
+    Api, Client, ResourceExt,
+    runtime::{Controller, reflector::ObjectRef},
 };
 use mesh_cni_crds::v1alpha1::meshendpoint::MeshEndpoint;
-use serde::de::DeserializeOwned;
+use mesh_cni_k8s_utils::create_store_and_touched_subscriber;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    Context, MESH_SERVICE, MeshControllerExt, Result, ServiceBpfState,
+    Context, Result, SERVICE_OWNER_LABEL, ServiceBpfState,
     controller::{error_policy, reconcile},
     utils::shutdown,
 };
 
 pub async fn start_bpf_service_controller<B>(
-    service_state: KubeStore<Service>,
-    service_stream: ReflectHandle<Service>,
-    endpoint_slice_state: KubeStore<EndpointSlice>,
-    endpoint_slice_stream: ReflectHandle<EndpointSlice>,
-    mesh_endpoint_state: KubeStore<MeshEndpoint>,
+    kube_client: Client,
     service_bpf_state: B,
     cancel: CancellationToken,
 ) -> Result<()>
 where
     B: ServiceBpfState + Clone + Send + Sync + 'static,
 {
+    let service_api: Api<Service> = Api::all(kube_client.clone());
+    let (service_state, service_subscriber) =
+        create_store_and_touched_subscriber(service_api, Some(Duration::from_secs(30))).await?;
+
+    let endpoint_slice_api: Api<EndpointSlice> = Api::all(kube_client.clone());
+    let (endpoint_slice_state, endpoint_slice_subscriber) =
+        create_store_and_touched_subscriber(endpoint_slice_api, Some(Duration::from_secs(30)))
+            .await?;
+
+    let mesh_endpoint_api = Api::all(kube_client.clone());
+    let (mesh_endpoint_state, mesh_endpoint_subscriber) = create_store_and_touched_subscriber(
+        mesh_endpoint_api.clone(),
+        Some(Duration::from_secs(30)),
+    )
+    .await?;
     let context = Context {
         service_state: service_state.clone(),
         endpoint_slice_state,
@@ -41,45 +48,18 @@ where
     };
 
     info!("Starting Services controller");
-    Controller::for_shared_stream(service_stream, service_state)
+    Controller::for_shared_stream(service_subscriber, service_state)
         .graceful_shutdown_on(shutdown(cancel))
-        .owns_shared_stream(endpoint_slice_stream)
-        .run(reconcile, error_policy::<Service, B>, Arc::new(context))
+        .owns_shared_stream(endpoint_slice_subscriber)
+        .watches_shared_stream(mesh_endpoint_subscriber, meshendpoint_to_service_mapper)
+        .run(reconcile, error_policy::<B>, Arc::new(context))
         .for_each(|_| futures::future::ready(()))
         .await;
     Ok(())
 }
 
-pub async fn start_bpf_meshendpoint_controller<K, B>(
-    api: Api<K>,
-    service_state: KubeStore<Service>,
-    endpoint_slice_state: KubeStore<EndpointSlice>,
-    mesh_endpoint_state: KubeStore<MeshEndpoint>,
-    service_bpf_state: B,
-    cancel: CancellationToken,
-) -> Result<()>
-where
-    K: MeshControllerExt<B>,
-    K: ResourceExt<DynamicType = ()>,
-    K: DeserializeOwned + Clone + Sync + Debug + Send + 'static,
-    B: ServiceBpfState + Clone + Send + Sync + 'static,
-{
-    let context = Context {
-        service_state,
-        endpoint_slice_state,
-        mesh_endpoint_state,
-        service_bpf_state,
-    };
-
-    let selector: Selector = Expression::NotEqual(MESH_SERVICE.into(), "true".into()).into();
-    let watcher_config = kube::runtime::watcher::Config::default().labels_from(&selector);
-
-    info!("starting controller for {}", K::kind(&()));
-    Controller::new(api, watcher_config)
-        .graceful_shutdown_on(shutdown(cancel))
-        .run(reconcile, error_policy::<K, B>, Arc::new(context))
-        .filter_map(|x| async move { std::result::Result::ok(x) })
-        .for_each(|_| futures::future::ready(()))
-        .await;
-    Ok(())
+fn meshendpoint_to_service_mapper(meshendpoint: Arc<MeshEndpoint>) -> Option<ObjectRef<Service>> {
+    let namespace = meshendpoint.namespace()?;
+    let service_name = meshendpoint.labels().get(SERVICE_OWNER_LABEL)?;
+    Some(ObjectRef::new(service_name).within(&namespace))
 }

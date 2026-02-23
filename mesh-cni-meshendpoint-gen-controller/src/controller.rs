@@ -13,7 +13,7 @@ use mesh_cni_crds::{
 };
 use tracing::{error, info, instrument};
 
-use crate::{Error, MESH_SERVICE, Result, context::Context};
+use crate::{ANNOTATION_MESH_SERVICE, Error, Result, context::Context};
 
 const MANANGER: &str = "service-meshendpoint-controller";
 pub const LABEL_CLUSTER_OWNER: &str = "mesh-cni.dev/cluster-owner";
@@ -47,7 +47,8 @@ async fn reconcile_service(service: Arc<Service>, ctx: Arc<Context>) -> Result<A
     let mep_name = format!("{}-{}", name, ctx.cluster_name);
 
     info!("started reconciling Service {}/{}", ns, name);
-    let selector: Selector = Expression::NotEqual(MESH_SERVICE.into(), "true".into()).into();
+    let selector: Selector =
+        Expression::NotEqual(ANNOTATION_MESH_SERVICE.into(), "true".into()).into();
     if selector.matches(service.annotations()) {
         if let Some(mesh) = ctx
             .mesh_endpoint_state

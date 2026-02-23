@@ -1966,6 +1966,8 @@ dependencies = [
  "kube",
  "mesh-cni-crds",
  "mesh-cni-ebpf-common",
+ "mesh-cni-k8s-utils",
+ "mesh-cni-meshendpoint-gen-controller",
  "opentelemetry",
  "prometheus-client",
  "serde",

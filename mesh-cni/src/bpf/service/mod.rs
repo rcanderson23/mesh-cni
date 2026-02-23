@@ -1,17 +1,11 @@
 mod state;
 
-use std::time::Duration;
-
 use aya::maps::{HashMap, Map, MapData};
-use k8s_openapi::api::{core::v1::Service, discovery::v1::EndpointSlice};
-use kube::{Api, Client};
+use kube::Client;
 use mesh_cni_ebpf_common::service::{
     EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
 };
-use mesh_cni_k8s_utils::create_store_and_subscriber;
-use mesh_cni_service_bpf_controller::{
-    start_bpf_meshendpoint_controller, start_bpf_service_controller,
-};
+use mesh_cni_service_bpf_controller::start_bpf_service_controller;
 pub use state::{ServiceEndpoint, ServiceEndpointBpfMap, ServiceEndpointState};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -40,39 +34,9 @@ where
         + Sync
         + 'static,
 {
-    let service_api: Api<Service> = Api::all(kube_client.clone());
-    let (service_state, service_subscriber) =
-        create_store_and_subscriber(service_api, Some(Duration::from_secs(30))).await?;
+    let service_controller = start_bpf_service_controller(kube_client, service_bpf_state, cancel);
 
-    let endpoint_slice_api: Api<EndpointSlice> = Api::all(kube_client.clone());
-    let (endpoint_slice_state, endpoint_slice_subscriber) =
-        create_store_and_subscriber(endpoint_slice_api, Some(Duration::from_secs(30))).await?;
-
-    let mesh_endpoint_api = Api::all(kube_client.clone());
-    let (mesh_endpoint_state, _) =
-        create_store_and_subscriber(mesh_endpoint_api.clone(), Some(Duration::from_secs(30)))
-            .await?;
-
-    let service_controller = start_bpf_service_controller(
-        service_state.clone(),
-        service_subscriber,
-        endpoint_slice_state.clone(),
-        endpoint_slice_subscriber,
-        mesh_endpoint_state.clone(),
-        service_bpf_state.clone(),
-        cancel.clone(),
-    );
-
-    let mesh_endpoint_controller = start_bpf_meshendpoint_controller(
-        mesh_endpoint_api,
-        service_state,
-        endpoint_slice_state,
-        mesh_endpoint_state,
-        service_bpf_state,
-        cancel.clone(),
-    );
     tokio::spawn(service_controller);
-    tokio::spawn(mesh_endpoint_controller);
 
     Ok(())
 }

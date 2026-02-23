@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, net::IpAddr, sync::Arc};
 
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::{Namespace, Node, Pod};
@@ -7,9 +7,11 @@ use kube::{
     runtime::{Controller, reflector::ObjectRef},
 };
 use mesh_cni_crds::v1alpha1::identity::Identity;
+use mesh_cni_ebpf_common::policy::RESERVED_IDENTITY_IDS;
 use mesh_cni_k8s_utils::create_store_and_subscriber;
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info};
 
 use crate::{
     IdentityBpfState, Result,
@@ -58,6 +60,7 @@ where
 
     let context = Arc::new(Context {
         node_name,
+        pod_store: pod_store.clone(),
         identity_store: identity_store.clone(),
         namespace_store,
         bpf_maps,
@@ -112,6 +115,7 @@ where
             .filter_map(|x| async move { std::result::Result::ok(x) })
             .for_each(|_| futures::future::ready(())),
     );
+    tokio::spawn(run_orphan_ip_sweeper(context.clone(), cancel.clone()));
     Controller::for_shared_stream(pod_subscriber, pod_store)
         .watches_shared_stream(namespace_subscriber, namespace_mapper)
         .watches_shared_stream(identity_subscriber, identity_mapper)
@@ -126,4 +130,55 @@ where
 
 async fn shutdown(cancel: CancellationToken) {
     cancel.cancelled().await;
+}
+
+async fn run_orphan_ip_sweeper<B>(ctx: Arc<Context<B>>, cancel: CancellationToken)
+where
+    B: IdentityBpfState + Send + Sync + 'static,
+{
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = interval.tick() => {
+                if let Err(e) = sweep_orphan_pod_ips(&ctx) {
+                    error!(?e, "failed orphan IP sweep");
+                }
+            }
+        }
+    }
+}
+
+fn sweep_orphan_pod_ips<B>(ctx: &Arc<Context<B>>) -> Result<()>
+where
+    B: IdentityBpfState + Send + Sync + 'static,
+{
+    let mut live_pod_ips: HashSet<IpAddr> = HashSet::default();
+    for pod in ctx.pod_store.state() {
+        if pod
+            .spec
+            .as_ref()
+            .is_some_and(|spec| spec.host_network == Some(true))
+        {
+            continue;
+        }
+        live_pod_ips.extend(crate::pod::pod_ips(&pod));
+    }
+
+    for (ip_net, id) in ctx.bpf_maps.state()? {
+        if RESERVED_IDENTITY_IDS.contains(&id) {
+            continue;
+        }
+        let ip = match ip_net {
+            ipnetwork::IpNetwork::V4(net) if net.prefix() == 32 => IpAddr::V4(net.ip()),
+            ipnetwork::IpNetwork::V6(net) if net.prefix() == 128 => IpAddr::V6(net.ip()),
+            _ => continue,
+        };
+        if live_pod_ips.contains(&ip) {
+            continue;
+        }
+        info!(ip = %ip, id, "deleting orphan pod IP identity entry");
+        ctx.bpf_maps.delete(ip_net)?;
+    }
+    Ok(())
 }

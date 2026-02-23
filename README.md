@@ -46,7 +46,7 @@ The referenced Secret must exist in the controller namespace and contain kubecon
 ### MeshEndpoint
 
 `MeshEndpoint` are controller-derived and should not be manually created. Created when a `Service` is annotated with the multi-cluster annotation.
-Contains endpoint information from the owned cluster and represents state that should be programmed into the service BPF map.
+Contains backend endpoint information from the owned cluster and represents state that should be programmed into the service BPF map.
 
 To include a Service in multi-cluster mesh endpoint generation, set:
 
@@ -68,14 +68,15 @@ metadata:
     kubernetes.io/service-name: web
     mesh-cni.dev/cluster-owner: cluster2
 spec:
-  service_ips:
-    - 10.97.10.20
   backend_port_mappings:
     - ip: 10.242.0.21
       service_port: 80
       backend_port: 8080
       protocol: TCP
 ```
+
+`MeshEndpoint` no longer carries `service_ips`; the service BPF controller always reads local
+Service ClusterIPs from the in-cluster `Service` resource.
 
 ### Identity and CIDRIdentity
 

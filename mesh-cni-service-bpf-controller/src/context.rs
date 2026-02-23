@@ -6,7 +6,7 @@ use crate::ServiceBpfState;
 
 pub struct Context<B>
 where
-    B: ServiceBpfState + Clone + Send + Sync + 'static,
+    B: ServiceBpfState,
 {
     pub service_state: Store<Service>,
     pub endpoint_slice_state: Store<EndpointSlice>,

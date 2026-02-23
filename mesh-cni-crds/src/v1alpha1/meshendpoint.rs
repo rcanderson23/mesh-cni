@@ -1,4 +1,4 @@
-use std::{net::IpAddr, sync::Arc};
+use std::{hash::Hash, net::IpAddr, sync::Arc};
 
 use ahash::HashMap;
 use k8s_openapi::api::{
@@ -33,8 +33,6 @@ pub const NAME_GROUP_MESHENDPOINT: &str = "meshendpoints.mesh-cni.dev";
     namespaced
 )]
 pub struct MeshEndpointSpec {
-    /// The ClusterIPs defined in the Service
-    pub service_ips: Vec<IpAddr>,
     /// The backend IP, service port, backend port, and protocol
     pub backend_port_mappings: Vec<BackendPortMapping>,
 }
@@ -52,9 +50,12 @@ pub struct BackendPortMapping {
 }
 
 impl MeshEndpoint {
-    pub fn generate_bpf_service_endpoints(&self) -> HashMap<ServiceKey, Vec<EndpointValue>> {
+    pub fn generate_bpf_service_endpoints(
+        &self,
+        service_ips: &[IpAddr],
+    ) -> HashMap<ServiceKey, Vec<EndpointValue>> {
         let mut result: HashMap<ServiceKey, Vec<EndpointValue>> = HashMap::default();
-        for service_ip in &self.spec.service_ips {
+        for service_ip in service_ips {
             for mapping in &self.spec.backend_port_mappings {
                 let protocol = kube_proto_from_str(&Some(mapping.protocol.clone())) as u8;
 
@@ -95,10 +96,9 @@ pub fn generate_mesh_endpoint_spec(
     store: &Store<EndpointSlice>,
     service: &Service,
 ) -> MeshEndpointSpec {
-    let service_ips = service_ips_from_service(service);
     let service_names_ports_protocols = service_names_ports_protocols(service);
 
-    let slices = endpoint_slices_owned_by_service(store, service);
+    let slices = get_resource_owned_by_service(store, service);
 
     let mut backend_port_mappings = Vec::new();
 
@@ -121,15 +121,32 @@ pub fn generate_mesh_endpoint_spec(
     }
 
     MeshEndpointSpec {
-        service_ips,
         backend_port_mappings,
     }
 }
 
-fn endpoint_slices_owned_by_service(
-    store: &Store<EndpointSlice>,
-    service: &Service,
-) -> Vec<Arc<EndpointSlice>> {
+pub fn coalesce_mesh_endpoints(store: &Store<MeshEndpoint>, service: &Service) -> MeshEndpointSpec {
+    let meps = get_resource_owned_by_service(store, service);
+
+    let mut backend_port_mappings = Vec::new();
+    meps.iter().for_each(|mep| {
+        mep.spec
+            .backend_port_mappings
+            .iter()
+            .cloned()
+            .for_each(|bpm| backend_port_mappings.push(bpm))
+    });
+
+    MeshEndpointSpec {
+        backend_port_mappings,
+    }
+}
+
+fn get_resource_owned_by_service<K>(store: &Store<K>, service: &Service) -> Vec<Arc<K>>
+where
+    K: ResourceExt + Clone,
+    K::DynamicType: Hash + Eq + Clone,
+{
     let selector: Selector =
         Expression::Equal(SERVICE_OWNER_LABEL.into(), service.name_any()).into();
     // Service is namespaced
@@ -150,7 +167,7 @@ fn endpoint_ready(ep_cond: &EndpointConditions) -> bool {
     (ep_cond.ready == Some(true) || ep_cond.ready.is_none()) && (ep_cond.terminating != Some(true))
 }
 
-fn service_ips_from_service(service: &Service) -> Vec<IpAddr> {
+pub fn service_ips_from_service(service: &Service) -> Vec<IpAddr> {
     let mut result = Vec::new();
     if let Some(spec) = &service.spec
         && let Some(ips) = &spec.cluster_ips

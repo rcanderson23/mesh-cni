@@ -42,7 +42,8 @@ kind-down:
   kind delete cluster --name={{name}}
 
 install:
-  helm upgrade --install {{name}} ./charts/mesh-cni -n kube-system --set=agent.image.tag=latest --kube-context=kind-{{name}}
+  cluster_url="https://$(kubectl --context kind-{{name}} get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' | tr -d '\n'):6443"; \
+  helm upgrade --install {{name}} ./charts/mesh-cni -n kube-system --set=agent.image.tag=latest --set-string=agent.clusterURL="${cluster_url}" --kube-context=kind-{{name}}
 
 restart:
   kubectl rollout restart daemonset -n kube-system {{name}}-agent
@@ -76,22 +77,24 @@ multi-load-image:
   kind load docker-image {{container_image}}:latest --name={{cluster2_name}}
 
 multi-install:
-  helm upgrade --install {{name}} ./charts/mesh-cni --kubeconfig {{cluster1_kubeconfig}} -n kube-system --create-namespace --set=agent.image.tag=latest --set=controller.image.tag=latest --set=agent.clusterURL="$(kubectl config view --kubeconfig {{cluster1_internal_kubeconfig}} --minify -o jsonpath='{.clusters[0].cluster.server}')"
-  helm upgrade --install {{name}} ./charts/mesh-cni --kubeconfig {{cluster2_kubeconfig}} -n kube-system --create-namespace --set=agent.image.tag=latest --set=controller.image.tag=latest --set=agent.clusterURL="$(kubectl config view --kubeconfig {{cluster2_internal_kubeconfig}} --minify -o jsonpath='{.clusters[0].cluster.server}')"
+  cluster_url="https://$(kubectl --kubeconfig {{cluster1_kubeconfig}} get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' | tr -d '\n'):6443"; \
+  helm upgrade --install {{name}} ./charts/mesh-cni --kubeconfig {{cluster1_kubeconfig}} -n mesh-cni --create-namespace --set=agent.image.tag=latest --set=controller.image.tag=latest --set-string=agent.clusterURL="${cluster_url}"
+  cluster_url="https://$(kubectl --kubeconfig {{cluster2_kubeconfig}} get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' | tr -d '\n'):6443"; \
+  helm upgrade --install {{name}} ./charts/mesh-cni --kubeconfig {{cluster2_kubeconfig}} -n mesh-cni --create-namespace --set=agent.image.tag=latest --set=controller.image.tag=latest --set-string=agent.clusterURL="${cluster_url}"
 
 multi-create-kubeconfig-secrets:
-  kubectl --kubeconfig {{cluster1_kubeconfig}} -n kube-system create secret generic {{cluster1_remote_secret}} --from-file=config={{cluster2_internal_kubeconfig}} --dry-run=client -o yaml | kubectl --kubeconfig {{cluster1_kubeconfig}} apply -f -
-  kubectl --kubeconfig {{cluster2_kubeconfig}} -n kube-system create secret generic {{cluster2_remote_secret}} --from-file=config={{cluster1_internal_kubeconfig}} --dry-run=client -o yaml | kubectl --kubeconfig {{cluster2_kubeconfig}} apply -f -
+  kubectl --kubeconfig {{cluster1_kubeconfig}} -n mesh-cni create secret generic {{cluster1_remote_secret}} --from-file=config={{cluster2_internal_kubeconfig}} --dry-run=client -o yaml | kubectl --kubeconfig {{cluster1_kubeconfig}} apply -f -
+  kubectl --kubeconfig {{cluster2_kubeconfig}} -n mesh-cni create secret generic {{cluster2_remote_secret}} --from-file=config={{cluster1_internal_kubeconfig}} --dry-run=client -o yaml | kubectl --kubeconfig {{cluster2_kubeconfig}} apply -f -
 
 multi-apply-cluster-crs:
   kubectl --kubeconfig {{cluster1_kubeconfig}} apply -f kind/cluster-cr-cluster2.yaml
   kubectl --kubeconfig {{cluster2_kubeconfig}} apply -f kind/cluster-cr-cluster1.yaml
 
 multi-restart:
-  kubectl --kubeconfig {{cluster1_kubeconfig}} rollout restart daemonset -n kube-system {{name}}-agent
-  kubectl --kubeconfig {{cluster1_kubeconfig}} rollout restart deployment -n kube-system {{name}}-controller
-  kubectl --kubeconfig {{cluster2_kubeconfig}} rollout restart daemonset -n kube-system {{name}}-agent
-  kubectl --kubeconfig {{cluster2_kubeconfig}} rollout restart deployment -n kube-system {{name}}-controller
+  kubectl --kubeconfig {{cluster1_kubeconfig}} rollout restart daemonset -n mesh-cni {{name}}-agent
+  kubectl --kubeconfig {{cluster1_kubeconfig}} rollout restart deployment -n mesh-cni {{name}}-controller
+  kubectl --kubeconfig {{cluster2_kubeconfig}} rollout restart daemonset -n mesh-cni {{name}}-agent
+  kubectl --kubeconfig {{cluster2_kubeconfig}} rollout restart deployment -n mesh-cni {{name}}-controller
 
 multi-run-local: container multi-kind-up multi-load-image multi-install multi-create-kubeconfig-secrets multi-restart multi-apply-cluster-crs
 

@@ -51,15 +51,8 @@ spec:
                   - service_port
                   type: object
                 type: array
-              service_ips:
-                description: The ClusterIPs defined in the Service
-                items:
-                  format: ip
-                  type: string
-                type: array
             required:
             - backend_port_mappings
-            - service_ips
             type: object
         required:
         - spec

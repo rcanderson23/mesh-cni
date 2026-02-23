@@ -5,6 +5,9 @@ pub enum Error {
     #[error("kube error: {0}")]
     KubeError(#[from] kube::Error),
 
+    #[error("kube utils: {0}")]
+    K8sUtils(#[from] mesh_cni_k8s_utils::Error),
+
     #[error("missing precondition: {0}")]
     ReconcileMissingPrecondition(String),
 
@@ -13,6 +16,9 @@ pub enum Error {
 
     #[error("{0}")]
     Other(String),
+
+    #[error("Service resource is invalid")]
+    InvalidResource,
 }
 
 impl Error {
