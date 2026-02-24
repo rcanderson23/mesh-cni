@@ -172,7 +172,7 @@ fn cidr_ruleset_v4(
                 selected_id,
                 direction: direction_candidate,
                 _pad: [0; 3],
-                addr: peer_ip.to_be(),
+                addr: peer_ip.to_be_bytes(),
             },
         );
         if let Some(ruleset_id) = POLICY_CIDR_V4.get(&lookup) {

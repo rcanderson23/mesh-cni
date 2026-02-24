@@ -68,11 +68,9 @@ where
     ) = store_init;
 
     let index_state = policy_bpf_state.index_state()?;
-    let cidr_v4_state = policy_bpf_state.cidr_v4_index_state()?;
-    let cidr_v6_state = policy_bpf_state.cidr_v6_index_state()?;
+    let cidr_state = policy_bpf_state.cidr_index_state()?;
     let ruleset_state = policy_bpf_state.ruleset_state()?;
-    let ruleset_state =
-        RulesetState::new_with_cidr(&index_state, &cidr_v4_state, &cidr_v6_state, &ruleset_state);
+    let ruleset_state = RulesetState::new_with_cidr(&index_state, &cidr_state, &ruleset_state);
 
     let context = Arc::new(Context {
         pod_store: pod_store.clone(),

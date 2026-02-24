@@ -92,7 +92,7 @@ pub struct CidrPolicyMapDataV4 {
     pub selected_id: IdentityId,
     pub direction: u8,
     pub _pad: [u8; 3],
-    pub addr: u32,
+    pub addr: [u8; 4],
 }
 
 #[cfg(feature = "user")]
@@ -110,13 +110,28 @@ pub struct CidrPolicyMapDataV6 {
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for CidrPolicyMapDataV6 {}
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum CidrPolicyMapKey {
+    V4(CidrPolicyMapKeyV4),
+    V6(CidrPolicyMapKeyV6),
+}
+
+impl CidrPolicyMapKey {
+    pub fn selected_id(&self) -> IdentityId {
+        match self {
+            CidrPolicyMapKey::V4(key) => key.selected_id,
+            CidrPolicyMapKey::V6(key) => key.selected_id,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct CidrPolicyMapKeyV4 {
     pub prefix_len: u32,
     pub selected_id: IdentityId,
     pub direction: u8,
     pub _pad: [u8; 3],
-    pub addr: u32,
+    pub addr: [u8; 4],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

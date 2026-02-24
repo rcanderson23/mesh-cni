@@ -14,9 +14,9 @@ use mesh_cni_crds::v1alpha1::{cidridentity::CIDRIdentity, identity::Identity};
 use mesh_cni_ebpf_common::{
     IdentityId,
     policy::{
-        ANY_ID, ANY_PORT, Action as PolicyAction, CidrPolicyMapKeyV4, CidrPolicyMapKeyV6,
-        PolicyDirection, PolicyIndexKey, PolicyProtocol, PolicyRuleKey, PolicyValue, RULESET_NONE,
-        RulesetId,
+        ANY_ID, ANY_PORT, Action as PolicyAction, CidrPolicyMapKey, CidrPolicyMapKeyV4,
+        CidrPolicyMapKeyV6, PolicyDirection, PolicyIndexKey, PolicyProtocol, PolicyRuleKey,
+        PolicyValue, RULESET_NONE, RulesetId,
     },
 };
 use tracing::info;
@@ -67,8 +67,7 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
     );
 
     let index_state = ctx.policy_bpf_state.index_state()?;
-    let cidr_v4_state = ctx.policy_bpf_state.cidr_v4_index_state()?;
-    let cidr_v6_state = ctx.policy_bpf_state.cidr_v6_index_state()?;
+    let cidr_state = ctx.policy_bpf_state.cidr_index_state()?;
     let mut written_rulesets: HashSet<RulesetId> = HashSet::default();
 
     reconcile_identity_phase(
@@ -83,8 +82,7 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         ctx.as_ref(),
         identity_id,
         &selected_netpols,
-        &cidr_v4_state,
-        &cidr_v6_state,
+        &cidr_state,
         &mut generated_rules,
         &mut written_rulesets,
     )?;
@@ -220,146 +218,78 @@ fn reconcile_cidr_phase<P: PolicyControllerBpf>(
     ctx: &Context<P>,
     identity_id: IdentityId,
     selected_netpols: &[&Arc<NetworkPolicy>],
-    cidr_v4_state: &HashMap<CidrPolicyMapKeyV4, RulesetId>,
-    cidr_v6_state: &HashMap<CidrPolicyMapKeyV6, RulesetId>,
+    cidr_state: &HashMap<CidrPolicyMapKey, RulesetId>,
     generated_rules: &mut GeneratedRules,
     written_rulesets: &mut HashSet<RulesetId>,
 ) -> Result<()> {
-    let mut raw_cidr_v4_rules: HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>> = HashMap::default();
-    let mut raw_cidr_v6_rules: HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>> = HashMap::default();
+    let raw_cidr_rules = std::mem::take(&mut generated_rules.cidr_rules);
 
-    for (key, rule_specs) in std::mem::take(&mut generated_rules.ingress_cidr_rules_v4) {
-        raw_cidr_v4_rules.entry(key).or_default().extend(rule_specs);
-    }
-    for (key, rule_specs) in std::mem::take(&mut generated_rules.egress_cidr_rules_v4) {
-        raw_cidr_v4_rules.entry(key).or_default().extend(rule_specs);
-    }
-    for (key, rule_specs) in std::mem::take(&mut generated_rules.ingress_cidr_rules_v6) {
-        raw_cidr_v6_rules.entry(key).or_default().extend(rule_specs);
-    }
-    for (key, rule_specs) in std::mem::take(&mut generated_rules.egress_cidr_rules_v6) {
-        raw_cidr_v6_rules.entry(key).or_default().extend(rule_specs);
-    }
+    let desired_cidr_rules = expand_cidr_rule_specs(&raw_cidr_rules);
 
-    let desired_cidr_v4_rules = expand_cidr_rule_specs_v4(&raw_cidr_v4_rules);
-    let desired_cidr_v6_rules = expand_cidr_rule_specs_v6(&raw_cidr_v6_rules);
+    let mut desired_cidr: HashMap<CidrPolicyMapKey, RulesetId> = HashMap::default();
 
-    let mut desired_cidr_v4: HashMap<CidrPolicyMapKeyV4, RulesetId> = HashMap::default();
-    let mut desired_cidr_v6: HashMap<CidrPolicyMapKeyV6, RulesetId> = HashMap::default();
-
-    for (key, rule_specs) in desired_cidr_v4_rules {
+    for (key, rule_specs) in desired_cidr_rules {
         let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs, &ctx.ruleset_state);
         if written_rulesets.insert(ruleset_id) {
             for (rule_key, rule_value) in &ruleset_entries {
                 ctx.policy_bpf_state.update_rule(*rule_key, *rule_value)?;
             }
         }
-        desired_cidr_v4.insert(key, ruleset_id);
+        desired_cidr.insert(key, ruleset_id);
     }
 
-    for (key, rule_specs) in desired_cidr_v6_rules {
-        let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs, &ctx.ruleset_state);
-        if written_rulesets.insert(ruleset_id) {
-            for (rule_key, rule_value) in &ruleset_entries {
-                ctx.policy_bpf_state.update_rule(*rule_key, *rule_value)?;
-            }
-        }
-        desired_cidr_v6.insert(key, ruleset_id);
-    }
-
-    let current_cidr_v4: HashMap<CidrPolicyMapKeyV4, RulesetId> = cidr_v4_state
+    let current_cidr: HashMap<CidrPolicyMapKey, RulesetId> = cidr_state
         .iter()
-        .filter(|(key, _)| cidr_key_applies(identity_id, key.selected_id))
-        .map(|(key, value)| (*key, *value))
-        .collect();
-    let current_cidr_v6: HashMap<CidrPolicyMapKeyV6, RulesetId> = cidr_v6_state
-        .iter()
-        .filter(|(key, _)| cidr_key_applies(identity_id, key.selected_id))
-        .map(|(key, value)| (*key, *value))
+        .filter(|(key, _)| cidr_key_applies(identity_id, key.selected_id()))
+        .map(|(key, value)| (key.clone(), *value))
         .collect();
 
     info!(
         identity_id,
         selected_policies = selected_netpols.len(),
-        current_cidr_v4 = current_cidr_v4.len(),
-        desired_cidr_v4 = desired_cidr_v4.len(),
-        current_cidr_v6 = current_cidr_v6.len(),
-        desired_cidr_v6 = desired_cidr_v6.len(),
+        current_cidr = current_cidr.len(),
+        desired_cidr = desired_cidr.len(),
         "reconcile: cidr phase computed diff"
     );
 
-    let mut cidr_v4_deleted_count: u32 = 0;
-    let mut cidr_v4_updated_count: u32 = 0;
-    let mut cidr_v4_unchanged_count: u32 = 0;
-    let mut cidr_v4_added_count: u32 = 0;
+    let mut cidr_deleted_count: u32 = 0;
+    let mut cidr_updated_count: u32 = 0;
+    let mut cidr_unchanged_count: u32 = 0;
+    let mut cidr_added_count: u32 = 0;
 
-    for (key, current_ruleset_id) in &current_cidr_v4 {
-        match desired_cidr_v4.get(key) {
+    for (key, current_ruleset_id) in &current_cidr {
+        match desired_cidr.get(key) {
             Some(desired_ruleset_id) if *desired_ruleset_id == *current_ruleset_id => {
-                cidr_v4_unchanged_count += 1;
+                cidr_unchanged_count += 1;
             }
             Some(desired_ruleset_id) => {
                 ctx.policy_bpf_state
-                    .update_cidr_v4_index(*key, *desired_ruleset_id)?;
+                    .update_cidr_index(key.clone(), *desired_ruleset_id)?;
                 release_ruleset_if_unused(ctx, *current_ruleset_id)?;
-                cidr_v4_updated_count += 1;
+                cidr_updated_count += 1;
             }
             None => {
-                ctx.policy_bpf_state.delete_cidr_v4_index(key)?;
+                ctx.policy_bpf_state.delete_cidr_index(key)?;
                 release_ruleset_if_unused(ctx, *current_ruleset_id)?;
-                cidr_v4_deleted_count += 1;
+                cidr_deleted_count += 1;
             }
         }
     }
-    for (key, ruleset_id) in desired_cidr_v4 {
-        if current_cidr_v4.contains_key(&key) {
+
+    for (key, ruleset_id) in desired_cidr {
+        if current_cidr.contains_key(&key) {
             continue;
         }
-        ctx.policy_bpf_state.update_cidr_v4_index(key, ruleset_id)?;
-        cidr_v4_added_count += 1;
-    }
-
-    let mut cidr_v6_deleted_count: u32 = 0;
-    let mut cidr_v6_updated_count: u32 = 0;
-    let mut cidr_v6_unchanged_count: u32 = 0;
-    let mut cidr_v6_added_count: u32 = 0;
-
-    for (key, current_ruleset_id) in &current_cidr_v6 {
-        match desired_cidr_v6.get(key) {
-            Some(desired_ruleset_id) if *desired_ruleset_id == *current_ruleset_id => {
-                cidr_v6_unchanged_count += 1;
-            }
-            Some(desired_ruleset_id) => {
-                ctx.policy_bpf_state
-                    .update_cidr_v6_index(*key, *desired_ruleset_id)?;
-                release_ruleset_if_unused(ctx, *current_ruleset_id)?;
-                cidr_v6_updated_count += 1;
-            }
-            None => {
-                ctx.policy_bpf_state.delete_cidr_v6_index(key)?;
-                release_ruleset_if_unused(ctx, *current_ruleset_id)?;
-                cidr_v6_deleted_count += 1;
-            }
-        }
-    }
-    for (key, ruleset_id) in desired_cidr_v6 {
-        if current_cidr_v6.contains_key(&key) {
-            continue;
-        }
-        ctx.policy_bpf_state.update_cidr_v6_index(key, ruleset_id)?;
-        cidr_v6_added_count += 1;
+        ctx.policy_bpf_state.update_cidr_index(key, ruleset_id)?;
+        cidr_added_count += 1;
     }
 
     info!(
         identity_id,
-        cidr_v4_deleted = cidr_v4_deleted_count,
-        cidr_v4_updated = cidr_v4_updated_count,
-        cidr_v4_unchanged = cidr_v4_unchanged_count,
-        cidr_v4_added = cidr_v4_added_count,
-        cidr_v6_deleted = cidr_v6_deleted_count,
-        cidr_v6_updated = cidr_v6_updated_count,
-        cidr_v6_unchanged = cidr_v6_unchanged_count,
-        cidr_v6_added = cidr_v6_added_count,
+        cidr_deleted = cidr_deleted_count,
+        cidr_updated = cidr_updated_count,
+        cidr_unchanged = cidr_unchanged_count,
+        cidr_added = cidr_added_count,
         "reconcile: cidr phase applied diff"
     );
     Ok(())
@@ -369,10 +299,7 @@ fn reconcile_cidr_phase<P: PolicyControllerBpf>(
 struct GeneratedRules {
     ingress_identity_rules: HashMap<IdentityId, Vec<RuleSpec>>,
     egress_identity_rules: HashMap<IdentityId, Vec<RuleSpec>>,
-    ingress_cidr_rules_v4: HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>>,
-    ingress_cidr_rules_v6: HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>>,
-    egress_cidr_rules_v4: HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>>,
-    egress_cidr_rules_v6: HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>>,
+    cidr_rules: HashMap<CidrPolicyMapKey, Vec<RuleSpec>>,
 }
 
 fn generate_rules_maps(
@@ -428,8 +355,7 @@ fn generate_rules_maps(
                             identity.spec.id,
                             PolicyDirection::Ingress,
                             &rule_specs,
-                            &mut generated_rules.ingress_cidr_rules_v4,
-                            &mut generated_rules.ingress_cidr_rules_v6,
+                            &mut generated_rules.cidr_rules,
                         );
                     }
                 }
@@ -467,8 +393,7 @@ fn generate_rules_maps(
                             identity.spec.id,
                             PolicyDirection::Egress,
                             &rule_specs,
-                            &mut generated_rules.egress_cidr_rules_v4,
-                            &mut generated_rules.egress_cidr_rules_v6,
+                            &mut generated_rules.cidr_rules,
                         );
                     }
                 }
@@ -715,33 +640,32 @@ fn add_cidr_rule_specs_for_ip_block(
     selected_id: IdentityId,
     direction: PolicyDirection,
     rule_specs: &[RuleSpec],
-    cidr_v4_map: &mut HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>>,
-    cidr_v6_map: &mut HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>>,
+    cidr_map: &mut HashMap<CidrPolicyMapKey, Vec<RuleSpec>>,
 ) {
     for prefix in cidr_prefixes_for_ip_block(ip_block, cidr_identities) {
         match prefix {
             IpNetwork::V4(prefix_v4) => {
-                let key = CidrPolicyMapKeyV4 {
+                let key = CidrPolicyMapKey::V4(CidrPolicyMapKeyV4 {
                     prefix_len: 64 + u32::from(prefix_v4.prefix()),
                     selected_id,
                     direction: direction.into(),
                     _pad: [0; 3],
-                    addr: u32::from(prefix_v4.network()).to_be(),
-                };
-                cidr_v4_map
+                    addr: prefix_v4.network().octets(),
+                });
+                cidr_map
                     .entry(key)
                     .or_default()
                     .extend_from_slice(rule_specs);
             }
             IpNetwork::V6(prefix_v6) => {
-                let key = CidrPolicyMapKeyV6 {
+                let key = CidrPolicyMapKey::V6(CidrPolicyMapKeyV6 {
                     prefix_len: 64 + u32::from(prefix_v6.prefix()),
                     selected_id,
                     direction: direction.into(),
                     _pad: [0; 3],
                     addr: u128::from(prefix_v6.network()).to_be_bytes(),
-                };
-                cidr_v6_map
+                });
+                cidr_map
                     .entry(key)
                     .or_default()
                     .extend_from_slice(rule_specs);
@@ -750,90 +674,58 @@ fn add_cidr_rule_specs_for_ip_block(
     }
 }
 
-fn expand_cidr_rule_specs_v4(
-    source_rules: &HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>>,
-) -> HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>> {
-    let mut expanded_rules: HashMap<CidrPolicyMapKeyV4, Vec<RuleSpec>> = HashMap::default();
+fn expand_cidr_rule_specs(
+    source_rules: &HashMap<CidrPolicyMapKey, Vec<RuleSpec>>,
+) -> HashMap<CidrPolicyMapKey, Vec<RuleSpec>> {
+    let mut expanded_rules: HashMap<CidrPolicyMapKey, Vec<RuleSpec>> = HashMap::default();
 
     for key in source_rules.keys() {
         let mut effective_rules = Vec::new();
         for (ancestor_key, ancestor_rules) in source_rules {
-            if cidr_v4_key_contains(ancestor_key, key) {
+            if cidr_key_contains(ancestor_key, key) {
                 effective_rules.extend_from_slice(ancestor_rules);
             }
         }
-        expanded_rules.insert(*key, effective_rules);
+        expanded_rules.insert(key.clone(), effective_rules);
     }
 
     expanded_rules
 }
 
-fn expand_cidr_rule_specs_v6(
-    source_rules: &HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>>,
-) -> HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>> {
-    let mut expanded_rules: HashMap<CidrPolicyMapKeyV6, Vec<RuleSpec>> = HashMap::default();
-
-    for key in source_rules.keys() {
-        let mut effective_rules = Vec::new();
-        for (ancestor_key, ancestor_rules) in source_rules {
-            if cidr_v6_key_contains(ancestor_key, key) {
-                effective_rules.extend_from_slice(ancestor_rules);
+fn cidr_key_contains(ancestor_key: &CidrPolicyMapKey, descendant_key: &CidrPolicyMapKey) -> bool {
+    match (ancestor_key, descendant_key) {
+        (CidrPolicyMapKey::V4(ancestor), CidrPolicyMapKey::V4(descendant)) => {
+            if ancestor.selected_id != descendant.selected_id
+                || ancestor.direction != descendant.direction
+                || ancestor.prefix_len > descendant.prefix_len
+            {
+                return false;
             }
+            let Some(prefix_bits) = ancestor.prefix_len.checked_sub(64) else {
+                return false;
+            };
+            if prefix_bits > 32 {
+                return false;
+            }
+            prefix_matches(&ancestor.addr, &descendant.addr, prefix_bits)
         }
-        expanded_rules.insert(*key, effective_rules);
+        (CidrPolicyMapKey::V6(ancestor), CidrPolicyMapKey::V6(descendant)) => {
+            if ancestor.selected_id != descendant.selected_id
+                || ancestor.direction != descendant.direction
+                || ancestor.prefix_len > descendant.prefix_len
+            {
+                return false;
+            }
+            let Some(prefix_bits) = ancestor.prefix_len.checked_sub(64) else {
+                return false;
+            };
+            if prefix_bits > 128 {
+                return false;
+            }
+            prefix_matches(&ancestor.addr, &descendant.addr, prefix_bits)
+        }
+        _ => false,
     }
-
-    expanded_rules
-}
-
-fn cidr_v4_key_contains(
-    ancestor_key: &CidrPolicyMapKeyV4,
-    descendant_key: &CidrPolicyMapKeyV4,
-) -> bool {
-    if ancestor_key.selected_id != descendant_key.selected_id
-        || ancestor_key.direction != descendant_key.direction
-        || ancestor_key.prefix_len > descendant_key.prefix_len
-    {
-        return false;
-    }
-
-    let Some(prefix_bits) = ancestor_key.prefix_len.checked_sub(64) else {
-        return false;
-    };
-    if prefix_bits > 32 {
-        return false;
-    }
-
-    prefix_matches(
-        ancestor_key.addr.to_ne_bytes().as_slice(),
-        descendant_key.addr.to_ne_bytes().as_slice(),
-        prefix_bits,
-    )
-}
-
-fn cidr_v6_key_contains(
-    ancestor_key: &CidrPolicyMapKeyV6,
-    descendant_key: &CidrPolicyMapKeyV6,
-) -> bool {
-    if ancestor_key.selected_id != descendant_key.selected_id
-        || ancestor_key.direction != descendant_key.direction
-        || ancestor_key.prefix_len > descendant_key.prefix_len
-    {
-        return false;
-    }
-
-    let Some(prefix_bits) = ancestor_key.prefix_len.checked_sub(64) else {
-        return false;
-    };
-    if prefix_bits > 128 {
-        return false;
-    }
-
-    prefix_matches(
-        ancestor_key.addr.as_slice(),
-        descendant_key.addr.as_slice(),
-        prefix_bits,
-    )
 }
 
 fn prefix_matches(prefix_addr: &[u8], candidate_addr: &[u8], prefix_bits: u32) -> bool {
@@ -1035,40 +927,39 @@ mod tests {
             Ok(self.ruleset.lock().unwrap().clone())
         }
 
-        fn update_cidr_v4_index(
-            &self,
-            key: CidrPolicyMapKeyV4,
-            ruleset_id: RulesetId,
-        ) -> Result<()> {
-            self.cidr_v4.lock().unwrap().insert(key, ruleset_id);
+        fn update_cidr_index(&self, key: CidrPolicyMapKey, ruleset_id: RulesetId) -> Result<()> {
+            match key {
+                CidrPolicyMapKey::V4(key) => {
+                    self.cidr_v4.lock().unwrap().insert(key, ruleset_id);
+                }
+                CidrPolicyMapKey::V6(key) => {
+                    self.cidr_v6.lock().unwrap().insert(key, ruleset_id);
+                }
+            }
             Ok(())
         }
 
-        fn delete_cidr_v4_index(&self, key: &CidrPolicyMapKeyV4) -> Result<()> {
-            self.cidr_v4.lock().unwrap().remove(key);
+        fn delete_cidr_index(&self, key: &CidrPolicyMapKey) -> Result<()> {
+            match key {
+                CidrPolicyMapKey::V4(key) => {
+                    self.cidr_v4.lock().unwrap().remove(key);
+                }
+                CidrPolicyMapKey::V6(key) => {
+                    self.cidr_v6.lock().unwrap().remove(key);
+                }
+            }
             Ok(())
         }
 
-        fn cidr_v4_index_state(&self) -> Result<HashMap<CidrPolicyMapKeyV4, RulesetId>> {
-            Ok(self.cidr_v4.lock().unwrap().clone())
-        }
-
-        fn update_cidr_v6_index(
-            &self,
-            key: CidrPolicyMapKeyV6,
-            ruleset_id: RulesetId,
-        ) -> Result<()> {
-            self.cidr_v6.lock().unwrap().insert(key, ruleset_id);
-            Ok(())
-        }
-
-        fn delete_cidr_v6_index(&self, key: &CidrPolicyMapKeyV6) -> Result<()> {
-            self.cidr_v6.lock().unwrap().remove(key);
-            Ok(())
-        }
-
-        fn cidr_v6_index_state(&self) -> Result<HashMap<CidrPolicyMapKeyV6, RulesetId>> {
-            Ok(self.cidr_v6.lock().unwrap().clone())
+        fn cidr_index_state(&self) -> Result<HashMap<CidrPolicyMapKey, RulesetId>> {
+            let mut state = HashMap::default();
+            for (key, value) in self.cidr_v4.lock().unwrap().iter() {
+                state.insert(CidrPolicyMapKey::V4(*key), *value);
+            }
+            for (key, value) in self.cidr_v6.lock().unwrap().iter() {
+                state.insert(CidrPolicyMapKey::V6(*key), *value);
+            }
+            Ok(state)
         }
     }
 
@@ -2295,16 +2186,17 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let cidr_v4 = ctx.policy_bpf_state.cidr_v4_index_state().unwrap();
+        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
         let allow_key = CidrPolicyMapKeyV4 {
             prefix_len: 64 + 24,
             selected_id: 501,
             direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
-            addr: u32::from(std::net::Ipv4Addr::from_str("10.244.0.0").expect("valid ipv4"))
-                .to_be(),
+            addr: std::net::Ipv4Addr::from_str("10.244.0.0")
+                .expect("valid ipv4")
+                .octets(),
         };
-        assert!(cidr_v4.contains_key(&allow_key));
+        assert!(cidr.contains_key(&CidrPolicyMapKey::V4(allow_key)));
     }
 
     #[test]
@@ -2398,18 +2290,19 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let cidr_v4 = ctx.policy_bpf_state.cidr_v4_index_state().unwrap();
+        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
         let allow_key = CidrPolicyMapKeyV4 {
             prefix_len: 64 + 24,
             selected_id: 601,
             direction: PolicyDirection::Egress.into(),
             _pad: [0; 3],
-            addr: u32::from(std::net::Ipv4Addr::from_str("10.244.0.0").expect("valid ipv4"))
-                .to_be(),
+            addr: std::net::Ipv4Addr::from_str("10.244.0.0")
+                .expect("valid ipv4")
+                .octets(),
         };
-        assert!(cidr_v4.contains_key(&allow_key));
-        let ruleset_id = cidr_v4.get(&allow_key).copied().unwrap();
+        assert!(cidr.contains_key(&CidrPolicyMapKey::V4(allow_key)));
+        let ruleset_id = cidr.get(&CidrPolicyMapKey::V4(allow_key)).copied().unwrap();
         let rule_key = PolicyRuleKey {
             ruleset_id,
             proto: PolicyProtocol::Tcp.into(),
@@ -2538,7 +2431,7 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let cidr_v4 = ctx.policy_bpf_state.cidr_v4_index_state().unwrap();
+        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
         let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
 
         let broad_key = CidrPolicyMapKeyV4 {
@@ -2546,18 +2439,26 @@ mod tests {
             selected_id: 911,
             direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
-            addr: u32::from(std::net::Ipv4Addr::from_str("10.0.0.0").expect("valid ipv4")).to_be(),
+            addr: std::net::Ipv4Addr::from_str("10.0.0.0")
+                .expect("valid ipv4")
+                .octets(),
         };
         let narrow_key = CidrPolicyMapKeyV4 {
             prefix_len: 64 + 16,
             selected_id: 911,
             direction: PolicyDirection::Ingress.into(),
             _pad: [0; 3],
-            addr: u32::from(std::net::Ipv4Addr::from_str("10.1.0.0").expect("valid ipv4")).to_be(),
+            addr: std::net::Ipv4Addr::from_str("10.1.0.0")
+                .expect("valid ipv4")
+                .octets(),
         };
 
-        let broad_ruleset_id = *cidr_v4.get(&broad_key).expect("expected broad key");
-        let narrow_ruleset_id = *cidr_v4.get(&narrow_key).expect("expected narrow key");
+        let broad_ruleset_id = *cidr
+            .get(&CidrPolicyMapKey::V4(broad_key))
+            .expect("expected broad key");
+        let narrow_ruleset_id = *cidr
+            .get(&CidrPolicyMapKey::V4(narrow_key))
+            .expect("expected narrow key");
 
         let broad_80_key = PolicyRuleKey {
             ruleset_id: broad_ruleset_id,

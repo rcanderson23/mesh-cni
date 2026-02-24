@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::bail;
 use aya::maps::{LpmTrie, Map, MapData, lpm_trie::Key as LpmKey};
 use mesh_cni_ebpf_common::policy::{
-    CidrPolicyMapDataV4, CidrPolicyMapDataV6, CidrPolicyMapKeyV4, CidrPolicyMapKeyV6,
-    PolicyIndexKey, PolicyRuleKey, PolicyValue, RulesetId,
+    CidrPolicyMapDataV4, CidrPolicyMapDataV6, CidrPolicyMapKey, CidrPolicyMapKeyV4,
+    CidrPolicyMapKeyV6, PolicyIndexKey, PolicyRuleKey, PolicyValue, RulesetId,
 };
 use mesh_cni_policy_controller::PolicyControllerBpf;
 use tracing::info;
@@ -107,6 +107,31 @@ where
     pub fn cidr_v6_index_state(&self) -> Result<ahash::HashMap<CidrPolicyMapKeyV6, RulesetId>> {
         self.cidr_v6.get_state()
     }
+
+    pub fn update_cidr_index(&self, key: CidrPolicyMapKey, ruleset_id: RulesetId) -> Result<()> {
+        match key {
+            CidrPolicyMapKey::V4(key) => self.update_cidr_v4_index(key, ruleset_id),
+            CidrPolicyMapKey::V6(key) => self.update_cidr_v6_index(key, ruleset_id),
+        }
+    }
+
+    pub fn delete_cidr_index(&self, key: &CidrPolicyMapKey) -> Result<()> {
+        match key {
+            CidrPolicyMapKey::V4(key) => self.delete_cidr_v4_index(key),
+            CidrPolicyMapKey::V6(key) => self.delete_cidr_v6_index(key),
+        }
+    }
+
+    pub fn cidr_index_state(&self) -> Result<ahash::HashMap<CidrPolicyMapKey, RulesetId>> {
+        let mut state: ahash::HashMap<CidrPolicyMapKey, RulesetId> = ahash::HashMap::default();
+        for (key, value) in self.cidr_v4_index_state()? {
+            state.insert(CidrPolicyMapKey::V4(key), value);
+        }
+        for (key, value) in self.cidr_v6_index_state()? {
+            state.insert(CidrPolicyMapKey::V6(key), value);
+        }
+        Ok(state)
+    }
 }
 
 impl<PI, PR> PolicyControllerBpf for PolicyState<PI, PR>
@@ -156,51 +181,24 @@ where
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 
-    fn update_cidr_v4_index(
+    fn update_cidr_index(
         &self,
-        key: CidrPolicyMapKeyV4,
+        key: CidrPolicyMapKey,
         ruleset_id: RulesetId,
     ) -> mesh_cni_policy_controller::Result<()> {
-        PolicyState::update_cidr_v4_index(self, key, ruleset_id)
+        PolicyState::update_cidr_index(self, key, ruleset_id)
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 
-    fn delete_cidr_v4_index(
-        &self,
-        key: &CidrPolicyMapKeyV4,
-    ) -> mesh_cni_policy_controller::Result<()> {
-        PolicyState::delete_cidr_v4_index(self, key)
+    fn delete_cidr_index(&self, key: &CidrPolicyMapKey) -> mesh_cni_policy_controller::Result<()> {
+        PolicyState::delete_cidr_index(self, key)
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 
-    fn cidr_v4_index_state(
+    fn cidr_index_state(
         &self,
-    ) -> mesh_cni_policy_controller::Result<ahash::HashMap<CidrPolicyMapKeyV4, RulesetId>> {
-        PolicyState::cidr_v4_index_state(self)
-            .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
-    }
-
-    fn update_cidr_v6_index(
-        &self,
-        key: CidrPolicyMapKeyV6,
-        ruleset_id: RulesetId,
-    ) -> mesh_cni_policy_controller::Result<()> {
-        PolicyState::update_cidr_v6_index(self, key, ruleset_id)
-            .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
-    }
-
-    fn delete_cidr_v6_index(
-        &self,
-        key: &CidrPolicyMapKeyV6,
-    ) -> mesh_cni_policy_controller::Result<()> {
-        PolicyState::delete_cidr_v6_index(self, key)
-            .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
-    }
-
-    fn cidr_v6_index_state(
-        &self,
-    ) -> mesh_cni_policy_controller::Result<ahash::HashMap<CidrPolicyMapKeyV6, RulesetId>> {
-        PolicyState::cidr_v6_index_state(self)
+    ) -> mesh_cni_policy_controller::Result<ahash::HashMap<CidrPolicyMapKey, RulesetId>> {
+        PolicyState::cidr_index_state(self)
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 }

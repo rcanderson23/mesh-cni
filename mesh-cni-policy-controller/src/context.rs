@@ -6,7 +6,7 @@ use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicy};
 use kube::runtime::reflector::Store;
 use mesh_cni_crds::v1alpha1::{cidridentity::CIDRIdentity, identity::Identity};
 use mesh_cni_ebpf_common::policy::{
-    CidrPolicyMapKeyV4, CidrPolicyMapKeyV6, PolicyIndexKey, PolicyRuleKey, PolicyValue, RulesetId,
+    CidrPolicyMapKey, PolicyIndexKey, PolicyRuleKey, PolicyValue, RulesetId,
 };
 
 use crate::PolicyControllerBpf;
@@ -51,22 +51,19 @@ impl RulesetState {
         index_state: &HashMap<PolicyIndexKey, RulesetId>,
         ruleset_state: &HashMap<PolicyRuleKey, PolicyValue>,
     ) -> Self {
-        let cidr_v4_state = HashMap::default();
-        let cidr_v6_state = HashMap::default();
-        Self::new_with_cidr(index_state, &cidr_v4_state, &cidr_v6_state, ruleset_state)
+        let cidr_state = HashMap::default();
+        Self::new_with_cidr(index_state, &cidr_state, ruleset_state)
     }
 
     pub(crate) fn new_with_cidr(
         index_state: &HashMap<PolicyIndexKey, RulesetId>,
-        cidr_v4_state: &HashMap<CidrPolicyMapKeyV4, RulesetId>,
-        cidr_v6_state: &HashMap<CidrPolicyMapKeyV6, RulesetId>,
+        cidr_state: &HashMap<CidrPolicyMapKey, RulesetId>,
         ruleset_state: &HashMap<PolicyRuleKey, PolicyValue>,
     ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(RulesetStateInner::new(
                 index_state,
-                cidr_v4_state,
-                cidr_v6_state,
+                cidr_state,
                 ruleset_state,
             ))),
         }
@@ -104,8 +101,7 @@ pub struct RulesetStateInner {
 impl RulesetStateInner {
     fn new(
         index_state: &HashMap<PolicyIndexKey, RulesetId>,
-        cidr_v4_state: &HashMap<CidrPolicyMapKeyV4, RulesetId>,
-        cidr_v6_state: &HashMap<CidrPolicyMapKeyV6, RulesetId>,
+        cidr_state: &HashMap<CidrPolicyMapKey, RulesetId>,
         ruleset_state: &HashMap<PolicyRuleKey, PolicyValue>,
     ) -> Self {
         let mut by_hash: HashMap<RulesetHash, RulesetEntry> = HashMap::default();
@@ -115,10 +111,7 @@ impl RulesetStateInner {
         for ruleset_id in index_state.values().copied().filter(|id| *id != 0) {
             *refcounts.entry(ruleset_id).or_default() += 1;
         }
-        for ruleset_id in cidr_v4_state.values().copied().filter(|id| *id != 0) {
-            *refcounts.entry(ruleset_id).or_default() += 1;
-        }
-        for ruleset_id in cidr_v6_state.values().copied().filter(|id| *id != 0) {
+        for ruleset_id in cidr_state.values().copied().filter(|id| *id != 0) {
             *refcounts.entry(ruleset_id).or_default() += 1;
         }
 
@@ -157,12 +150,7 @@ impl RulesetStateInner {
                 max_id = ruleset_id;
             }
         }
-        for ruleset_id in cidr_v4_state.values().copied().filter(|id| *id != 0) {
-            if ruleset_id > max_id {
-                max_id = ruleset_id;
-            }
-        }
-        for ruleset_id in cidr_v6_state.values().copied().filter(|id| *id != 0) {
+        for ruleset_id in cidr_state.values().copied().filter(|id| *id != 0) {
             if ruleset_id > max_id {
                 max_id = ruleset_id;
             }
