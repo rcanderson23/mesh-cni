@@ -96,11 +96,19 @@ where
             count: new_count,
         };
 
-        self.insert_endpoints(&new_service_value, value)?;
+        if new_count > old_count {
+            // Ensure new endpoint slots are populated before datapath can select them.
+            self.insert_endpoints(&new_service_value, value)?;
+            self.service_map.update(key, new_service_value)?;
+        } else {
+            self.service_map.update(key, new_service_value)?;
+            self.insert_endpoints(&new_service_value, value)?;
 
-        if old_count > new_count {
-            self.delete_endpoints(&new_service_value, new_count..old_count)?;
+            if old_count > new_count {
+                self.delete_endpoints(&new_service_value, new_count..old_count)?;
+            }
         }
+        self.service_cache.insert(key, new_service_value);
 
         Ok(id)
     }
@@ -466,6 +474,48 @@ mod test {
         let second_id = service_endpoint.update(service_key, endpoints.clone(), first_id)?;
 
         assert_eq!(initial_id, second_id);
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_existing_service_changes_count() -> crate::Result<()> {
+        let mut service_endpoint = new_service_endpoint();
+
+        let service_key = ServiceKeyV4::new(
+            Ipv4Addr::new(192, 168, 0, 1).to_bits(),
+            80,
+            KubeProtocol::Tcp as u8,
+        );
+        let endpoint_one = EndpointValueV4 {
+            ip: Ipv4Addr::new(10, 0, 0, 1).to_bits(),
+            port: 8080,
+            _protocol: KubeProtocol::Tcp as u8,
+        };
+
+        let next_id = service_endpoint.update(service_key, vec![&endpoint_one], 0)?;
+        assert_eq!(
+            service_endpoint.get_from_cache(&service_key).unwrap().count,
+            1
+        );
+
+        let endpoint_two = EndpointValueV4 {
+            ip: Ipv4Addr::new(10, 0, 0, 2).to_bits(),
+            port: 8080,
+            _protocol: KubeProtocol::Tcp as u8,
+        };
+        let _ =
+            service_endpoint.update(service_key, vec![&endpoint_one, &endpoint_two], next_id)?;
+        assert_eq!(
+            service_endpoint.get_from_cache(&service_key).unwrap().count,
+            2
+        );
+
+        let _ = service_endpoint.update(service_key, vec![&endpoint_one], next_id)?;
+        assert_eq!(
+            service_endpoint.get_from_cache(&service_key).unwrap().count,
+            1
+        );
 
         Ok(())
     }
