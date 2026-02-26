@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::{net::IpAddr, str::FromStr, sync::Arc};
 
 use ahash::{HashMap, HashSet};
 use ipnetwork::IpNetwork;
@@ -10,7 +10,11 @@ use k8s_openapi::{
     apimachinery::pkg::util::intstr::IntOrString,
 };
 use kube::{ResourceExt, runtime::controller::Action};
-use mesh_cni_crds::v1alpha1::{cidridentity::CIDRIdentity, identity::Identity};
+use mesh_cni_crds::v1alpha1::{
+    cidridentity::CIDRIdentity,
+    identity::Identity,
+    meshidentityslice::{MeshIdentityNamedPort, MeshIdentitySlice},
+};
 use mesh_cni_ebpf_common::{
     IdentityId,
     policy::{
@@ -25,7 +29,10 @@ use crate::{
     PolicyControllerBpf, Result,
     context::{Context, hash_rule_triples},
     controller::DEFAULT_REQUEUE_DURATION,
-    selector::{PolicyType, peer_selects_identity, policy_affects_type, policy_selects_identity},
+    selector::{
+        PolicyType, peer_selects_identity, peer_selects_mesh_identity_slice, policy_affects_type,
+        policy_selects_identity,
+    },
 };
 
 pub(crate) async fn reconcile_policy_with_identity<P: PolicyControllerBpf>(
@@ -56,6 +63,7 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
     let identity_id = identity.spec.id;
     let identities = ctx.identity_store.state();
     let cidr_identities = ctx.cidr_identity_store.state();
+    let mesh_identity_slices = ctx.mesh_identity_slice_store.state();
     let pods = ctx.pod_store.state();
 
     let mut generated_rules = generate_rules_maps(
@@ -63,6 +71,7 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         &identity,
         &identities,
         &cidr_identities,
+        &mesh_identity_slices,
         &pods,
     );
 
@@ -307,6 +316,7 @@ fn generate_rules_maps(
     identity: &Identity,
     identities: &[Arc<Identity>],
     cidr_identities: &[Arc<CIDRIdentity>],
+    mesh_identity_slices: &[Arc<MeshIdentitySlice>],
     pods: &[Arc<Pod>],
 ) -> GeneratedRules {
     let identity_by_id: HashMap<u32, Arc<Identity>> = identities
@@ -327,6 +337,7 @@ fn generate_rules_maps(
         if policy_affects_type(spec, PolicyType::Ingress) {
             let rules = spec.ingress.as_deref().unwrap_or(&[]);
             for rule in rules {
+                let rule_specs = rule_specs_from_ports(identity, pods, rule.ports.as_ref());
                 let peer_ids = peer_ids_for_rule(&policy_ns, rule.from.as_ref(), identities);
                 for peer_id in peer_ids {
                     let rule_specs = rule_specs_for_peer(
@@ -344,7 +355,6 @@ fn generate_rules_maps(
                 }
 
                 if let Some(peers) = rule.from.as_ref() {
-                    let rule_specs = rule_specs_from_ports(identity, pods, rule.ports.as_ref());
                     for peer in peers {
                         let Some(ip_block) = &peer.ip_block else {
                             continue;
@@ -359,12 +369,22 @@ fn generate_rules_maps(
                         );
                     }
                 }
+                let peer_endpoints =
+                    peer_endpoints_for_rule(&policy_ns, rule.from.as_ref(), mesh_identity_slices);
+                add_cidr_rule_specs_for_peer_endpoints(
+                    &peer_endpoints,
+                    identity.spec.id,
+                    PolicyDirection::Ingress,
+                    rule.ports.as_ref(),
+                    &mut generated_rules.cidr_rules,
+                );
             }
         }
 
         if policy_affects_type(spec, PolicyType::Egress) {
             let rules = spec.egress.as_deref().unwrap_or(&[]);
             for rule in rules {
+                let rule_specs = rule_specs_from_ports(identity, pods, rule.ports.as_ref());
                 let peer_ids = peer_ids_for_rule(&policy_ns, rule.to.as_ref(), identities);
                 for peer_id in peer_ids {
                     let rule_specs = rule_specs_for_peer(
@@ -382,7 +402,6 @@ fn generate_rules_maps(
                 }
 
                 if let Some(peers) = rule.to.as_ref() {
-                    let rule_specs = rule_specs_from_ports(identity, pods, rule.ports.as_ref());
                     for peer in peers {
                         let Some(ip_block) = &peer.ip_block else {
                             continue;
@@ -397,6 +416,15 @@ fn generate_rules_maps(
                         );
                     }
                 }
+                let peer_endpoints =
+                    peer_endpoints_for_rule(&policy_ns, rule.to.as_ref(), mesh_identity_slices);
+                add_cidr_rule_specs_for_peer_endpoints(
+                    &peer_endpoints,
+                    identity.spec.id,
+                    PolicyDirection::Egress,
+                    rule.ports.as_ref(),
+                    &mut generated_rules.cidr_rules,
+                );
             }
         }
     }
@@ -434,12 +462,8 @@ fn rule_specs_from_ports(
 
     let mut specs = Vec::new();
     for port in ports {
-        let proto = match port.protocol.as_deref() {
-            None => PolicyProtocol::Tcp.into(),
-            Some("TCP") => PolicyProtocol::Tcp.into(),
-            Some("UDP") => PolicyProtocol::Udp.into(),
-            Some("SCTP") => PolicyProtocol::Sctp.into(),
-            Some(_) => continue,
+        let Some(proto) = parse_policy_proto(port.protocol.as_deref()) else {
+            continue;
         };
 
         let Some(port_value) = &port.port else {
@@ -473,6 +497,66 @@ fn rule_specs_from_ports(
                     specs.push(RuleSpec {
                         proto,
                         port: resolved_port,
+                        action: PolicyAction::Allow.into(),
+                    });
+                }
+            }
+        }
+    }
+
+    specs
+}
+
+fn rule_specs_from_mesh_endpoint_ports(
+    endpoint: &MeshPeerEndpoint,
+    ports: Option<&Vec<NetworkPolicyPort>>,
+) -> Vec<RuleSpec> {
+    let ports = match ports {
+        None => return vec![RuleSpec::default()],
+        Some(p) if p.is_empty() => return vec![RuleSpec::default()],
+        Some(p) => p,
+    };
+
+    let mut specs = Vec::new();
+    for port in ports {
+        let Some(proto) = parse_policy_proto(port.protocol.as_deref()) else {
+            continue;
+        };
+
+        let Some(port_value) = &port.port else {
+            specs.push(RuleSpec {
+                proto,
+                port: ANY_PORT,
+                action: PolicyAction::Allow.into(),
+            });
+            continue;
+        };
+
+        match port_value {
+            IntOrString::Int(port_value) => {
+                if port.end_port.is_some() {
+                    continue;
+                }
+                let Ok(port_value) = u16::try_from(*port_value) else {
+                    continue;
+                };
+                specs.push(RuleSpec {
+                    proto,
+                    port: port_value,
+                    action: PolicyAction::Allow.into(),
+                });
+            }
+            IntOrString::String(port_name) => {
+                for named_port in &endpoint.named_ports {
+                    if named_port.name != *port_name {
+                        continue;
+                    }
+                    if !mesh_named_port_matches_protocol(named_port, proto) {
+                        continue;
+                    }
+                    specs.push(RuleSpec {
+                        proto,
+                        port: named_port.port,
                         action: PolicyAction::Allow.into(),
                     });
                 }
@@ -554,15 +638,28 @@ fn labels_match_identity(identity: &Identity, pod: &Pod) -> bool {
 }
 
 fn container_port_matches_protocol(container_port: &ContainerPort, proto: u8) -> bool {
-    let declared: u8 = match container_port.protocol.as_deref() {
-        None => PolicyProtocol::Tcp.into(),
-        Some("TCP") => PolicyProtocol::Tcp.into(),
-        Some("UDP") => PolicyProtocol::Udp.into(),
-        Some("SCTP") => PolicyProtocol::Sctp.into(),
-        Some(_) => return false,
+    let Some(declared) = parse_policy_proto(container_port.protocol.as_deref()) else {
+        return false;
     };
 
     proto == declared
+}
+
+fn mesh_named_port_matches_protocol(named_port: &MeshIdentityNamedPort, proto: u8) -> bool {
+    let Some(declared) = parse_policy_proto(Some(named_port.protocol.as_str())) else {
+        return false;
+    };
+    proto == declared
+}
+
+fn parse_policy_proto(proto: Option<&str>) -> Option<u8> {
+    match proto {
+        None => Some(PolicyProtocol::Tcp.into()),
+        Some("TCP") => Some(PolicyProtocol::Tcp.into()),
+        Some("UDP") => Some(PolicyProtocol::Udp.into()),
+        Some("SCTP") => Some(PolicyProtocol::Sctp.into()),
+        Some(_) => None,
+    }
 }
 
 fn peer_ids_for_rule(
@@ -600,6 +697,57 @@ fn peer_ids_for_rule(
     }
 
     ids
+}
+
+#[derive(Clone, Debug)]
+struct MeshPeerEndpoint {
+    ip: IpAddr,
+    named_ports: Vec<MeshIdentityNamedPort>,
+}
+
+fn peer_endpoints_for_rule(
+    policy_ns: &str,
+    peers: Option<&Vec<NetworkPolicyPeer>>,
+    mesh_identity_slices: &[Arc<MeshIdentitySlice>],
+) -> Vec<MeshPeerEndpoint> {
+    let Some(peers) = peers else {
+        return Vec::new();
+    };
+    if peers.is_empty() {
+        return Vec::new();
+    }
+
+    let mut endpoints: HashMap<IpAddr, Vec<MeshIdentityNamedPort>> = HashMap::default();
+    for peer in peers {
+        if peer.ip_block.is_some() {
+            continue;
+        }
+        let same_namespace_only = peer.namespace_selector.is_none() && peer.pod_selector.is_some();
+        for slice in mesh_identity_slices {
+            let Some(slice_ns) = slice.namespace() else {
+                continue;
+            };
+            if same_namespace_only && slice_ns.as_str() != policy_ns {
+                continue;
+            }
+            if !peer_selects_mesh_identity_slice(peer, slice.as_ref()) {
+                continue;
+            }
+            for endpoint in &slice.spec.endpoints {
+                let named_ports = endpoints.entry(endpoint.ip).or_default();
+                for named_port in &endpoint.named_ports {
+                    if !named_ports.iter().any(|existing| existing == named_port) {
+                        named_ports.push(named_port.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    endpoints
+        .into_iter()
+        .map(|(ip, named_ports)| MeshPeerEndpoint { ip, named_ports })
+        .collect()
 }
 
 fn cidr_prefixes_for_ip_block(
@@ -671,6 +819,64 @@ fn add_cidr_rule_specs_for_ip_block(
                     .extend_from_slice(rule_specs);
             }
         }
+    }
+}
+
+fn add_cidr_rule_specs_for_peer_ips(
+    peer_ips: &[IpAddr],
+    selected_id: IdentityId,
+    direction: PolicyDirection,
+    rule_specs: &[RuleSpec],
+    cidr_map: &mut HashMap<CidrPolicyMapKey, Vec<RuleSpec>>,
+) {
+    for ip in peer_ips {
+        match ip {
+            IpAddr::V4(ipv4) => {
+                let key = CidrPolicyMapKey::V4(CidrPolicyMapKeyV4 {
+                    prefix_len: 64 + 32,
+                    selected_id,
+                    direction: direction.into(),
+                    _pad: [0; 3],
+                    addr: ipv4.octets(),
+                });
+                cidr_map
+                    .entry(key)
+                    .or_default()
+                    .extend_from_slice(rule_specs);
+            }
+            IpAddr::V6(ipv6) => {
+                let key = CidrPolicyMapKey::V6(CidrPolicyMapKeyV6 {
+                    prefix_len: 64 + 128,
+                    selected_id,
+                    direction: direction.into(),
+                    _pad: [0; 3],
+                    addr: ipv6.to_bits().to_be_bytes(),
+                });
+                cidr_map
+                    .entry(key)
+                    .or_default()
+                    .extend_from_slice(rule_specs);
+            }
+        }
+    }
+}
+
+fn add_cidr_rule_specs_for_peer_endpoints(
+    peer_endpoints: &[MeshPeerEndpoint],
+    selected_id: IdentityId,
+    direction: PolicyDirection,
+    ports: Option<&Vec<NetworkPolicyPort>>,
+    cidr_map: &mut HashMap<CidrPolicyMapKey, Vec<RuleSpec>>,
+) {
+    for endpoint in peer_endpoints {
+        let rule_specs = rule_specs_from_mesh_endpoint_ports(endpoint, ports);
+        add_cidr_rule_specs_for_peer_ips(
+            &[endpoint.ip],
+            selected_id,
+            direction,
+            &rule_specs,
+            cidr_map,
+        );
     }
 }
 
@@ -872,6 +1078,9 @@ mod tests {
     use mesh_cni_crds::v1alpha1::{
         cidridentity::{CIDRIdentity, CidrIdentitySpec},
         identity::IdentitySpec,
+        meshidentityslice::{
+            MeshIdentityEndpoint, MeshIdentityNamedPort, MeshIdentitySlice, MeshIdentitySliceSpec,
+        },
     };
 
     use super::*;
@@ -1092,6 +1301,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut pod_writer, pod_a);
         insert(&mut pod_writer, pod_b);
@@ -1108,6 +1318,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1174,6 +1385,7 @@ mod tests {
         let (policy_store, _policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut identity_writer, identity.clone());
 
@@ -1187,6 +1399,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1260,6 +1473,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1274,6 +1488,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1348,6 +1563,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1362,6 +1578,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1440,6 +1657,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1454,6 +1672,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1530,6 +1749,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1544,6 +1764,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1622,6 +1843,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1636,6 +1858,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1734,6 +1957,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut pod_writer, pod);
         insert(&mut policy_writer, policy);
@@ -1749,6 +1973,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -1873,6 +2098,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -1889,6 +2115,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -2033,6 +2260,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut pod_writer, pod);
         insert(&mut policy_writer, policy);
@@ -2049,6 +2277,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -2163,6 +2392,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, mut cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -2178,6 +2408,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -2267,6 +2498,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, mut cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -2282,6 +2514,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -2312,6 +2545,519 @@ mod tests {
         };
         let rule = rules.get(&rule_key).expect("expected CIDR peer allow rule");
         assert_eq!(rule.action, PolicyAction::Allow as u8);
+    }
+
+    #[test]
+    fn reconcile_egress_peer_selectors_include_mesh_identity_slice_ips() {
+        let identity = Identity::new(
+            "ident-a",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                },
+                id: 7771,
+            },
+        );
+        let mut identity = identity;
+        identity.metadata.namespace = Some("x".into());
+
+        let remote_slice = MeshIdentitySlice::new(
+            "remote-a",
+            MeshIdentitySliceSpec {
+                cluster: "cluster2".into(),
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("app".into(), "remote".into());
+                    labels
+                },
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("team".into(), "blue".into());
+                    labels
+                },
+                endpoints: vec![MeshIdentityEndpoint {
+                    ip: "10.242.0.5".parse().expect("valid ip"),
+                    named_ports: vec![],
+                }],
+            },
+        );
+        let mut remote_slice = remote_slice;
+        remote_slice.metadata.namespace = Some("remote-ns".into());
+
+        let policy = NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some("allow-remote-egress".into()),
+                namespace: Some("x".into()),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("pod".into(), "a".into());
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                egress: Some(vec![NetworkPolicyEgressRule {
+                    to: Some(vec![NetworkPolicyPeer {
+                        namespace_selector: Some(LabelSelector {
+                            match_labels: Some({
+                                let mut labels = BTreeMap::new();
+                                labels.insert("team".into(), "blue".into());
+                                labels
+                            }),
+                            ..Default::default()
+                        }),
+                        pod_selector: Some(LabelSelector {
+                            match_labels: Some({
+                                let mut labels = BTreeMap::new();
+                                labels.insert("app".into(), "remote".into());
+                                labels
+                            }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        protocol: Some("TCP".into()),
+                        port: Some(IntOrString::Int(80)),
+                        ..Default::default()
+                    }]),
+                }]),
+                ..Default::default()
+            }),
+        };
+
+        let (pod_store, _pod_writer) = store::<Pod>();
+        let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
+        let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, mut mesh_identity_slice_writer) =
+            store::<MeshIdentitySlice>();
+
+        insert(&mut policy_writer, policy);
+        insert(&mut identity_writer, identity.clone());
+        insert(&mut mesh_identity_slice_writer, remote_slice);
+
+        let policy_bpf_state = TestPolicyBpfState::new();
+        let index_state = policy_bpf_state.index_state().unwrap();
+        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
+        let ctx = Context {
+            pod_store,
+            policy_store,
+            identity_store,
+            cidr_identity_store,
+            mesh_identity_slice_store,
+            policy_bpf_state,
+            ruleset_state,
+        };
+
+        let ctx = Arc::new(ctx);
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
+
+        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
+        let key = CidrPolicyMapKey::V4(CidrPolicyMapKeyV4 {
+            prefix_len: 64 + 32,
+            selected_id: 7771,
+            direction: PolicyDirection::Egress.into(),
+            _pad: [0; 3],
+            addr: std::net::Ipv4Addr::new(10, 242, 0, 5).octets(),
+        });
+        assert!(
+            cidr.contains_key(&key),
+            "expected mesh identity slice ip to be programmed as egress cidr peer"
+        );
+    }
+
+    #[test]
+    fn reconcile_egress_named_port_uses_mesh_identity_slice_endpoint_ports() {
+        let identity = Identity::new(
+            "ident-a",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                },
+                id: 7772,
+            },
+        );
+        let mut identity = identity;
+        identity.metadata.namespace = Some("x".into());
+
+        // Local selected pod has "http" on 8080, which must not be used for egress mesh peers.
+        let local_pod = Pod {
+            metadata: ObjectMeta {
+                name: Some("a".into()),
+                namespace: Some("x".into()),
+                labels: Some({
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                }),
+                ..Default::default()
+            },
+            spec: Some(PodSpec {
+                containers: vec![Container {
+                    name: "app".into(),
+                    ports: Some(vec![ContainerPort {
+                        name: Some("http".into()),
+                        container_port: 8080,
+                        protocol: Some("TCP".into()),
+                        ..Default::default()
+                    }]),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let remote_slice = MeshIdentitySlice::new(
+            "remote-a",
+            MeshIdentitySliceSpec {
+                cluster: "cluster2".into(),
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("app".into(), "remote".into());
+                    labels
+                },
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("team".into(), "blue".into());
+                    labels
+                },
+                endpoints: vec![MeshIdentityEndpoint {
+                    ip: "10.242.0.5".parse().expect("valid ip"),
+                    named_ports: vec![MeshIdentityNamedPort {
+                        name: "http".into(),
+                        protocol: "TCP".into(),
+                        port: 9090,
+                    }],
+                }],
+            },
+        );
+        let mut remote_slice = remote_slice;
+        remote_slice.metadata.namespace = Some("remote-ns".into());
+
+        let policy = NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some("allow-remote-egress".into()),
+                namespace: Some("x".into()),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("pod".into(), "a".into());
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                egress: Some(vec![NetworkPolicyEgressRule {
+                    to: Some(vec![NetworkPolicyPeer {
+                        namespace_selector: Some(LabelSelector {
+                            match_labels: Some({
+                                let mut labels = BTreeMap::new();
+                                labels.insert("team".into(), "blue".into());
+                                labels
+                            }),
+                            ..Default::default()
+                        }),
+                        pod_selector: Some(LabelSelector {
+                            match_labels: Some({
+                                let mut labels = BTreeMap::new();
+                                labels.insert("app".into(), "remote".into());
+                                labels
+                            }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        protocol: Some("TCP".into()),
+                        port: Some(IntOrString::String("http".into())),
+                        ..Default::default()
+                    }]),
+                }]),
+                ..Default::default()
+            }),
+        };
+
+        let (pod_store, mut pod_writer) = store::<Pod>();
+        let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
+        let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, mut mesh_identity_slice_writer) =
+            store::<MeshIdentitySlice>();
+
+        insert(&mut pod_writer, local_pod);
+        insert(&mut policy_writer, policy);
+        insert(&mut identity_writer, identity.clone());
+        insert(&mut mesh_identity_slice_writer, remote_slice);
+
+        let policy_bpf_state = TestPolicyBpfState::new();
+        let index_state = policy_bpf_state.index_state().unwrap();
+        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
+        let ctx = Context {
+            pod_store,
+            policy_store,
+            identity_store,
+            cidr_identity_store,
+            mesh_identity_slice_store,
+            policy_bpf_state,
+            ruleset_state,
+        };
+
+        let ctx = Arc::new(ctx);
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
+
+        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let key = CidrPolicyMapKey::V4(CidrPolicyMapKeyV4 {
+            prefix_len: 64 + 32,
+            selected_id: 7772,
+            direction: PolicyDirection::Egress.into(),
+            _pad: [0; 3],
+            addr: std::net::Ipv4Addr::new(10, 242, 0, 5).octets(),
+        });
+
+        let ruleset_id = *cidr
+            .get(&key)
+            .expect("expected mesh identity slice ip to be programmed");
+        let allow_key = PolicyRuleKey {
+            ruleset_id,
+            proto: PolicyProtocol::Tcp.into(),
+            _pad0: [0; 3],
+            port: 9090,
+            _pad1: [0; 2],
+        };
+        assert!(
+            rules.contains_key(&allow_key),
+            "expected named port to resolve from mesh endpoint metadata"
+        );
+
+        let wrong_key = PolicyRuleKey {
+            ruleset_id,
+            proto: PolicyProtocol::Tcp.into(),
+            _pad0: [0; 3],
+            port: 8080,
+            _pad1: [0; 2],
+        };
+        assert!(
+            !rules.contains_key(&wrong_key),
+            "expected local selected identity named port not to be used"
+        );
+    }
+
+    #[test]
+    fn reconcile_ingress_named_port_uses_mesh_identity_slice_endpoint_ports() {
+        let identity = Identity::new(
+            "ident-a",
+            IdentitySpec {
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("env".into(), "prod".into());
+                    labels
+                },
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                },
+                id: 7773,
+            },
+        );
+        let mut identity = identity;
+        identity.metadata.namespace = Some("x".into());
+
+        // Local selected pod has "http" on 8080, which must not be used for ingress mesh peers.
+        let local_pod = Pod {
+            metadata: ObjectMeta {
+                name: Some("a".into()),
+                namespace: Some("x".into()),
+                labels: Some({
+                    let mut labels = BTreeMap::new();
+                    labels.insert("pod".into(), "a".into());
+                    labels
+                }),
+                ..Default::default()
+            },
+            spec: Some(PodSpec {
+                containers: vec![Container {
+                    name: "app".into(),
+                    ports: Some(vec![ContainerPort {
+                        name: Some("http".into()),
+                        container_port: 8080,
+                        protocol: Some("TCP".into()),
+                        ..Default::default()
+                    }]),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let remote_slice = MeshIdentitySlice::new(
+            "remote-a",
+            MeshIdentitySliceSpec {
+                cluster: "cluster2".into(),
+                pod_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("app".into(), "remote".into());
+                    labels
+                },
+                namespace_labels: {
+                    let mut labels = BTreeMap::new();
+                    labels.insert("team".into(), "blue".into());
+                    labels
+                },
+                endpoints: vec![MeshIdentityEndpoint {
+                    ip: "10.242.0.5".parse().expect("valid ip"),
+                    named_ports: vec![MeshIdentityNamedPort {
+                        name: "http".into(),
+                        protocol: "TCP".into(),
+                        port: 9090,
+                    }],
+                }],
+            },
+        );
+        let mut remote_slice = remote_slice;
+        remote_slice.metadata.namespace = Some("remote-ns".into());
+
+        let policy = NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some("allow-remote-ingress".into()),
+                namespace: Some("x".into()),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("pod".into(), "a".into());
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                ingress: Some(vec![NetworkPolicyIngressRule {
+                    from: Some(vec![NetworkPolicyPeer {
+                        namespace_selector: Some(LabelSelector {
+                            match_labels: Some({
+                                let mut labels = BTreeMap::new();
+                                labels.insert("team".into(), "blue".into());
+                                labels
+                            }),
+                            ..Default::default()
+                        }),
+                        pod_selector: Some(LabelSelector {
+                            match_labels: Some({
+                                let mut labels = BTreeMap::new();
+                                labels.insert("app".into(), "remote".into());
+                                labels
+                            }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        protocol: Some("TCP".into()),
+                        port: Some(IntOrString::String("http".into())),
+                        ..Default::default()
+                    }]),
+                }]),
+                ..Default::default()
+            }),
+        };
+
+        let (pod_store, mut pod_writer) = store::<Pod>();
+        let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
+        let (identity_store, mut identity_writer) = store::<Identity>();
+        let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, mut mesh_identity_slice_writer) =
+            store::<MeshIdentitySlice>();
+
+        insert(&mut pod_writer, local_pod);
+        insert(&mut policy_writer, policy);
+        insert(&mut identity_writer, identity.clone());
+        insert(&mut mesh_identity_slice_writer, remote_slice);
+
+        let policy_bpf_state = TestPolicyBpfState::new();
+        let index_state = policy_bpf_state.index_state().unwrap();
+        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
+
+        let ctx = Context {
+            pod_store,
+            policy_store,
+            identity_store,
+            cidr_identity_store,
+            mesh_identity_slice_store,
+            policy_bpf_state,
+            ruleset_state,
+        };
+
+        let ctx = Arc::new(ctx);
+        let identity = Arc::new(identity);
+        inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
+
+        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let key = CidrPolicyMapKey::V4(CidrPolicyMapKeyV4 {
+            prefix_len: 64 + 32,
+            selected_id: 7773,
+            direction: PolicyDirection::Ingress.into(),
+            _pad: [0; 3],
+            addr: std::net::Ipv4Addr::new(10, 242, 0, 5).octets(),
+        });
+
+        let ruleset_id = *cidr
+            .get(&key)
+            .expect("expected mesh identity slice ip to be programmed");
+        let allow_key = PolicyRuleKey {
+            ruleset_id,
+            proto: PolicyProtocol::Tcp.into(),
+            _pad0: [0; 3],
+            port: 9090,
+            _pad1: [0; 2],
+        };
+        assert!(
+            rules.contains_key(&allow_key),
+            "expected named port to resolve from mesh endpoint metadata"
+        );
+
+        let wrong_key = PolicyRuleKey {
+            ruleset_id,
+            proto: PolicyProtocol::Tcp.into(),
+            _pad0: [0; 3],
+            port: 8080,
+            _pad1: [0; 2],
+        };
+        assert!(
+            !rules.contains_key(&wrong_key),
+            "expected local selected identity named port not to be used"
+        );
     }
 
     #[test]
@@ -2407,6 +3153,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, mut cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy);
         insert(&mut identity_writer, identity.clone());
@@ -2423,6 +3170,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -2583,6 +3331,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut pod_writer, pod_b);
         insert(&mut policy_writer, policy);
@@ -2599,6 +3348,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -2704,6 +3454,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut pod_writer, pod_b);
         insert(&mut policy_writer, policy);
@@ -2720,6 +3471,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -2825,6 +3577,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut pod_writer, pod_b);
         insert(&mut policy_writer, policy);
@@ -2841,6 +3594,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };
@@ -2960,6 +3714,7 @@ mod tests {
         let (policy_store, mut policy_writer) = store::<NetworkPolicy>();
         let (identity_store, mut identity_writer) = store::<Identity>();
         let (cidr_identity_store, _cidr_identity_writer) = store::<CIDRIdentity>();
+        let (mesh_identity_slice_store, _mesh_identity_slice_writer) = store::<MeshIdentitySlice>();
 
         insert(&mut policy_writer, policy_v1);
         insert(&mut identity_writer, identity.clone());
@@ -2974,6 +3729,7 @@ mod tests {
             policy_store,
             identity_store,
             cidr_identity_store,
+            mesh_identity_slice_store,
             policy_bpf_state,
             ruleset_state,
         };

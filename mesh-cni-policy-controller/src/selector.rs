@@ -11,7 +11,7 @@ use kube::{
     ResourceExt,
     core::{Selector, SelectorExt},
 };
-use mesh_cni_crds::v1alpha1::identity::Identity;
+use mesh_cni_crds::v1alpha1::{identity::Identity, meshidentityslice::MeshIdentitySlice};
 use mesh_cni_ebpf_common::policy::PolicyIndexKey;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +77,29 @@ pub(crate) fn peer_selects_identity(peer: &NetworkPolicyPeer, identity: &Identit
 
     if let Some(selector) = &peer.pod_selector
         && !label_selector_matches(selector, &identity.spec.pod_labels)
+    {
+        return false;
+    }
+
+    peer.pod_selector.is_some() || peer.namespace_selector.is_some()
+}
+
+pub(crate) fn peer_selects_mesh_identity_slice(
+    peer: &NetworkPolicyPeer,
+    slice: &MeshIdentitySlice,
+) -> bool {
+    if peer.ip_block.is_some() && peer.pod_selector.is_none() && peer.namespace_selector.is_none() {
+        return false;
+    }
+
+    if let Some(selector) = &peer.namespace_selector
+        && !label_selector_matches(selector, &slice.spec.namespace_labels)
+    {
+        return false;
+    }
+
+    if let Some(selector) = &peer.pod_selector
+        && !label_selector_matches(selector, &slice.spec.pod_labels)
     {
         return false;
     }

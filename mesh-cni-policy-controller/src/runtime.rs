@@ -9,7 +9,9 @@ use kube::{
     Api, Client, ResourceExt,
     runtime::{Config, Controller, reflector::ObjectRef},
 };
-use mesh_cni_crds::v1alpha1::{cidridentity::CIDRIdentity, identity::Identity};
+use mesh_cni_crds::v1alpha1::{
+    cidridentity::CIDRIdentity, identity::Identity, meshidentityslice::MeshIdentitySlice,
+};
 use mesh_cni_k8s_utils::create_store_and_touched_subscriber;
 use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
@@ -54,6 +56,10 @@ where
                 Api::all(client.clone()),
                 Some(Duration::from_secs(30))
             ),
+            create_store_and_touched_subscriber(
+                Api::all(client.clone()),
+                Some(Duration::from_secs(30))
+            ),
         )
     })
     .await
@@ -65,6 +71,7 @@ where
         (identity_store, identity_subscriber),
         (cidr_identity_store, cidr_identity_subscriber),
         (_namespace_store, namespace_subscriber),
+        (mesh_identity_slice_store, mesh_identity_slice_subscriber),
     ) = store_init;
 
     let index_state = policy_bpf_state.index_state()?;
@@ -77,6 +84,7 @@ where
         policy_store: policy_store.clone(),
         identity_store: identity_store.clone(),
         cidr_identity_store: cidr_identity_store.clone(),
+        mesh_identity_slice_store: mesh_identity_slice_store.clone(),
         policy_bpf_state,
         ruleset_state,
     });
@@ -87,6 +95,7 @@ where
     let mapper_identity_policy_store = policy_store.clone();
     let mapper_identity_identity_store = identity_store.clone();
     let mapper_cidr_identity_identity_store = identity_store.clone();
+    let mapper_mesh_identity_slice_identity_store = identity_store.clone();
     let mapper_namespace_identity_store = identity_store.clone();
     let mapper_namespace_policy_store = policy_store.clone();
 
@@ -243,6 +252,14 @@ where
                 .filter_map(|i| Some(ObjectRef::new(&i.name_any()).within(&i.namespace()?)))
                 .collect()
         };
+    let mesh_identity_slice_mapper =
+        move |_slice: Arc<MeshIdentitySlice>| -> Vec<ObjectRef<Identity>> {
+            mapper_mesh_identity_slice_identity_store
+                .state()
+                .iter()
+                .filter_map(|i| Some(ObjectRef::new(&i.name_any()).within(&i.namespace()?)))
+                .collect()
+        };
 
     let config = Config::default();
     let config = config.debounce(Duration::from_millis(500));
@@ -258,6 +275,7 @@ where
             .watches_shared_stream(identity_trigger, identity_mapper)
             .watches_shared_stream(cidr_identity_subscriber, cidr_identity_mapper)
             .watches_shared_stream(namespace_subscriber, namespace_mapper)
+            .watches_shared_stream(mesh_identity_slice_subscriber, mesh_identity_slice_mapper)
             .graceful_shutdown_on(shutdown(cancel))
             .run(
                 reconcile_policy_with_identity,

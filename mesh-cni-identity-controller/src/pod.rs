@@ -1,13 +1,16 @@
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::runtime::reflector::ObjectRef;
-use kube::{ResourceExt, runtime::controller::Action};
+use kube::{
+    ResourceExt,
+    runtime::{controller::Action, reflector::ObjectRef},
+};
 use tracing::{debug, info};
 
-use crate::controller::DEFAULT_REQUEUE_DURATION;
-use crate::{Error, Result, context::Context};
-use crate::{IdentityBpfState, IdentityControllerExt};
+use crate::{
+    Error, IdentityBpfState, IdentityControllerExt, Result, context::Context,
+    controller::DEFAULT_REQUEUE_DURATION,
+};
 
 const PENDING_POD_IP_REQUEUE_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
 

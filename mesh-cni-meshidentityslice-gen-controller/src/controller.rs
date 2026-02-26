@@ -11,9 +11,14 @@ use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{
     Api, ResourceExt,
     api::{DeleteParams, Patch, PatchParams},
-    runtime::{controller::Action, reflector::ObjectRef, reflector::Store},
+    runtime::{
+        controller::Action,
+        reflector::{ObjectRef, Store},
+    },
 };
-use mesh_cni_crds::v1alpha1::meshidentityslice::{MeshIdentitySlice, MeshIdentitySliceSpec};
+use mesh_cni_crds::v1alpha1::meshidentityslice::{
+    MeshIdentityEndpoint, MeshIdentityNamedPort, MeshIdentitySlice, MeshIdentitySliceSpec,
+};
 use mesh_cni_k8s_utils::sanitize_pod_labels;
 use tracing::{error, info};
 
@@ -99,7 +104,10 @@ fn desired_slices_for_namespace(
     let namespace_name = namespace.name_any();
     let namespace_labels = namespace.labels().clone();
 
-    let mut grouped: HashMap<BTreeMap<String, String>, BTreeSet<IpAddr>> = HashMap::default();
+    let mut grouped: HashMap<
+        BTreeMap<String, String>,
+        BTreeMap<IpAddr, BTreeSet<MeshIdentityNamedPort>>,
+    > = HashMap::default();
 
     for pod in pods.state() {
         if pod.namespace().as_deref() != Some(namespace_name.as_str()) {
@@ -122,19 +130,31 @@ fn desired_slices_for_namespace(
         if ips.is_empty() {
             continue;
         }
+        let named_ports = pod_named_ports(&pod);
 
-        let addrs = grouped.entry(labels).or_default();
-        addrs.extend(ips);
+        let endpoints = grouped.entry(labels).or_default();
+        for ip in ips {
+            endpoints
+                .entry(ip)
+                .or_default()
+                .extend(named_ports.iter().cloned());
+        }
     }
 
     let mut desired = Vec::with_capacity(grouped.len());
-    for (pod_labels, ips) in grouped {
+    for (pod_labels, endpoints_by_ip) in grouped {
         let name = mesh_identity_slice_name(cluster_name, &pod_labels);
         let spec = MeshIdentitySliceSpec {
             cluster: cluster_name.to_string(),
             pod_labels,
             namespace_labels: namespace_labels.clone(),
-            ips: ips.into_iter().collect(),
+            endpoints: endpoints_by_ip
+                .into_iter()
+                .map(|(ip, named_ports)| MeshIdentityEndpoint {
+                    ip,
+                    named_ports: named_ports.into_iter().collect(),
+                })
+                .collect(),
         };
         let mut slice = MeshIdentitySlice::new(&name, spec);
         let labels = slice.labels_mut();
@@ -170,6 +190,39 @@ fn pod_ips(pod: &Pod) -> Vec<IpAddr> {
         .and_then(|ip| IpAddr::from_str(ip).ok())
         .into_iter()
         .collect()
+}
+
+fn pod_named_ports(pod: &Pod) -> BTreeSet<MeshIdentityNamedPort> {
+    let Some(spec) = pod.spec.as_ref() else {
+        return BTreeSet::new();
+    };
+
+    let mut named_ports = BTreeSet::new();
+    for container in &spec.containers {
+        let Some(ports) = container.ports.as_ref() else {
+            continue;
+        };
+        for container_port in ports {
+            let Some(name) = container_port.name.as_ref() else {
+                continue;
+            };
+            let Ok(port) = u16::try_from(container_port.container_port) else {
+                continue;
+            };
+            let protocol = match container_port.protocol.as_deref() {
+                None | Some("TCP") => "TCP",
+                Some("UDP") => "UDP",
+                Some("SCTP") => "SCTP",
+                Some(_) => continue,
+            };
+            named_ports.insert(MeshIdentityNamedPort {
+                name: name.clone(),
+                protocol: protocol.to_string(),
+                port,
+            });
+        }
+    }
+    named_ports
 }
 
 #[cfg(test)]
@@ -295,19 +348,10 @@ mod tests {
                 .pod_labels
                 .contains_key("controller-revision-hash")
         );
-        assert_eq!(slice.spec.ips.len(), 2);
-        assert!(
-            slice
-                .spec
-                .ips
-                .contains(&IpAddr::V4(Ipv4Addr::new(10, 1, 0, 2)))
-        );
-        assert!(
-            slice
-                .spec
-                .ips
-                .contains(&IpAddr::V4(Ipv4Addr::new(10, 1, 0, 3)))
-        );
+        assert_eq!(slice.spec.endpoints.len(), 2);
+        let endpoint_ips: BTreeSet<IpAddr> = slice.spec.endpoints.iter().map(|ep| ep.ip).collect();
+        assert!(endpoint_ips.contains(&IpAddr::V4(Ipv4Addr::new(10, 1, 0, 2))));
+        assert!(endpoint_ips.contains(&IpAddr::V4(Ipv4Addr::new(10, 1, 0, 3))));
     }
 
     #[test]

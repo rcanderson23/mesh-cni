@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 use ahash::HashMap;
 use k8s_openapi::api::{core::v1::Pod, networking::v1::NetworkPolicy};
 use kube::runtime::reflector::Store;
-use mesh_cni_crds::v1alpha1::{cidridentity::CIDRIdentity, identity::Identity};
+use mesh_cni_crds::v1alpha1::{
+    cidridentity::CIDRIdentity, identity::Identity, meshidentityslice::MeshIdentitySlice,
+};
 use mesh_cni_ebpf_common::policy::{
     CidrPolicyMapKey, PolicyIndexKey, PolicyRuleKey, PolicyValue, RulesetId,
 };
@@ -30,6 +32,7 @@ pub struct Context<P: PolicyControllerBpf> {
     pub policy_store: Store<NetworkPolicy>,
     pub identity_store: Store<Identity>,
     pub cidr_identity_store: Store<CIDRIdentity>,
+    pub mesh_identity_slice_store: Store<MeshIdentitySlice>,
     pub policy_bpf_state: P,
     pub ruleset_state: RulesetState,
 }

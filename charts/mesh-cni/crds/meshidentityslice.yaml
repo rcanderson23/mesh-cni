@@ -24,11 +24,39 @@ spec:
               cluster:
                 description: Source cluster that owns this mirrored identity slice
                 type: string
-              ips:
-                description: Backend pod IPs for this identity slice
+              endpoints:
+                description: Backend pod endpoints for this identity slice
                 items:
-                  format: ip
-                  type: string
+                  properties:
+                    ip:
+                      description: Backend pod IP
+                      format: ip
+                      type: string
+                    namedPorts:
+                      description: Named ports declared by this pod endpoint
+                      items:
+                        properties:
+                          name:
+                            description: Named port identifier
+                            type: string
+                          port:
+                            description: Container port value
+                            format: uint16
+                            maximum: 65535.0
+                            minimum: 0.0
+                            type: integer
+                          protocol:
+                            description: Protocol ("TCP", "UDP", or "SCTP")
+                            type: string
+                        required:
+                        - name
+                        - port
+                        - protocol
+                        type: object
+                      type: array
+                  required:
+                  - ip
+                  type: object
                 type: array
               namespaceLabels:
                 additionalProperties:
