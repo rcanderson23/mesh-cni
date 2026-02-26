@@ -106,3 +106,4 @@ gen-crds:
   cargo run --target {{host_target}} -p mesh-cni-crds-gen -- --kind identity > charts/mesh-cni/crds/identity.yaml
   cargo run --target {{host_target}} -p mesh-cni-crds-gen -- --kind cidr-identity > charts/mesh-cni/crds/cidridentity.yaml
   cargo run --target {{host_target}} -p mesh-cni-crds-gen -- --kind cluster > charts/mesh-cni/crds/cluster.yaml
+  cargo run --target {{host_target}} -p mesh-cni-crds-gen -- --kind mesh-identity-slice > charts/mesh-cni/crds/meshidentityslice.yaml

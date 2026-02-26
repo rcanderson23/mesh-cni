@@ -7,7 +7,8 @@ use tokio_util::sync::CancellationToken;
 
 pub struct ClusterControllerState {
     pub cancellation: CancellationToken,
-    pub handle: JoinHandle<()>,
+    pub meshendpoint_handle: JoinHandle<()>,
+    pub meshidentityslice_handle: JoinHandle<()>,
     pub secret_name: String,
     pub secret_key: String,
     pub secret_resource_version: String,

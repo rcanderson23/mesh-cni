@@ -1,0 +1,52 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: meshidentityslices.mesh-cni.dev
+spec:
+  group: mesh-cni.dev
+  names:
+    categories: []
+    kind: MeshIdentitySlice
+    plural: meshidentityslices
+    shortNames: []
+    singular: meshidentityslice
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for MeshIdentitySliceSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              cluster:
+                description: Source cluster that owns this mirrored identity slice
+                type: string
+              ips:
+                description: Backend pod IPs for this identity slice
+                items:
+                  format: ip
+                  type: string
+                type: array
+              namespaceLabels:
+                additionalProperties:
+                  type: string
+                description: Snapshot of namespace labels for namespaceSelector evaluation
+                type: object
+              podLabels:
+                additionalProperties:
+                  type: string
+                description: Canonical pod labels matched by this identity slice
+                type: object
+            required:
+            - cluster
+            type: object
+        required:
+        - spec
+        title: MeshIdentitySlice
+        type: object
+    served: true
+    storage: true
+    subresources: {}

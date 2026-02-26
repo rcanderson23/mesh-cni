@@ -7,6 +7,7 @@ enum CrdKind {
     Identity,
     CidrIdentity,
     Cluster,
+    MeshIdentitySlice,
 }
 
 #[derive(Parser, Debug)]
@@ -26,5 +27,6 @@ fn main() -> mesh_cni_crds::Result<()> {
         CrdKind::Identity => mesh_cni_crds::crd_gen_identity(),
         CrdKind::CidrIdentity => mesh_cni_crds::crd_gen_cidridentity(),
         CrdKind::Cluster => mesh_cni_crds::crd_gen_cluster(),
+        CrdKind::MeshIdentitySlice => mesh_cni_crds::crd_gen_meshidentityslice(),
     }
 }

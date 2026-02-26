@@ -1,0 +1,20 @@
+[package]
+name = "mesh-cni-meshidentityslice-gen-controller"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+kube = { workspace = true }
+futures = { workspace = true }
+k8s-openapi = { workspace = true }
+mesh-cni-crds = { path = "../mesh-cni-crds"}
+mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+k8s-openapi = { workspace = true, features = ["v1_34"] }

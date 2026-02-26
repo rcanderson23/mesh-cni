@@ -44,7 +44,7 @@ pub async fn start_meshendpoint_gen_controller(
 
     let controller_config = kube::runtime::Config::default().concurrency(10);
 
-    info!("starting mesh service controller");
+    info!("starting meshendpoint-gen-controller");
     let h = tokio::spawn(
         Controller::new(
             service_api,

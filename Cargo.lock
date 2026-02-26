@@ -1783,6 +1783,7 @@ dependencies = [
  "mesh-cni-crds",
  "mesh-cni-k8s-utils",
  "mesh-cni-meshendpoint-gen-controller",
+ "mesh-cni-meshidentityslice-gen-controller",
  "schemars",
  "serde",
  "serde_json",
@@ -1915,6 +1916,22 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-opentelemetry",
+]
+
+[[package]]
+name = "mesh-cni-meshidentityslice-gen-controller"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "mesh-cni-crds",
+ "mesh-cni-k8s-utils",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

@@ -8,6 +8,7 @@ license.workspace = true
 mesh-cni-crds = { path = "../mesh-cni-crds" }
 mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
 mesh-cni-meshendpoint-gen-controller = { path = "../mesh-cni-meshendpoint-gen-controller" }
+mesh-cni-meshidentityslice-gen-controller = { path = "../mesh-cni-meshidentityslice-gen-controller" }
 futures = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }
