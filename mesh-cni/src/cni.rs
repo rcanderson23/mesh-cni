@@ -15,20 +15,20 @@ use mesh_cni_plugin::{
 use serde_json::Value;
 use tracing::{info, warn};
 
-use crate::{Result, config::AgentArgs};
+use crate::{Result, config::CniSettings};
 
 const CONFLIST_NAME: &str = "05-mesh.conflist";
 
-pub async fn ensure_cni_preconditions(args: &AgentArgs) -> Result<()> {
-    ensure_cni_log_dir(&args.cni_plugin_log_dir)?;
-    ensure_cni_bin(&args.cni_bin_dir, &args.cni_plugin_bin)?;
-    let conf = if args.chained {
+pub async fn ensure_cni_preconditions(settings: &CniSettings) -> Result<()> {
+    ensure_cni_log_dir(&settings.plugin_log_dir)?;
+    ensure_cni_bin(&settings.bin_dir, &settings.plugin_bin)?;
+    let conf = if settings.chained {
         // first startup can have issues where the main CNI has not written its
         // conf yet so retry a few times before completely failing
         let mut attempts = 0;
         let max_attempts = 3;
         let existing_conf = loop {
-            match get_existing_conflist(&args.cni_conf_dir) {
+            match get_existing_conflist(&settings.conf_dir) {
                 Ok(c) => break c,
                 Err(e) => {
                     if attempts >= max_attempts {
@@ -44,7 +44,7 @@ pub async fn ensure_cni_preconditions(args: &AgentArgs) -> Result<()> {
     } else {
         default_cni_config()?
     };
-    ensure_cni_conf(&args.cni_conf_dir, &conf)?;
+    ensure_cni_conf(&settings.conf_dir, &conf)?;
     Ok(())
 }
 

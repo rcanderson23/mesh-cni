@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
     match cli.command {
         mesh_cni::config::Commands::Agent(agent_args) => {
             system::ensure_proxy_settings(&agent_args.proxy_settings)?;
-            cni::ensure_cni_preconditions(&agent_args).await?;
+            cni::ensure_cni_preconditions(&agent_args.cni_settings).await?;
 
             let mut readiness_handle = tokio::spawn(http::serve(
                 agent_args.metrics_address,

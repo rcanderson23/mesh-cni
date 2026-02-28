@@ -48,22 +48,6 @@ pub struct AgentArgs {
     #[arg(long, env = "NODE_NAME")]
     pub node_name: String,
 
-    /// CNI Bin directory
-    #[arg(long, env = "CNI_BIN_DIR", default_value = "/opt/cni/bin")]
-    pub cni_bin_dir: PathBuf,
-
-    /// CNI configuration directory
-    #[arg(long, env = "CNI_CONF_DIR", default_value = "/etc/cni/net.d")]
-    pub cni_conf_dir: PathBuf,
-
-    /// CNI plugin log path
-    #[arg(long, env = "CNI_PLUGIN_LOG_PATH", default_value = "/var/log/mesh-cni")]
-    pub cni_plugin_log_dir: PathBuf,
-
-    /// CNI plugin bin path
-    #[arg(long, env = "CNI_PLUGIN_BIN", default_value = "/app/mesh-cni-plugin")]
-    pub cni_plugin_bin: PathBuf,
-
     /// Netns directory
     #[arg(
         long,
@@ -76,12 +60,11 @@ pub struct AgentArgs {
     #[arg(long, env = "NETNS_DIR", default_value = "/var/run/mesh/netns")]
     pub netns_dir: PathBuf,
 
-    /// Determines if CNI should be configured as chained
-    #[arg(long, env = "CHAINED", default_value = "false")]
-    pub chained: bool,
-
     #[clap(flatten)]
     pub proxy_settings: ProxySettings,
+
+    #[clap(flatten)]
+    pub cni_settings: CniSettings,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -99,6 +82,45 @@ pub struct NodePortSettings {
     /// Determines the end port range for NodePort services
     #[arg(long, env = "NODE_PORT_END", default_value = "32767")]
     pub node_port_end: u16,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct CniSettings {
+    /// CNI Bin directory
+    #[arg(
+        long = "cni-bin-dir",
+        env = "CNI_BIN_DIR",
+        default_value = "/opt/cni/bin"
+    )]
+    pub bin_dir: PathBuf,
+
+    /// CNI configuration directory
+    #[arg(
+        long = "cni-conf-dir",
+        env = "CNI_CONF_DIR",
+        default_value = "/etc/cni/net.d"
+    )]
+    pub conf_dir: PathBuf,
+
+    /// CNI plugin log path
+    #[arg(
+        long = "cni-plugin-log-dir",
+        env = "CNI_PLUGIN_LOG_PATH",
+        default_value = "/var/log/mesh-cni"
+    )]
+    pub plugin_log_dir: PathBuf,
+
+    /// CNI plugin bin path
+    #[arg(
+        long = "cni-plugin-bin",
+        env = "CNI_PLUGIN_BIN",
+        default_value = "/app/mesh-cni-plugin"
+    )]
+    pub plugin_bin: PathBuf,
+
+    /// Determines if CNI should be configured as chained
+    #[arg(long, env = "CHAINED", default_value = "false")]
+    pub chained: bool,
 }
 
 #[derive(Parser, Debug, Clone)]
