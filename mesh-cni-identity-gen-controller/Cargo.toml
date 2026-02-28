@@ -16,7 +16,7 @@ schemars = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 serde_json = { workspace = true }
-sha2 = {version = "0.10.9"}
+sha2 = { workspace = true }
 rand = { workspace = true }
 ipnetwork = { workspace = true }
 thiserror = { workspace = true }

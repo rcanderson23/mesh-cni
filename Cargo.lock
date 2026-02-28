@@ -1928,6 +1928,7 @@ dependencies = [
  "mesh-cni-crds",
  "mesh-cni-k8s-utils",
  "serde_json",
+ "sha2",
  "thiserror 2.0.17",
  "tokio",
  "tokio-util",

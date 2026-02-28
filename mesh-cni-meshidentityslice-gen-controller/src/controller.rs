@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    hash::{Hash, Hasher},
     net::IpAddr,
     str::FromStr,
     sync::Arc,
@@ -20,6 +19,7 @@ use mesh_cni_crds::v1alpha1::meshidentityslice::{
     MeshIdentityEndpoint, MeshIdentityNamedPort, MeshIdentitySlice, MeshIdentitySliceSpec,
 };
 use mesh_cni_k8s_utils::sanitize_pod_labels;
+use sha2::{Digest, Sha256};
 use tracing::{error, info};
 
 use crate::{Error, Result, context::Context};
@@ -68,7 +68,7 @@ pub async fn reconcile(namespace: Arc<Namespace>, ctx: Arc<Context>) -> Result<A
         return Ok(Action::await_change());
     }
 
-    let desired = desired_slices_for_namespace(&namespace, &ctx.pods, &ctx.cluster_name);
+    let desired = desired_slices_for_namespace(&namespace, &ctx.pods, &ctx.cluster_name)?;
     let desired_names: HashSet<String> = desired.iter().map(|s| s.name_any()).collect();
     let params = PatchParams::apply(MANAGER).force();
 
@@ -100,7 +100,7 @@ fn desired_slices_for_namespace(
     namespace: &Namespace,
     pods: &Store<Pod>,
     cluster_name: &str,
-) -> Vec<MeshIdentitySlice> {
+) -> Result<Vec<MeshIdentitySlice>> {
     let namespace_name = namespace.name_any();
     let namespace_labels = namespace.labels().clone();
 
@@ -143,7 +143,7 @@ fn desired_slices_for_namespace(
 
     let mut desired = Vec::with_capacity(grouped.len());
     for (pod_labels, endpoints_by_ip) in grouped {
-        let name = mesh_identity_slice_name(cluster_name, &pod_labels);
+        let name = mesh_identity_slice_name(cluster_name, &namespace_labels, &pod_labels)?;
         let spec = MeshIdentitySliceSpec {
             cluster: cluster_name.to_string(),
             pod_labels,
@@ -161,15 +161,18 @@ fn desired_slices_for_namespace(
         labels.insert(LABEL_CLUSTER_OWNER.to_string(), cluster_name.to_string());
         desired.push(slice);
     }
-    desired
+    Ok(desired)
 }
 
-fn mesh_identity_slice_name(cluster_name: &str, pod_labels: &BTreeMap<String, String>) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    cluster_name.hash(&mut hasher);
-    pod_labels.hash(&mut hasher);
-    let digest = hasher.finish();
-    format!("{}-{:016x}", cluster_name, digest)
+fn mesh_identity_slice_name(
+    cluster_name: &str,
+    namespace_labels: &BTreeMap<String, String>,
+    pod_labels: &BTreeMap<String, String>,
+) -> Result<String> {
+    let bytes = serde_json::to_vec(&(cluster_name, namespace_labels, pod_labels))?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn pod_ips(pod: &Pod) -> Vec<IpAddr> {
@@ -331,11 +334,12 @@ mod tests {
         );
         let pods = make_pod_store(vec![pod_a, pod_b]);
 
-        let desired = desired_slices_for_namespace(&ns, &pods, "cluster2");
+        let desired = desired_slices_for_namespace(&ns, &pods, "cluster2").expect("desired");
         assert_eq!(desired.len(), 1);
 
         let slice = &desired[0];
-        assert!(slice.name_any().starts_with("cluster2-"));
+        assert_eq!(slice.name_any().len(), 64);
+        assert!(slice.name_any().chars().all(|c| c.is_ascii_hexdigit()));
         assert_eq!(slice.spec.cluster, "cluster2");
         assert_eq!(
             slice.spec.namespace_labels.get("env"),
@@ -377,7 +381,7 @@ mod tests {
         );
         let pods = make_pod_store(vec![pod_a, pod_b]);
 
-        let desired = desired_slices_for_namespace(&ns, &pods, "cluster2");
+        let desired = desired_slices_for_namespace(&ns, &pods, "cluster2").expect("desired");
         assert_eq!(desired.len(), 2);
 
         let apps: BTreeSet<String> = desired
@@ -415,7 +419,7 @@ mod tests {
         );
         let pods = make_pod_store(vec![host_network, pending]);
 
-        let desired = desired_slices_for_namespace(&ns, &pods, "cluster2");
+        let desired = desired_slices_for_namespace(&ns, &pods, "cluster2").expect("desired");
         assert!(desired.is_empty());
     }
 
@@ -461,8 +465,13 @@ mod tests {
         let labels: BTreeMap<String, String> = [("app".to_string(), "demo".to_string())]
             .into_iter()
             .collect();
-        let first = mesh_identity_slice_name("cluster2", &labels);
-        let second = mesh_identity_slice_name("cluster2", &labels);
+        let namespace_labels: BTreeMap<String, String> = [("env".to_string(), "test".to_string())]
+            .into_iter()
+            .collect();
+        let first =
+            mesh_identity_slice_name("cluster2", &namespace_labels, &labels).expect("name");
+        let second =
+            mesh_identity_slice_name("cluster2", &namespace_labels, &labels).expect("name");
         assert_eq!(first, second);
     }
 }
