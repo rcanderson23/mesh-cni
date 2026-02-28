@@ -1,5 +1,5 @@
 use clap::Parser;
-use mesh_cni::{Result, agent, cni, config::Cli, controller, http};
+use mesh_cni::{Result, agent, cni, config::Cli, controller, http, system};
 use tokio::task::JoinError;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -14,6 +14,7 @@ async fn main() -> Result<()> {
     let ready = tokio_util::sync::CancellationToken::new();
     match cli.command {
         mesh_cni::config::Commands::Agent(agent_args) => {
+            system::ensure_proxy_settings(&agent_args.proxy_settings)?;
             cni::ensure_cni_preconditions(&agent_args).await?;
 
             let mut readiness_handle = tokio::spawn(http::serve(

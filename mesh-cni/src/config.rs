@@ -79,6 +79,26 @@ pub struct AgentArgs {
     /// Determines if CNI should be configured as chained
     #[arg(long, env = "CHAINED", default_value = "false")]
     pub chained: bool,
+
+    #[clap(flatten)]
+    pub proxy_settings: ProxySettings,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct ProxySettings {
+    #[clap(flatten)]
+    pub node_port_settings: NodePortSettings,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct NodePortSettings {
+    /// Determines the start port range for NodePort services
+    #[arg(long, env = "NODE_PORT_START", default_value = "30000")]
+    pub node_port_start: u16,
+
+    /// Determines the end port range for NodePort services
+    #[arg(long, env = "NODE_PORT_END", default_value = "32767")]
+    pub node_port_end: u16,
 }
 
 #[derive(Parser, Debug, Clone)]
