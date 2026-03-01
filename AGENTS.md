@@ -14,7 +14,7 @@
 - `just container`: build Docker image for the CNI.
 - `just run-local`: build, create kind cluster, load image, install Helm chart, and restart.
 - `just reset-cluster`: tear down and recreate local cluster with current changes.
-- `just multi-run-local`: build and deploy both multi-cluster kind environments.
+- `just multi-run-local`: build and deploy multi-cluster kind environments.
 - `just multi-reset-cluster`: recreate multi-cluster environments from scratch.
 
 ## Coding Style & Naming Conventions
