@@ -82,6 +82,10 @@ pub struct NodePortSettings {
     /// Determines the end port range for NodePort services
     #[arg(long, env = "NODE_PORT_END", default_value = "32767")]
     pub node_port_end: u16,
+
+    /// Regex used to select host interfaces for NodePort service tc attachments
+    #[arg(long, env = "NODE_PORT_IFACE_REGEX", default_value = "^eth.*$")]
+    pub node_port_iface_regex: String,
 }
 
 #[derive(Parser, Debug, Clone)]

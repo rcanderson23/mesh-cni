@@ -67,7 +67,13 @@ pub async fn start(
     let service_endpoint_v4 = ServiceEndpoint::new(service_map_v4, endpoint_map_v4);
     let service_endpoint_v6 = ServiceEndpoint::new(service_map_v6, endpoint_map_v6);
     let state = ServiceEndpointState::new(service_endpoint_v4, service_endpoint_v6);
-    bpf::service::run(kube_client.clone(), state.clone(), cancel.clone()).await?;
+    bpf::service::run(
+        kube_client.clone(),
+        state.clone(),
+        args.proxy_settings.node_port_settings.clone(),
+        cancel.clone(),
+    )
+    .await?;
     let service_server = http::grpc::service::server(state);
 
     info!("starting conntrack cleanup background process");

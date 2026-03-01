@@ -468,8 +468,7 @@ mod tests {
         let namespace_labels: BTreeMap<String, String> = [("env".to_string(), "test".to_string())]
             .into_iter()
             .collect();
-        let first =
-            mesh_identity_slice_name("cluster2", &namespace_labels, &labels).expect("name");
+        let first = mesh_identity_slice_name("cluster2", &namespace_labels, &labels).expect("name");
         let second =
             mesh_identity_slice_name("cluster2", &namespace_labels, &labels).expect("name");
         assert_eq!(first, second);

@@ -1,7 +1,9 @@
 use core::net::Ipv4Addr;
 
 use aya_ebpf::{
-    bindings::bpf_sock_addr, helpers::generated::bpf_get_prandom_u32, programs::SockAddrContext,
+    bindings::{TC_ACT_PIPE, bpf_sock_addr},
+    helpers::generated::bpf_get_prandom_u32,
+    programs::{SockAddrContext, TcContext},
 };
 use aya_log_ebpf::debug;
 use mesh_cni_ebpf_common::service::{EndpointKey, ServiceKeyV4};
@@ -98,4 +100,9 @@ fn build_service_key(ctx: &SockAddrContext, ptr: *mut bpf_sock_addr) -> Result<S
 fn get_position(count: u16) -> u16 {
     let rand = unsafe { bpf_get_prandom_u32() as u16 };
     rand % count
+}
+
+#[inline]
+pub fn try_mesh_cni_nodeport_ingress(_ctx: TcContext) -> Result<i32, i32> {
+    Ok(TC_ACT_PIPE)
 }

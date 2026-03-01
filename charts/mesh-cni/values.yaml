@@ -31,6 +31,10 @@ agent:
   cniConfDir: /host/etc/cni/net.d
   cniPluginLogDir: /host/var/log/mesh-cni
   socketPath: /var/run/mesh/mesh.sock
+  nodePort:
+    start: 30000
+    end: 32767
+    ifaceRegex: "^eth.*$"
   # This is for setting Kubernetes Annotations to a Pod.
   # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/
   podAnnotations: {}

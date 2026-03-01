@@ -15,7 +15,8 @@ use crate::{
     bpf::{
         BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_FS_DIR, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR,
         BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_EGRESS_TC,
-        BPF_PROGRAM_INGRESS_TC, BpfNamePath, POLICY_MAPS_LIST, PROG_LIST, SERVICE_MAPS_LIST,
+        BPF_PROGRAM_INGRESS_TC, BPF_PROGRAM_NODEPORT_INGRESS_TC, BpfNamePath, POLICY_MAPS_LIST,
+        PROG_LIST, SERVICE_MAPS_LIST,
     },
 };
 
@@ -42,6 +43,9 @@ pub fn init_bpf() -> Result<()> {
 
     info!("ensuring egress program loaded and pinned");
     ensure_tc_program(&mut ebpf, BPF_PROGRAM_EGRESS_TC)?;
+
+    info!("ensuring nodeport ingress program loaded and pinned");
+    ensure_tc_program(&mut ebpf, BPF_PROGRAM_NODEPORT_INGRESS_TC)?;
 
     pin_maps(&mut ebpf, &SERVICE_MAPS_LIST)?;
     pin_maps(&mut ebpf, &POLICY_MAPS_LIST)?;
@@ -144,11 +148,21 @@ fn start_ebpf_logger() -> Result<()> {
     let info = egress.info()?;
     start_ebpf_logger_from_prog_id(info.id())?;
 
+    let nodeport_ingress = SchedClassifier::from_pin(BPF_PROGRAM_NODEPORT_INGRESS_TC.path())?;
+    let info = nodeport_ingress.info()?;
+    start_ebpf_logger_from_prog_id(info.id())?;
+
     Ok(())
 }
 
 fn start_ebpf_logger_from_prog_id(program_id: u32) -> Result<()> {
-    let logger = aya_log::EbpfLogger::init_from_id(program_id)?;
+    let logger = match aya_log::EbpfLogger::init_from_id(program_id) {
+        Ok(l) => l,
+        Err(e) => {
+            warn!(%e, "unable to start ebpf logger from program");
+            return Ok(());
+        }
+    };
     let mut logger =
         tokio::io::unix::AsyncFd::with_interest(logger, tokio::io::Interest::READABLE)?;
     tokio::spawn(async move {

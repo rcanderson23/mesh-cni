@@ -57,6 +57,9 @@ spec:
           - --cni-bin-dir={{ .Values.agent.cniBinDir }}
           - --cni-conf-dir={{ .Values.agent.cniConfDir }}
           - --cni-plugin-log-dir={{ .Values.agent.cniPluginLogDir }}
+          - --node-port-start={{ .Values.agent.nodePort.start }}
+          - --node-port-end={{ .Values.agent.nodePort.end }}
+          - --node-port-iface-regex={{ .Values.agent.nodePort.ifaceRegex }}
           - --agent-socket-path={{ .Values.agent.socketPath }}
           {{- if .Values.agent.chained }}
           - --chained

@@ -1,3 +1,4 @@
+mod nodeport_iface;
 mod state;
 
 use aya::maps::{HashMap, Map, MapData};
@@ -13,6 +14,7 @@ use tracing::info;
 use crate::{
     Result,
     bpf::{BPF_MAP_ENDPOINTS_V4, BPF_MAP_ENDPOINTS_V6, BPF_MAP_SERVICES_V4, BPF_MAP_SERVICES_V6},
+    config::NodePortSettings,
 };
 type ServiceMapV4 = HashMap<MapData, ServiceKeyV4, ServiceValue>;
 type ServiceMapV6 = HashMap<MapData, ServiceKeyV6, ServiceValue>;
@@ -22,6 +24,7 @@ type EndpointMapV6 = HashMap<MapData, EndpointKey, EndpointValueV6>;
 pub async fn run<SE4, SE6>(
     kube_client: Client,
     service_bpf_state: ServiceEndpointState<SE4, SE6>,
+    node_port_settings: NodePortSettings,
     cancel: CancellationToken,
 ) -> Result<()>
 where
@@ -34,9 +37,11 @@ where
         + Sync
         + 'static,
 {
-    let service_controller = start_bpf_service_controller(kube_client, service_bpf_state, cancel);
+    let service_controller =
+        start_bpf_service_controller(kube_client, service_bpf_state, cancel.child_token());
 
     tokio::spawn(service_controller);
+    nodeport_iface::start_nodeport_iface_reconciler(node_port_settings, cancel.child_token())?;
 
     Ok(())
 }

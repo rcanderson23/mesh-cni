@@ -43,11 +43,11 @@ kind-down:
 
 install:
   cluster_url="https://$(kubectl --context kind-{{name}} get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' | tr -d '\n'):6443"; \
-  helm upgrade --install {{name}} ./charts/mesh-cni -n kube-system --set=agent.image.tag=latest --set-string=agent.clusterURL="${cluster_url}" --kube-context=kind-{{name}}
+  helm upgrade --install {{name}} --create-namespace ./charts/mesh-cni -n mesh-cni --set=agent.image.tag=latest --set-string=agent.clusterURL="${cluster_url}" --kube-context=kind-{{name}}
 
 restart:
-  kubectl rollout restart daemonset -n kube-system {{name}}-agent
-  kubectl rollout restart deployment -n kube-system {{name}}-controller
+  kubectl rollout restart daemonset -n mesh-cni {{name}}-agent
+  kubectl rollout restart deployment -n mesh-cni {{name}}-controller
 
 load-image:
     kind load docker-image {{container_image}}:latest --name={{name}}
