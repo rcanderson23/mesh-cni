@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
     time::Duration,
@@ -17,13 +17,14 @@ use tracing::{info, warn};
 
 use crate::{
     Result,
-    bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_NODEPORT_INGRESS_TC},
+    bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_NODEPORT_EGRESS_TC, BPF_PROGRAM_NODEPORT_INGRESS_TC},
     config::NodePortSettings,
 };
 
 const HOST_NET_IFACE_DIR: &str = "/sys/class/net";
 const NODEPORT_LINK_PREFIX: &str = "mesh_cni_nodeport_";
-const NODEPORT_LINK_SUFFIX: &str = "_ingress";
+const NODEPORT_LINK_SUFFIX_INGRESS: &str = "_ingress";
+const NODEPORT_LINK_SUFFIX_EGRESS: &str = "_egress";
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub fn start_nodeport_iface_reconciler(
@@ -41,11 +42,12 @@ pub fn start_nodeport_iface_reconciler(
         regex = %node_port_settings.node_port_iface_regex,
         "starting nodeport interface reconciler"
     );
+    reconcile(&iface_regex)?;
 
     let mut interval = tokio::time::interval(RECONCILE_INTERVAL);
 
+    // TODO: investigate if this can event driven using rtnetlink
     tokio::spawn(async move {
-        // TODO: investigate if this can event driven using rtnetlink
         loop {
             if let Err(err) = reconcile(&iface_regex) {
                 warn!(%err, "nodeport interface reconciliation failed");
@@ -68,7 +70,9 @@ fn reconcile(iface_regex: &Regex) -> Result<()> {
     let current_links = get_pinned_iface_links()?;
 
     for iface in &desired_ifaces {
-        ensure_nodeport_attached(iface)?;
+        ensure_ipv4_accept_local_enabled(iface)?;
+        ensure_nodeport_attached(iface, TcAttachType::Ingress)?;
+        ensure_nodeport_attached(iface, TcAttachType::Egress)?;
     }
 
     for (iface, link_path) in current_links {
@@ -86,6 +90,17 @@ fn reconcile(iface_regex: &Regex) -> Result<()> {
     Ok(())
 }
 
+fn ensure_ipv4_accept_local_enabled(iface: &str) -> Result<()> {
+    let path = format!("/proc/sys/net/ipv4/conf/{iface}/accept_local");
+    let current = fs::read_to_string(&path)?;
+    if current.trim() == "1" {
+        return Ok(());
+    }
+    fs::write(&path, b"1")?;
+    info!(iface = %iface, path = %path, "enabled ipv4 accept_local for nodeport forwarding");
+    Ok(())
+}
+
 fn get_matching_ifaces(iface_regex: &Regex) -> Result<BTreeSet<String>> {
     let mut names = BTreeSet::new();
     for entry in fs::read_dir(HOST_NET_IFACE_DIR)? {
@@ -100,8 +115,8 @@ fn get_matching_ifaces(iface_regex: &Regex) -> Result<BTreeSet<String>> {
     Ok(names)
 }
 
-fn get_pinned_iface_links() -> Result<BTreeMap<String, PathBuf>> {
-    let mut links = BTreeMap::new();
+fn get_pinned_iface_links() -> Result<Vec<(String, PathBuf)>> {
+    let mut links = Vec::new();
     for entry in fs::read_dir(BPF_MESH_LINKS_DIR)? {
         let entry = entry?;
         let path = entry.path();
@@ -111,33 +126,39 @@ fn get_pinned_iface_links() -> Result<BTreeMap<String, PathBuf>> {
         let Some(iface) = iface_name_from_link_file(&file_name) else {
             continue;
         };
-        links.insert(iface, path);
+        links.push((iface, path));
     }
     Ok(links)
 }
 
 fn iface_name_from_link_file(file_name: &str) -> Option<String> {
-    let iface = file_name
-        .strip_prefix(NODEPORT_LINK_PREFIX)?
-        .strip_suffix(NODEPORT_LINK_SUFFIX)?;
+    let without_prefix = file_name.strip_prefix(NODEPORT_LINK_PREFIX)?;
+    let iface = without_prefix
+        .strip_suffix(NODEPORT_LINK_SUFFIX_INGRESS)
+        .or_else(|| without_prefix.strip_suffix(NODEPORT_LINK_SUFFIX_EGRESS))?;
     if iface.is_empty() {
         return None;
     }
     Some(iface.to_string())
 }
 
-fn ensure_nodeport_attached(iface: &str) -> Result<()> {
-    let pin_path = pin_path_for_iface(iface);
+fn ensure_nodeport_attached(iface: &str, attach_type: TcAttachType) -> Result<()> {
+    let pin_path = pin_path_for_iface(iface, attach_type);
     if pin_path.try_exists()? {
         return Ok(());
     }
 
     let _ = tc::qdisc_add_clsact(iface);
 
-    let mut prog = SchedClassifier::from_pin(BPF_PROGRAM_NODEPORT_INGRESS_TC.path())?;
+    let prog_path = match attach_type {
+        TcAttachType::Ingress => BPF_PROGRAM_NODEPORT_INGRESS_TC.path(),
+        TcAttachType::Egress => BPF_PROGRAM_NODEPORT_EGRESS_TC.path(),
+        TcAttachType::Custom(_) => BPF_PROGRAM_NODEPORT_INGRESS_TC.path(),
+    };
+    let mut prog = SchedClassifier::from_pin(prog_path)?;
 
-    info!(iface = %iface, "attaching nodeport ingress tc program");
-    let link_id = prog.attach(iface, TcAttachType::Ingress)?;
+    info!(iface = %iface, ?attach_type, "attaching nodeport tc program");
+    let link_id = prog.attach(iface, attach_type)?;
     let link = prog.take_link(link_id)?;
     let link: FdLink = link.try_into()?;
     link.pin(pin_path)?;
@@ -145,10 +166,13 @@ fn ensure_nodeport_attached(iface: &str) -> Result<()> {
     Ok(())
 }
 
-fn pin_path_for_iface(iface: &str) -> PathBuf {
-    PathBuf::from(BPF_MESH_LINKS_DIR).join(format!(
-        "{NODEPORT_LINK_PREFIX}{iface}{NODEPORT_LINK_SUFFIX}"
-    ))
+fn pin_path_for_iface(iface: &str, attach_type: TcAttachType) -> PathBuf {
+    let suffix = match attach_type {
+        TcAttachType::Ingress => NODEPORT_LINK_SUFFIX_INGRESS,
+        TcAttachType::Egress => NODEPORT_LINK_SUFFIX_EGRESS,
+        TcAttachType::Custom(_) => NODEPORT_LINK_SUFFIX_INGRESS,
+    };
+    PathBuf::from(BPF_MESH_LINKS_DIR).join(format!("{NODEPORT_LINK_PREFIX}{iface}{suffix}"))
 }
 
 fn unpin_path(path: impl AsRef<Path>) -> Result<()> {

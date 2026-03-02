@@ -10,7 +10,7 @@ use crate::{
         self,
         ip::IpNetworkState,
         policy::{PolicyBpfState, PolicyState},
-        service::{ServiceEndpoint, ServiceEndpointState},
+        service::{NodePortState, ServiceEndpoint, ServiceEndpointState},
     },
     config::AgentArgs,
     http, kubernetes,
@@ -62,19 +62,31 @@ pub async fn start(
     info!("loading service/endpoint bpf maps");
     let (service_map_v4, service_map_v6) = bpf::service::load_service_maps()?;
     let (endpoint_map_v4, endpoint_map_v6) = bpf::service::load_endpoint_maps()?;
+    let (nodeport_map_v4, nodeport_map_v6) = bpf::service::load_nodeport_maps()?;
+    let (nodeport_policy_map_v4, nodeport_policy_map_v6) =
+        bpf::service::load_nodeport_policy_maps()?;
 
     info!("starting kube service service");
     let service_endpoint_v4 = ServiceEndpoint::new(service_map_v4, endpoint_map_v4);
     let service_endpoint_v6 = ServiceEndpoint::new(service_map_v6, endpoint_map_v6);
-    let state = ServiceEndpointState::new(service_endpoint_v4, service_endpoint_v6);
+    let service_state = ServiceEndpointState::new(service_endpoint_v4, service_endpoint_v6);
+    let nodeport_state = NodePortState::new(
+        nodeport_map_v4,
+        nodeport_map_v6,
+        nodeport_policy_map_v4,
+        nodeport_policy_map_v6,
+    );
+    let controller_service_state =
+        bpf::service::ControllerServiceBpfState::new(service_state.clone(), nodeport_state);
     bpf::service::run(
         kube_client.clone(),
-        state.clone(),
+        args.node_name.clone(),
+        controller_service_state,
         args.proxy_settings.node_port_settings.clone(),
         cancel.clone(),
     )
     .await?;
-    let service_server = http::grpc::service::server(state);
+    let service_server = http::grpc::service::server(service_state);
 
     info!("starting conntrack cleanup background process");
     let cleanup_handle = tokio::spawn(bpf::conntrack::run_cleanup(cancel.clone()));

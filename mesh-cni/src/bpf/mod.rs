@@ -9,7 +9,7 @@ use std::{borrow::BorrowMut, hash::Hash};
 use anyhow::anyhow;
 use aya::{
     Pod,
-    maps::{HashMap, LpmTrie, MapData, lpm_trie::Key as LpmKey},
+    maps::{HashMap, LpmTrie, MapData, MapError, lpm_trie::Key as LpmKey},
 };
 use ipnetwork::IpNetwork;
 use mesh_cni_ebpf_common::IdentityId;
@@ -20,6 +20,8 @@ pub(crate) const BPF_PROGRAM_INGRESS_TC: BpfNamePath = BpfNamePath::Program("mes
 pub(crate) const BPF_PROGRAM_EGRESS_TC: BpfNamePath = BpfNamePath::Program("mesh_cni_egress");
 pub(crate) const BPF_PROGRAM_NODEPORT_INGRESS_TC: BpfNamePath =
     BpfNamePath::Program("mesh_cni_nodeport_ingress");
+pub(crate) const BPF_PROGRAM_NODEPORT_EGRESS_TC: BpfNamePath =
+    BpfNamePath::Program("mesh_cni_nodeport_egress");
 pub const BPF_PROGRAM_CGROUP_CONNECT_V4: BpfNamePath =
     BpfNamePath::Program("mesh_cni_cgroup_connect4");
 pub const BPF_LINK_CGROUP_CONNECT_V4_PATH: &str = "/sys/fs/bpf/mesh/links/mesh_cni_cgroup_connect4";
@@ -34,6 +36,11 @@ pub const BPF_MAP_SERVICES_V4: BpfNamePath = BpfNamePath::Map("services_v4");
 pub const BPF_MAP_SERVICES_V6: BpfNamePath = BpfNamePath::Map("services_v6");
 pub const BPF_MAP_ENDPOINTS_V4: BpfNamePath = BpfNamePath::Map("endpoints_v4");
 pub const BPF_MAP_ENDPOINTS_V6: BpfNamePath = BpfNamePath::Map("endpoints_v6");
+pub const BPF_MAP_NODEPORTS_V4: BpfNamePath = BpfNamePath::Map("nodeports_v4");
+pub const BPF_MAP_NODEPORTS_V6: BpfNamePath = BpfNamePath::Map("nodeports_v6");
+pub const BPF_MAP_NODEPORT_POLICIES_V4: BpfNamePath = BpfNamePath::Map("nodeport_policies_v4");
+pub const BPF_MAP_NODEPORT_POLICIES_V6: BpfNamePath = BpfNamePath::Map("nodeport_policies_v6");
+pub const BPF_MAP_NODEPORT_NAT_V4: BpfNamePath = BpfNamePath::Map("nodeport_nat_v4");
 pub const BPF_MAP_POLICY_INDEX: BpfNamePath = BpfNamePath::Map("policy_index");
 pub const BPF_MAP_POLICY_RULESET: BpfNamePath = BpfNamePath::Map("policy_ruleset");
 pub const BPF_MAP_POLICY_CIDR_V4: BpfNamePath = BpfNamePath::Map("policy_cidr_v4");
@@ -54,18 +61,24 @@ pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 7] = [
     BPF_MAP_POLICY_CIDR_V6,
 ];
 
-pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 4] = [
+pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 9] = [
     BPF_MAP_SERVICES_V4,
     BPF_MAP_SERVICES_V6,
     BPF_MAP_ENDPOINTS_V4,
     BPF_MAP_ENDPOINTS_V6,
+    BPF_MAP_NODEPORTS_V4,
+    BPF_MAP_NODEPORTS_V6,
+    BPF_MAP_NODEPORT_POLICIES_V4,
+    BPF_MAP_NODEPORT_POLICIES_V6,
+    BPF_MAP_NODEPORT_NAT_V4,
 ];
 
-pub(crate) const PROG_LIST: [BpfNamePath; 4] = [
+pub(crate) const PROG_LIST: [BpfNamePath; 5] = [
     BPF_PROGRAM_CGROUP_CONNECT_V4,
     BPF_PROGRAM_INGRESS_TC,
     BPF_PROGRAM_EGRESS_TC,
     BPF_PROGRAM_NODEPORT_INGRESS_TC,
+    BPF_PROGRAM_NODEPORT_EGRESS_TC,
 ];
 
 pub enum BpfNamePath {
@@ -109,6 +122,15 @@ pub trait SharedBpfMap: Send + Sync + 'static {
     fn get_state(&self) -> Result<ahash::HashMap<Self::KeyOutput, Self::Value>>;
 }
 
+fn is_not_found_delete_error(error: &MapError) -> bool {
+    match error {
+        MapError::SyscallError(syscall_error) => {
+            syscall_error.io_error.kind() == std::io::ErrorKind::NotFound
+        }
+        _ => false,
+    }
+}
+
 impl<T, K, V> BpfMap for HashMap<T, K, V>
 where
     T: BorrowMut<MapData>,
@@ -122,7 +144,11 @@ where
         Ok(self.insert(key, value, 0)?)
     }
     fn delete(&mut self, key: &K) -> Result<()> {
-        Ok(self.remove(key)?)
+        match self.remove(key) {
+            Ok(()) => Ok(()),
+            Err(error) if is_not_found_delete_error(&error) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
     fn get(&self, key: &K) -> Result<V> {
         Ok(<HashMap<T, K, V>>::get(self, key, 0)?)
@@ -180,7 +206,11 @@ where
         Ok(self.insert(&key, value, 0)?)
     }
     fn delete(&mut self, key: &Self::Key) -> Result<()> {
-        Ok(self.remove(key)?)
+        match self.remove(key) {
+            Ok(()) => Ok(()),
+            Err(error) if is_not_found_delete_error(&error) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
     fn get(&self, key: &Self::Key) -> Result<Self::Value> {
         Ok(<LpmTrie<T, u32, V>>::get(self, key, 0)?)
@@ -213,7 +243,11 @@ where
         Ok(self.insert(&key, value, 0)?)
     }
     fn delete(&mut self, key: &Self::Key) -> Result<()> {
-        Ok(self.remove(key)?)
+        match self.remove(key) {
+            Ok(()) => Ok(()),
+            Err(error) if is_not_found_delete_error(&error) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
     fn get(&self, key: &Self::Key) -> Result<Self::Value> {
         Ok(<LpmTrie<T, u128, V>>::get(self, key, 0)?)

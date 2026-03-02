@@ -15,8 +15,8 @@ use crate::{
     bpf::{
         BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_FS_DIR, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR,
         BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_EGRESS_TC,
-        BPF_PROGRAM_INGRESS_TC, BPF_PROGRAM_NODEPORT_INGRESS_TC, BpfNamePath, POLICY_MAPS_LIST,
-        PROG_LIST, SERVICE_MAPS_LIST,
+        BPF_PROGRAM_INGRESS_TC, BPF_PROGRAM_NODEPORT_EGRESS_TC, BPF_PROGRAM_NODEPORT_INGRESS_TC,
+        BpfNamePath, POLICY_MAPS_LIST, PROG_LIST, SERVICE_MAPS_LIST,
     },
 };
 
@@ -46,6 +46,8 @@ pub fn init_bpf() -> Result<()> {
 
     info!("ensuring nodeport ingress program loaded and pinned");
     ensure_tc_program(&mut ebpf, BPF_PROGRAM_NODEPORT_INGRESS_TC)?;
+    info!("ensuring nodeport egress program loaded and pinned");
+    ensure_tc_program(&mut ebpf, BPF_PROGRAM_NODEPORT_EGRESS_TC)?;
 
     pin_maps(&mut ebpf, &SERVICE_MAPS_LIST)?;
     pin_maps(&mut ebpf, &POLICY_MAPS_LIST)?;
@@ -150,6 +152,9 @@ fn start_ebpf_logger() -> Result<()> {
 
     let nodeport_ingress = SchedClassifier::from_pin(BPF_PROGRAM_NODEPORT_INGRESS_TC.path())?;
     let info = nodeport_ingress.info()?;
+    start_ebpf_logger_from_prog_id(info.id())?;
+    let nodeport_egress = SchedClassifier::from_pin(BPF_PROGRAM_NODEPORT_EGRESS_TC.path())?;
+    let info = nodeport_egress.info()?;
     start_ebpf_logger_from_prog_id(info.id())?;
 
     Ok(())

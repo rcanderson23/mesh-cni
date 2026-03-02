@@ -8,11 +8,13 @@ use anyhow::anyhow;
 use mesh_cni_ebpf_common::{
     Id,
     service::{
-        EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4,
-        ServiceKeyV6, ServiceValue,
+        EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, NodePortFrontendValue,
+        NodePortKey, ServiceKey, ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
 };
-use mesh_cni_service_bpf_controller::{Error as BpfControllerError, ServiceBpfState};
+use mesh_cni_service_bpf_controller::{
+    Error as BpfControllerError, NodePortMapKey, ServiceBpfState,
+};
 use tracing::warn;
 
 use crate::{Result, bpf::BpfMap};
@@ -205,6 +207,185 @@ where
             map.insert(*k, *v);
         }
         Ok(map)
+    }
+}
+
+struct NodePortShared<N4, N6, P4, P6>
+where
+    N4: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+    N6: BpfMap<Key = NodePortKey, Value = ServiceKeyV6, KeyOutput = NodePortKey>,
+    P4: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+    P6: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+{
+    state: Mutex<NodePortStateInner<N4, N6, P4, P6>>,
+}
+
+struct NodePortStateInner<N4, N6, P4, P6>
+where
+    N4: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+    N6: BpfMap<Key = NodePortKey, Value = ServiceKeyV6, KeyOutput = NodePortKey>,
+    P4: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+    P6: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+{
+    frontend_map_v4: N4,
+    frontend_map_v6: N6,
+    policy_map_v4: P4,
+    policy_map_v6: P6,
+    frontend_cache_v4: ahash::HashMap<NodePortKey, ServiceKeyV4>,
+    frontend_cache_v6: ahash::HashMap<NodePortKey, ServiceKeyV6>,
+    policy_cache_v4: ahash::HashMap<NodePortKey, NodePortFrontendValue>,
+    policy_cache_v6: ahash::HashMap<NodePortKey, NodePortFrontendValue>,
+}
+
+#[derive(Clone)]
+pub struct NodePortState<N4, N6, P4, P6>
+where
+    N4: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+    N6: BpfMap<Key = NodePortKey, Value = ServiceKeyV6, KeyOutput = NodePortKey>,
+    P4: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+    P6: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+{
+    shared: Arc<NodePortShared<N4, N6, P4, P6>>,
+}
+
+impl<N4, N6, P4, P6> NodePortState<N4, N6, P4, P6>
+where
+    N4: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+    N6: BpfMap<Key = NodePortKey, Value = ServiceKeyV6, KeyOutput = NodePortKey>,
+    P4: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+    P6: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+{
+    pub fn new(
+        frontend_map_v4: N4,
+        frontend_map_v6: N6,
+        policy_map_v4: P4,
+        policy_map_v6: P6,
+    ) -> Self {
+        let shared = NodePortShared {
+            state: Mutex::new(NodePortStateInner {
+                frontend_map_v4,
+                frontend_map_v6,
+                policy_map_v4,
+                policy_map_v6,
+                frontend_cache_v4: HashMap::default(),
+                frontend_cache_v6: HashMap::default(),
+                policy_cache_v4: HashMap::default(),
+                policy_cache_v6: HashMap::default(),
+            }),
+        };
+        Self {
+            shared: Arc::new(shared),
+        }
+    }
+
+    fn update_frontend(&self, key: NodePortMapKey, value: ServiceKey) -> Result<()> {
+        let mut state = self.shared.state.lock().unwrap();
+        match (key, value) {
+            (NodePortMapKey::V4(frontend), ServiceKey::V4(service_key)) => {
+                state.frontend_map_v4.update(frontend, service_key)?;
+                state.frontend_cache_v4.insert(frontend, service_key);
+                Ok(())
+            }
+            (NodePortMapKey::V6(frontend), ServiceKey::V6(service_key)) => {
+                state.frontend_map_v6.update(frontend, service_key)?;
+                state.frontend_cache_v6.insert(frontend, service_key);
+                Ok(())
+            }
+            _ => Err(anyhow!("nodeport frontend key/value family mismatch")),
+        }
+    }
+
+    fn remove_frontend(&self, key: &NodePortMapKey) -> Result<()> {
+        let mut state = self.shared.state.lock().unwrap();
+        match key {
+            NodePortMapKey::V4(frontend) => {
+                state.frontend_map_v4.delete(frontend)?;
+                state.frontend_cache_v4.remove(frontend);
+            }
+            NodePortMapKey::V6(frontend) => {
+                state.frontend_map_v6.delete(frontend)?;
+                state.frontend_cache_v6.remove(frontend);
+            }
+        }
+        Ok(())
+    }
+
+    fn update_policy(&self, key: NodePortMapKey, value: NodePortFrontendValue) -> Result<()> {
+        let mut state = self.shared.state.lock().unwrap();
+        match key {
+            NodePortMapKey::V4(frontend) => {
+                state.policy_map_v4.update(frontend, value)?;
+                state.policy_cache_v4.insert(frontend, value);
+            }
+            NodePortMapKey::V6(frontend) => {
+                state.policy_map_v6.update(frontend, value)?;
+                state.policy_cache_v6.insert(frontend, value);
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_policy(&self, key: &NodePortMapKey) -> Result<()> {
+        let mut state = self.shared.state.lock().unwrap();
+        match key {
+            NodePortMapKey::V4(frontend) => {
+                state.policy_map_v4.delete(frontend)?;
+                state.policy_cache_v4.remove(frontend);
+            }
+            NodePortMapKey::V6(frontend) => {
+                state.policy_map_v6.delete(frontend)?;
+                state.policy_cache_v6.remove(frontend);
+            }
+        }
+        Ok(())
+    }
+
+    fn frontend_state_from_map(&self) -> Result<ahash::HashMap<NodePortMapKey, ServiceKey>> {
+        let state = self.shared.state.lock().unwrap();
+        let mut map = HashMap::default();
+
+        for (key, value) in state.frontend_map_v4.get_state()? {
+            map.insert(NodePortMapKey::V4(key), ServiceKey::V4(value));
+        }
+        for (key, value) in state.frontend_map_v6.get_state()? {
+            map.insert(NodePortMapKey::V6(key), ServiceKey::V6(value));
+        }
+
+        Ok(map)
+    }
+}
+
+#[derive(Clone)]
+pub struct ControllerServiceBpfState<SE4, SE6, N4, N6, P4, P6>
+where
+    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
+    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    N4: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+    N6: BpfMap<Key = NodePortKey, Value = ServiceKeyV6, KeyOutput = NodePortKey>,
+    P4: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+    P6: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+{
+    pub service_endpoint_state: ServiceEndpointState<SE4, SE6>,
+    pub nodeport_state: NodePortState<N4, N6, P4, P6>,
+}
+
+impl<SE4, SE6, N4, N6, P4, P6> ControllerServiceBpfState<SE4, SE6, N4, N6, P4, P6>
+where
+    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
+    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    N4: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+    N6: BpfMap<Key = NodePortKey, Value = ServiceKeyV6, KeyOutput = NodePortKey>,
+    P4: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+    P6: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+{
+    pub fn new(
+        service_endpoint_state: ServiceEndpointState<SE4, SE6>,
+        nodeport_state: NodePortState<N4, N6, P4, P6>,
+    ) -> Self {
+        Self {
+            service_endpoint_state,
+            nodeport_state,
+        }
     }
 }
 
@@ -422,6 +603,129 @@ where
     ) -> std::result::Result<ahash::HashMap<ServiceKey, Vec<EndpointValue>>, BpfControllerError>
     {
         ServiceEndpointState::state_from_map(self)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn update_nodeport(
+        &self,
+        _key: NodePortMapKey,
+        _value: ServiceKey,
+    ) -> std::result::Result<(), BpfControllerError> {
+        Err(BpfControllerError::Other(
+            "nodeport frontend updates are not supported on ServiceEndpointState".into(),
+        ))
+    }
+
+    fn remove_nodeport(
+        &self,
+        _key: &NodePortMapKey,
+    ) -> std::result::Result<(), BpfControllerError> {
+        Err(BpfControllerError::Other(
+            "nodeport frontend removes are not supported on ServiceEndpointState".into(),
+        ))
+    }
+
+    fn update_nodeport_policy(
+        &self,
+        _key: NodePortMapKey,
+        _value: NodePortFrontendValue,
+    ) -> std::result::Result<(), BpfControllerError> {
+        Err(BpfControllerError::Other(
+            "nodeport policy updates are not supported on ServiceEndpointState".into(),
+        ))
+    }
+
+    fn remove_nodeport_policy(
+        &self,
+        _key: &NodePortMapKey,
+    ) -> std::result::Result<(), BpfControllerError> {
+        Err(BpfControllerError::Other(
+            "nodeport policy removes are not supported on ServiceEndpointState".into(),
+        ))
+    }
+
+    fn nodeport_state(
+        &self,
+    ) -> std::result::Result<ahash::HashMap<NodePortMapKey, ServiceKey>, BpfControllerError> {
+        Ok(HashMap::default())
+    }
+}
+
+impl<SE4, SE6, N4, N6, P4, P6> ServiceBpfState
+    for ControllerServiceBpfState<SE4, SE6, N4, N6, P4, P6>
+where
+    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
+    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    N4: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+    N6: BpfMap<Key = NodePortKey, Value = ServiceKeyV6, KeyOutput = NodePortKey>,
+    P4: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+    P6: BpfMap<Key = NodePortKey, Value = NodePortFrontendValue, KeyOutput = NodePortKey>,
+{
+    fn update(
+        &self,
+        key: ServiceKey,
+        value: Vec<EndpointValue>,
+    ) -> std::result::Result<(), BpfControllerError> {
+        self.service_endpoint_state
+            .update(key, value)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn remove(&self, key: &ServiceKey) -> std::result::Result<(), BpfControllerError> {
+        self.service_endpoint_state
+            .remove(key)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn state(
+        &self,
+    ) -> std::result::Result<ahash::HashMap<ServiceKey, Vec<EndpointValue>>, BpfControllerError>
+    {
+        self.service_endpoint_state
+            .state_from_map()
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn update_nodeport(
+        &self,
+        key: NodePortMapKey,
+        value: ServiceKey,
+    ) -> std::result::Result<(), BpfControllerError> {
+        self.nodeport_state
+            .update_frontend(key, value)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn remove_nodeport(&self, key: &NodePortMapKey) -> std::result::Result<(), BpfControllerError> {
+        self.nodeport_state
+            .remove_frontend(key)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn update_nodeport_policy(
+        &self,
+        key: NodePortMapKey,
+        value: NodePortFrontendValue,
+    ) -> std::result::Result<(), BpfControllerError> {
+        self.nodeport_state
+            .update_policy(key, value)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn remove_nodeport_policy(
+        &self,
+        key: &NodePortMapKey,
+    ) -> std::result::Result<(), BpfControllerError> {
+        self.nodeport_state
+            .remove_policy(key)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn nodeport_state(
+        &self,
+    ) -> std::result::Result<ahash::HashMap<NodePortMapKey, ServiceKey>, BpfControllerError> {
+        self.nodeport_state
+            .frontend_state_from_map()
             .map_err(|e| BpfControllerError::BpfState(e.to_string()))
     }
 }

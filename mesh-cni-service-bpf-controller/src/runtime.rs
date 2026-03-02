@@ -19,11 +19,12 @@ use crate::{
 
 pub async fn start_bpf_service_controller<B>(
     kube_client: Client,
+    node_name: String,
     service_bpf_state: B,
     cancel: CancellationToken,
 ) -> Result<()>
 where
-    B: ServiceBpfState + Clone + Send + Sync + 'static,
+    B: ServiceBpfState + Send + Sync + 'static,
 {
     let service_api: Api<Service> = Api::all(kube_client.clone());
     let (service_state, service_subscriber) =
@@ -41,6 +42,7 @@ where
     )
     .await?;
     let context = Context {
+        node_name,
         service_state: service_state.clone(),
         endpoint_slice_state,
         mesh_endpoint_state,

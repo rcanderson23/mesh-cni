@@ -8,6 +8,7 @@ pub struct Context<B>
 where
     B: ServiceBpfState,
 {
+    pub node_name: String,
     pub service_state: Store<Service>,
     pub endpoint_slice_state: Store<EndpointSlice>,
     pub mesh_endpoint_state: Store<MeshEndpoint>,

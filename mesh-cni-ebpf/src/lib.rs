@@ -17,7 +17,8 @@ use mesh_cni_ebpf_common::{
         RulesetId,
     },
     service::{
-        EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
+        EndpointKey, EndpointValueV4, EndpointValueV6, NodePortFrontendValue, NodePortKey,
+        NodePortNatV4Key, NodePortNatV4Value, ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
 };
 
@@ -56,6 +57,24 @@ static ENDPOINTS_V4: HashMap<EndpointKey, EndpointValueV4> = HashMap::with_max_e
 
 #[map(name = "endpoints_v6")]
 static ENDPOINTS_V6: HashMap<EndpointKey, EndpointValueV6> = HashMap::with_max_entries(65535, 0);
+
+#[map(name = "nodeports_v4")]
+static NODEPORTS_V4: HashMap<NodePortKey, ServiceKeyV4> = HashMap::with_max_entries(65535, 0);
+
+#[map(name = "nodeports_v6")]
+static NODEPORTS_V6: HashMap<NodePortKey, ServiceKeyV6> = HashMap::with_max_entries(65535, 0);
+
+#[map(name = "nodeport_policies_v4")]
+static NODEPORT_POLICIES_V4: HashMap<NodePortKey, NodePortFrontendValue> =
+    HashMap::with_max_entries(65535, 0);
+
+#[map(name = "nodeport_policies_v6")]
+static NODEPORT_POLICIES_V6: HashMap<NodePortKey, NodePortFrontendValue> =
+    HashMap::with_max_entries(65535, 0);
+
+#[map(name = "nodeport_nat_v4")]
+static NODEPORT_NAT_V4: LruHashMap<NodePortNatV4Key, NodePortNatV4Value> =
+    LruHashMap::with_max_entries(262144, 0);
 
 #[inline]
 fn id_v4(ip: LpmKey<u32>) -> Option<IdentityId> {
