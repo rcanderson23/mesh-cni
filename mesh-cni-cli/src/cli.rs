@@ -1,10 +1,17 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(version, about = "A cli for interacting with mesh-cni-agent", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
+}
+
+#[derive(Clone, Debug, Default, ValueEnum)]
+pub enum OutputFormat {
+    #[default]
+    Table,
+    Json,
 }
 
 #[derive(Clone, Subcommand, Debug)]
@@ -29,7 +36,10 @@ pub enum Commands {
 #[derive(Clone, Subcommand, Debug)]
 pub enum IpCommands {
     /// List the IPs and their associated IDs
-    List,
+    List {
+        #[arg(short = 'o', long, value_enum, default_value_t = OutputFormat::Table)]
+        output: OutputFormat,
+    },
 }
 
 #[derive(Clone, Subcommand, Debug)]
@@ -39,17 +49,25 @@ pub enum ServiceCommands {
         #[arg(long)]
         /// When set, pulls data from the bpf map instead of the cache
         from_map: bool,
+        #[arg(short = 'o', long, value_enum, default_value_t = OutputFormat::Table)]
+        output: OutputFormat,
     },
 }
 
 #[derive(Clone, Subcommand, Debug)]
 pub enum ConntrackCommands {
     /// List the connections in the Conntrack
-    List,
+    List {
+        #[arg(short = 'o', long, value_enum, default_value_t = OutputFormat::Table)]
+        output: OutputFormat,
+    },
 }
 
 #[derive(Clone, Subcommand, Debug)]
 pub enum PolicyCommands {
     /// List the policies currently enforced
-    List,
+    List {
+        #[arg(short = 'o', long, value_enum, default_value_t = OutputFormat::Table)]
+        output: OutputFormat,
+    },
 }

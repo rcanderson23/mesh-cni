@@ -61,6 +61,22 @@ fn main() -> anyhow::Result<()> {
             "cni.v1.Route.scope",
             "#[serde(default, skip_serializing_if = \"Option::is_none\" )]",
         )
+        .type_attribute(
+            "ip.v1.IpId",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .type_attribute(
+            "service.v1.ServiceWithEndpoints",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .type_attribute(
+            "conntrack.v1.Connection",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .type_attribute(
+            "policy.v1.PolicySet",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
         .build_client(true)
         .build_server(true)
         .compile_protos(protos.as_slice(), &[proto_dir])?;

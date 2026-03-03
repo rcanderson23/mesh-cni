@@ -1766,6 +1766,8 @@ dependencies = [
  "hyper-util",
  "mesh-cni-api",
  "semver",
+ "serde",
+ "serde_json",
  "tabled",
  "tokio",
  "tonic",

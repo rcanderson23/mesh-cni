@@ -2,6 +2,7 @@ mod cli;
 mod client;
 mod conntrack;
 mod ip;
+mod output;
 mod policy;
 mod service;
 
