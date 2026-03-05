@@ -5,26 +5,29 @@ use std::{
 };
 
 use ahash::{HashMap, HashSet};
-use k8s_openapi::api::core::v1::Service;
+use k8s_openapi::api::core::v1::{Service, ServiceSpec};
 use kube::{Resource, ResourceExt, runtime::controller::Action};
 use mesh_cni_crds::v1alpha1::meshendpoint::{
     MeshEndpoint, coalesce_mesh_endpoints, generate_mesh_endpoint_spec, service_ips_from_service,
 };
-use mesh_cni_ebpf_common::service::{EndpointValue, ServiceKey};
+use mesh_cni_ebpf_common::{
+    KubeProtocol,
+    service::{EndpointValue, NodePortKey, ServiceKey},
+};
 use mesh_cni_meshendpoint_gen_controller::ANNOTATION_MESH_SERVICE;
 use tracing::{error, info};
 
 use crate::{Context, Error, Result, ServiceBpfState};
 
 const DEFAULT_REQUEUE_DURATION: Duration = Duration::from_secs(300);
-const ERROR_REQUEUE_DURATION: Duration = Duration::from_secs(300);
+const ERROR_REQUEUE_DURATION: Duration = Duration::from_secs(5);
 const MISSING_MESH_ENDPOINT_REQUEUE_DURATION: Duration = Duration::from_secs(5);
 pub const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
 
-pub async fn reconcile<B>(service: Arc<Service>, ctx: Arc<Context<B>>) -> Result<Action>
-where
-    B: ServiceBpfState,
-{
+pub async fn reconcile<B: ServiceBpfState>(
+    service: Arc<Service>,
+    ctx: Arc<Context<B>>,
+) -> Result<Action> {
     let ns = service
         .namespace()
         .ok_or_else(|| Error::ReconcileMissingPrecondition("missing namespace".into()))?;
@@ -38,13 +41,41 @@ where
     }
 }
 
-pub async fn reconcile_local_service<B>(
+pub async fn reconcile_nodeports<B: ServiceBpfState>(
     service: Arc<Service>,
     ctx: Arc<Context<B>>,
-) -> Result<Action>
-where
-    B: ServiceBpfState,
-{
+) -> Result<Action> {
+    let ns = service
+        .namespace()
+        .ok_or_else(|| Error::ReconcileMissingPrecondition("missing namespace".into()))?;
+    let ns_name = format!("{}/{}", ns, service.name_any());
+    info!("started reconciling NodePort state for Service {}", ns_name);
+
+    inner_reconcile_nodeports(&service, &ctx)?;
+    Ok(Action::await_change())
+}
+
+pub(crate) fn reconcile_all_nodeports<B: ServiceBpfState>(ctx: &Context<B>) -> Result<()> {
+    let desired_nodeports = desired_nodeport_mappings_for_services(&ctx.service_state.state());
+    let current_nodeports = ctx.service_bpf_state.nodeport_state()?;
+    let (keys_to_remove, keys_to_upsert) =
+        diff_global_nodeport_reconcile_actions(&current_nodeports, &desired_nodeports);
+
+    for key in keys_to_remove {
+        ctx.service_bpf_state.remove_nodeport(&key)?;
+    }
+    for (nodeport_key, service_key) in keys_to_upsert {
+        ctx.service_bpf_state
+            .update_nodeport(nodeport_key, service_key)?;
+    }
+
+    Ok(())
+}
+
+pub async fn reconcile_local_service<B: ServiceBpfState>(
+    service: Arc<Service>,
+    ctx: Arc<Context<B>>,
+) -> Result<Action> {
     let desired = generate_desired_service_pairs(&service, &ctx);
     let current = ctx.service_bpf_state.state()?;
     let is_deletion = service.meta().deletion_timestamp.is_some();
@@ -62,13 +93,10 @@ where
     Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
 }
 
-pub async fn reconcile_multi_cluster_service<B>(
+pub async fn reconcile_multi_cluster_service<B: ServiceBpfState>(
     service: Arc<Service>,
     ctx: Arc<Context<B>>,
-) -> Result<Action>
-where
-    B: ServiceBpfState,
-{
+) -> Result<Action> {
     let desired = generate_service_pairs_from_meps(&service, &ctx);
     let current = ctx.service_bpf_state.state()?;
     let is_deletion = service.meta().deletion_timestamp.is_some();
@@ -103,11 +131,14 @@ where
     Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
 }
 
-pub fn error_policy<B>(_service: Arc<Service>, error: &Error, _ctx: Arc<Context<B>>) -> Action
-where
-    B: ServiceBpfState,
-{
-    error!("error occurred: {}", error);
+pub fn error_policy<B: ServiceBpfState>(
+    service: Arc<Service>,
+    err: &Error,
+    _ctx: Arc<Context<B>>,
+) -> Action {
+    let ns = service.namespace().unwrap_or_default();
+    let ns_name = format!("{}/{}", ns, service.name_any());
+    error!(%err, "error reconciling {}", ns_name);
     Action::requeue(ERROR_REQUEUE_DURATION)
 }
 
@@ -230,18 +261,189 @@ fn is_meshed_service(service: &Service) -> bool {
     val.to_lowercase() == "true"
 }
 
-#[cfg(test)]
-mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+fn inner_reconcile_nodeports<B: ServiceBpfState>(
+    service: &Service,
+    ctx: &Context<B>,
+) -> Result<()> {
+    let nodeport_state = ctx.service_bpf_state.nodeport_state()?;
+    let is_deletion = service.meta().deletion_timestamp.is_some();
+    let desired = if !is_deletion && is_nodeport_service_type(service) {
+        desired_nodeport_mappings(service)
+    } else {
+        HashMap::default()
+    };
+    let (keys_to_remove, entries_to_upsert) =
+        diff_nodeport_reconcile_actions(service, &nodeport_state, &desired, is_deletion);
 
-    use ahash::{HashMap, HashSet};
-    use k8s_openapi::api::core::v1::{Service, ServiceSpec};
-    use mesh_cni_ebpf_common::{
-        KubeProtocol,
-        service::{EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey},
+    for key in keys_to_remove {
+        ctx.service_bpf_state.remove_nodeport(&key)?;
+    }
+    for (nodeport_key, service_key) in entries_to_upsert {
+        ctx.service_bpf_state
+            .update_nodeport(nodeport_key, service_key)?;
+    }
+    Ok(())
+}
+
+fn is_nodeport_service_type(service: &Service) -> bool {
+    service
+        .spec
+        .as_ref()
+        .and_then(|spec| spec.type_.as_deref())
+        .is_some_and(|service_type| matches!(service_type, "LoadBalancer" | "NodePort"))
+}
+
+fn nodeport_owned_keys(
+    service: &Service,
+    current_state: &HashMap<NodePortKey, ServiceKey>,
+) -> HashSet<NodePortKey> {
+    let ips = service_ip_sets(service);
+    current_state
+        .iter()
+        .filter_map(|(nodeport_key, service_key)| {
+            if key_matches_service_ip(service_key, &ips) {
+                Some(*nodeport_key)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn diff_nodeport_reconcile_actions(
+    service: &Service,
+    current_state: &HashMap<NodePortKey, ServiceKey>,
+    desired_state: &HashMap<NodePortKey, ServiceKey>,
+    is_deletion: bool,
+) -> (HashSet<NodePortKey>, Vec<(NodePortKey, ServiceKey)>) {
+    let owned_nodeport_keys = nodeport_owned_keys(service, current_state);
+    if is_deletion {
+        return (owned_nodeport_keys, Vec::new());
+    }
+
+    let keys_to_remove = owned_nodeport_keys
+        .into_iter()
+        .filter(|nodeport_key| !desired_state.contains_key(nodeport_key))
+        .collect();
+
+    let entries_to_upsert = desired_state
+        .iter()
+        .map(|(nodeport_key, service_key)| (*nodeport_key, *service_key))
+        .collect();
+
+    (keys_to_remove, entries_to_upsert)
+}
+
+fn desired_nodeport_mappings_for_services(
+    services: &[Arc<Service>],
+) -> HashMap<NodePortKey, ServiceKey> {
+    let mut desired = HashMap::default();
+    for service in services {
+        if service.meta().deletion_timestamp.is_some() || !is_nodeport_service_type(service) {
+            continue;
+        }
+        for (nodeport_key, service_key) in desired_nodeport_mappings(service) {
+            desired.insert(nodeport_key, service_key);
+        }
+    }
+    desired
+}
+
+fn diff_global_nodeport_reconcile_actions(
+    current_state: &HashMap<NodePortKey, ServiceKey>,
+    desired_state: &HashMap<NodePortKey, ServiceKey>,
+) -> (HashSet<NodePortKey>, Vec<(NodePortKey, ServiceKey)>) {
+    let keys_to_remove = current_state
+        .keys()
+        .filter(|key| !desired_state.contains_key(*key))
+        .copied()
+        .collect();
+    let keys_to_upsert = desired_state
+        .iter()
+        .map(|(nodeport_key, service_key)| (*nodeport_key, *service_key))
+        .collect();
+    (keys_to_remove, keys_to_upsert)
+}
+
+fn desired_nodeport_mappings(service: &Service) -> HashMap<NodePortKey, ServiceKey> {
+    let mut desired = HashMap::default();
+    let Some(cluster_ip) = first_ipv4_cluster_ip(service) else {
+        return desired;
+    };
+    let Some(spec) = &service.spec else {
+        return desired;
     };
 
-    use super::{diff_service_reconcile_actions, should_preserve_current_backends};
+    for (nodeport_key, service_port, protocol) in nodeport_ports(spec) {
+        let service_key = ServiceKey::v4(cluster_ip.to_bits(), service_port, protocol as u8);
+        desired.insert(nodeport_key, service_key);
+    }
+
+    desired
+}
+
+fn nodeport_ports(spec: &ServiceSpec) -> Vec<(NodePortKey, u16, KubeProtocol)> {
+    let mut ports = Vec::new();
+    let Some(service_ports) = &spec.ports else {
+        return ports;
+    };
+
+    for port_spec in service_ports {
+        let Some(node_port) = port_spec
+            .node_port
+            .and_then(|port| u16::try_from(port).ok())
+        else {
+            continue;
+        };
+        let Some(service_port) = u16::try_from(port_spec.port).ok() else {
+            continue;
+        };
+        let protocol = match &port_spec.protocol {
+            Some(protocol) => KubeProtocol::try_from(protocol.as_str()).unwrap_or_default(),
+            None => KubeProtocol::Tcp,
+        };
+        ports.push((
+            NodePortKey::new(node_port, protocol as u8),
+            service_port,
+            protocol,
+        ));
+    }
+    ports
+}
+
+fn first_ipv4_cluster_ip(service: &Service) -> Option<Ipv4Addr> {
+    let spec = service.spec.as_ref()?;
+    let cluster_ips = spec.cluster_ips.as_ref()?;
+    for cluster_ip in cluster_ips {
+        let Ok(ip_addr) = cluster_ip.parse::<IpAddr>() else {
+            continue;
+        };
+        if let IpAddr::V4(ip) = ip_addr {
+            return Some(ip);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        net::{IpAddr, Ipv4Addr, Ipv6Addr},
+        sync::Arc,
+    };
+
+    use ahash::{HashMap, HashSet};
+    use k8s_openapi::api::core::v1::{Service, ServicePort, ServiceSpec};
+    use mesh_cni_ebpf_common::{
+        KubeProtocol,
+        service::{EndpointValue, EndpointValueV4, EndpointValueV6, NodePortKey, ServiceKey},
+    };
+
+    use super::{
+        desired_nodeport_mappings, desired_nodeport_mappings_for_services,
+        diff_global_nodeport_reconcile_actions, diff_nodeport_reconcile_actions,
+        diff_service_reconcile_actions, should_preserve_current_backends,
+    };
 
     fn service_with_cluster_ips(ips: &[&str]) -> Service {
         Service {
@@ -252,6 +454,32 @@ mod tests {
             },
             spec: Some(ServiceSpec {
                 cluster_ips: Some(ips.iter().map(|ip| (*ip).to_string()).collect()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn service_with_nodeports(cluster_ips: &[&str], ports: &[(u16, u16, &str)]) -> Service {
+        let service_ports = ports
+            .iter()
+            .map(|(port, node_port, protocol)| ServicePort {
+                port: i32::from(*port),
+                node_port: Some(i32::from(*node_port)),
+                protocol: Some((*protocol).to_string()),
+                ..Default::default()
+            })
+            .collect();
+        Service {
+            metadata: kube::core::ObjectMeta {
+                namespace: Some("default".to_string()),
+                name: Some("svc".to_string()),
+                ..Default::default()
+            },
+            spec: Some(ServiceSpec {
+                cluster_ips: Some(cluster_ips.iter().map(|ip| (*ip).to_string()).collect()),
+                ports: Some(service_ports),
+                type_: Some(String::from("NodePort")),
                 ..Default::default()
             }),
             ..Default::default()
@@ -391,6 +619,154 @@ mod tests {
         let expected_removes: HashSet<_> = [owned_v4, owned_v6].into_iter().collect();
         assert_eq!(removes, expected_removes);
         assert!(upserts.is_empty());
+    }
+
+    #[test]
+    fn desired_nodeport_mappings_uses_nodeport_key_and_v4_service_key() {
+        let service = service_with_nodeports(&["10.96.0.10"], &[(80, 30080, "TCP")]);
+        let service_key = ServiceKey::v4(
+            Ipv4Addr::new(10, 96, 0, 10).to_bits(),
+            80,
+            KubeProtocol::Tcp as u8,
+        );
+
+        let desired = desired_nodeport_mappings(&service);
+        let nodeport_key = NodePortKey::new(30080, KubeProtocol::Tcp as u8);
+        assert_eq!(desired.get(&nodeport_key), Some(&service_key));
+    }
+
+    #[test]
+    fn nodeport_global_diff_removes_keys_not_in_desired() {
+        let desired_key = NodePortKey::new(30080, KubeProtocol::Tcp as u8);
+        let stale_key = NodePortKey::new(30081, KubeProtocol::Tcp as u8);
+
+        let mut current = HashMap::default();
+        current.insert(
+            desired_key,
+            ServiceKey::v4(
+                Ipv4Addr::new(10, 96, 0, 10).to_bits(),
+                80,
+                KubeProtocol::Tcp as u8,
+            ),
+        );
+        current.insert(
+            stale_key,
+            ServiceKey::v4(
+                Ipv4Addr::new(10, 96, 0, 11).to_bits(),
+                80,
+                KubeProtocol::Tcp as u8,
+            ),
+        );
+
+        let mut desired = HashMap::default();
+        desired.insert(
+            desired_key,
+            ServiceKey::v4(
+                Ipv4Addr::new(10, 96, 0, 10).to_bits(),
+                80,
+                KubeProtocol::Tcp as u8,
+            ),
+        );
+        let (to_remove, to_upsert) = diff_global_nodeport_reconcile_actions(&current, &desired);
+
+        let expected_remove: HashSet<_> = [stale_key].into_iter().collect();
+        assert_eq!(to_remove, expected_remove);
+        assert_eq!(to_upsert.len(), 1);
+        assert_eq!(to_upsert[0].0, desired_key);
+    }
+
+    #[test]
+    fn desired_nodeport_mappings_for_services_skips_non_nodeport_service_types() {
+        let nodeport_service = service_with_nodeports(&["10.96.0.10"], &[(80, 30080, "TCP")]);
+        let mut cluster_ip_service = service_with_nodeports(&["10.96.0.20"], &[(80, 30090, "TCP")]);
+        if let Some(spec) = &mut cluster_ip_service.spec {
+            spec.type_ = Some("ClusterIP".to_string());
+        }
+        let services = vec![Arc::new(nodeport_service), Arc::new(cluster_ip_service)];
+
+        let desired = desired_nodeport_mappings_for_services(&services);
+        let nodeport_key = NodePortKey::new(30080, KubeProtocol::Tcp as u8);
+        let cluster_ip_nodeport_key = NodePortKey::new(30090, KubeProtocol::Tcp as u8);
+
+        assert!(desired.contains_key(&nodeport_key));
+        assert!(!desired.contains_key(&cluster_ip_nodeport_key));
+    }
+
+    #[test]
+    fn nodeport_diff_removes_stale_owned_keys_on_port_change() {
+        let service = service_with_nodeports(&["10.96.0.10"], &[(80, 30081, "TCP")]);
+        let stale_owned = NodePortKey::new(30080, KubeProtocol::Tcp as u8);
+        let desired_owned = NodePortKey::new(30081, KubeProtocol::Tcp as u8);
+        let foreign = NodePortKey::new(30090, KubeProtocol::Tcp as u8);
+
+        let mut current = HashMap::default();
+        current.insert(
+            stale_owned,
+            ServiceKey::v4(
+                Ipv4Addr::new(10, 96, 0, 10).to_bits(),
+                80,
+                KubeProtocol::Tcp as u8,
+            ),
+        );
+        current.insert(
+            foreign,
+            ServiceKey::v4(
+                Ipv4Addr::new(10, 96, 0, 20).to_bits(),
+                80,
+                KubeProtocol::Tcp as u8,
+            ),
+        );
+
+        let desired = desired_nodeport_mappings(&service);
+        let (to_remove, to_upsert) =
+            diff_nodeport_reconcile_actions(&service, &current, &desired, false);
+
+        let expected_remove: HashSet<_> = [stale_owned].into_iter().collect();
+        assert_eq!(to_remove, expected_remove);
+        assert_eq!(to_upsert.len(), 1);
+        assert_eq!(to_upsert[0].0, desired_owned);
+    }
+
+    #[test]
+    fn nodeport_diff_deletion_removes_all_owned_keys() {
+        let service = service_with_nodeports(&["10.96.0.10"], &[(80, 30080, "TCP")]);
+        let key_one = NodePortKey::new(30080, KubeProtocol::Tcp as u8);
+        let key_two = NodePortKey::new(30081, KubeProtocol::Tcp as u8);
+        let foreign = NodePortKey::new(30090, KubeProtocol::Tcp as u8);
+
+        let mut current = HashMap::default();
+        current.insert(
+            key_one,
+            ServiceKey::v4(
+                Ipv4Addr::new(10, 96, 0, 10).to_bits(),
+                80,
+                KubeProtocol::Tcp as u8,
+            ),
+        );
+        current.insert(
+            key_two,
+            ServiceKey::v4(
+                Ipv4Addr::new(10, 96, 0, 10).to_bits(),
+                443,
+                KubeProtocol::Tcp as u8,
+            ),
+        );
+        current.insert(
+            foreign,
+            ServiceKey::v4(
+                Ipv4Addr::new(10, 96, 0, 20).to_bits(),
+                80,
+                KubeProtocol::Tcp as u8,
+            ),
+        );
+
+        let desired = HashMap::default();
+        let (to_remove, to_upsert) =
+            diff_nodeport_reconcile_actions(&service, &current, &desired, true);
+
+        let expected_remove: HashSet<_> = [key_one, key_two].into_iter().collect();
+        assert_eq!(to_remove, expected_remove);
+        assert!(to_upsert.is_empty());
     }
 
     #[test]

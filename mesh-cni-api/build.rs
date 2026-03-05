@@ -70,6 +70,10 @@ fn main() -> anyhow::Result<()> {
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .type_attribute(
+            "service.v1.NodePortService",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .type_attribute(
             "conntrack.v1.Connection",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )

@@ -34,6 +34,10 @@ pub const BPF_MAP_SERVICES_V4: BpfNamePath = BpfNamePath::Map("services_v4");
 pub const BPF_MAP_SERVICES_V6: BpfNamePath = BpfNamePath::Map("services_v6");
 pub const BPF_MAP_ENDPOINTS_V4: BpfNamePath = BpfNamePath::Map("endpoints_v4");
 pub const BPF_MAP_ENDPOINTS_V6: BpfNamePath = BpfNamePath::Map("endpoints_v6");
+pub const BPF_MAP_NODEPORT_IFACE_INDEXES: BpfNamePath = BpfNamePath::Map("nodeport_iface_indexes");
+pub const BPF_MAP_NODEPORT_LOCAL_ADDRS_V4: BpfNamePath =
+    BpfNamePath::Map("nodeport_local_addrs_v4");
+pub const BPF_MAP_NODEPORT_SERVICES_V4: BpfNamePath = BpfNamePath::Map("nodeport_services_v4");
 pub const BPF_MAP_POLICY_INDEX: BpfNamePath = BpfNamePath::Map("policy_index");
 pub const BPF_MAP_POLICY_RULESET: BpfNamePath = BpfNamePath::Map("policy_ruleset");
 pub const BPF_MAP_POLICY_CIDR_V4: BpfNamePath = BpfNamePath::Map("policy_cidr_v4");
@@ -54,11 +58,14 @@ pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 7] = [
     BPF_MAP_POLICY_CIDR_V6,
 ];
 
-pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 4] = [
+pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 7] = [
     BPF_MAP_SERVICES_V4,
     BPF_MAP_SERVICES_V6,
     BPF_MAP_ENDPOINTS_V4,
     BPF_MAP_ENDPOINTS_V6,
+    BPF_MAP_NODEPORT_IFACE_INDEXES,
+    BPF_MAP_NODEPORT_LOCAL_ADDRS_V4,
+    BPF_MAP_NODEPORT_SERVICES_V4,
 ];
 
 pub(crate) const PROG_LIST: [BpfNamePath; 4] = [

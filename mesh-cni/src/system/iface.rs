@@ -1,6 +1,7 @@
 use anyhow::bail;
 use rtnetlink::{Handle, LinkUnspec};
 use tokio_stream::StreamExt;
+use tracing::info;
 
 use crate::Result;
 
@@ -17,17 +18,24 @@ pub(crate) async fn ensure_mesh_veth() -> Result<()> {
         .match_name(MESH_HOST_INGRESS.to_string())
         .execute();
 
-    let iface_exists = links.try_next().await?.is_some();
+    info!("checking mesh_host interface presence");
+    let iface_exists = match links.try_next().await {
+        Ok(msg) if msg.is_some() => true,
+        Ok(_) => false,
+        Err(e) if is_enodev(&e) => false,
+        Err(e) => return Err(e.into()),
+    };
     if !iface_exists {
+        info!("creating mesh_host/mesh_pod veth");
         let add_result = handle
             .link()
             .add(rtnetlink::LinkVeth::new(MESH_HOST_INGRESS, MESH_POD_INGRESS).build())
             .execute()
             .await;
-        if let Err(err) = add_result
-            && !is_eexist(&err)
+        if let Err(e) = add_result
+            && !is_eexist(&e)
         {
-            return Err(err.into());
+            return Err(e.into());
         }
     }
 
@@ -53,6 +61,13 @@ async fn set_ifaces_up(handle: Handle, ifaces: &[&str]) -> Result<()> {
 fn is_eexist(err: &rtnetlink::Error) -> bool {
     match err {
         rtnetlink::Error::NetlinkError(msg) => msg.to_io().raw_os_error() == Some(libc::EEXIST),
+        _ => false,
+    }
+}
+
+fn is_enodev(err: &rtnetlink::Error) -> bool {
+    match err {
+        rtnetlink::Error::NetlinkError(msg) => msg.to_io().raw_os_error() == Some(libc::ENODEV),
         _ => false,
     }
 }

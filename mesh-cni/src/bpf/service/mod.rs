@@ -4,7 +4,8 @@ mod state;
 use aya::maps::{HashMap, Map, MapData};
 use kube::Client;
 use mesh_cni_ebpf_common::service::{
-    EndpointKey, EndpointValueV4, EndpointValueV6, ServiceKeyV4, ServiceKeyV6, ServiceValue,
+    EndpointKey, EndpointValueV4, EndpointValueV6, NodePortKey, ServiceKeyV4, ServiceKeyV6,
+    ServiceValue,
 };
 use mesh_cni_service_bpf_controller::start_bpf_service_controller;
 pub use state::{ServiceEndpoint, ServiceEndpointBpfMap, ServiceEndpointState};
@@ -13,17 +14,21 @@ use tracing::info;
 
 use crate::{
     Result,
-    bpf::{BPF_MAP_ENDPOINTS_V4, BPF_MAP_ENDPOINTS_V6, BPF_MAP_SERVICES_V4, BPF_MAP_SERVICES_V6},
+    bpf::{
+        BPF_MAP_ENDPOINTS_V4, BPF_MAP_ENDPOINTS_V6, BPF_MAP_NODEPORT_SERVICES_V4,
+        BPF_MAP_SERVICES_V4, BPF_MAP_SERVICES_V6,
+    },
     config::NodePortSettings,
 };
 type ServiceMapV4 = HashMap<MapData, ServiceKeyV4, ServiceValue>;
 type ServiceMapV6 = HashMap<MapData, ServiceKeyV6, ServiceValue>;
 type EndpointMapV4 = HashMap<MapData, EndpointKey, EndpointValueV4>;
 type EndpointMapV6 = HashMap<MapData, EndpointKey, EndpointValueV6>;
+type NodePortServiceMapV4 = HashMap<MapData, NodePortKey, ServiceKeyV4>;
 
-pub async fn run<SE4, SE6>(
+pub async fn run<SE4, SE6, NP>(
     kube_client: Client,
-    service_bpf_state: ServiceEndpointState<SE4, SE6>,
+    service_bpf_state: ServiceEndpointState<SE4, SE6, NP>,
     node_port_settings: NodePortSettings,
     cancel: CancellationToken,
 ) -> Result<()>
@@ -36,12 +41,17 @@ where
         + Send
         + Sync
         + 'static,
+    NP: crate::bpf::BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>
+        + Send
+        + Sync
+        + 'static,
 {
     let service_controller =
         start_bpf_service_controller(kube_client, service_bpf_state, cancel.child_token());
 
     tokio::spawn(service_controller);
-    nodeport_iface::start_nodeport_iface_reconciler(node_port_settings, cancel.child_token())?;
+    nodeport_iface::start_nodeport_iface_reconciler(node_port_settings, cancel.child_token())
+        .await?;
 
     Ok(())
 }
@@ -72,4 +82,12 @@ pub fn load_endpoint_maps() -> Result<(EndpointMapV4, EndpointMapV6)> {
     let ipv6_map = ipv6_map.try_into()?;
 
     Ok((ipv4_map, ipv6_map))
+}
+
+pub fn load_nodeport_service_map() -> Result<NodePortServiceMapV4> {
+    info!("loading nodeport service map");
+    let map = MapData::from_pin(BPF_MAP_NODEPORT_SERVICES_V4.path())?;
+    let map = Map::HashMap(map);
+    let map = map.try_into()?;
+    Ok(map)
 }

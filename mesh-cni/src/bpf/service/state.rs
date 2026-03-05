@@ -5,17 +5,30 @@ use std::{
 
 use ahash::{HashMap, HashMapExt};
 use anyhow::anyhow;
+use aya::maps::MapError;
 use mesh_cni_ebpf_common::{
     Id,
     service::{
-        EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, ServiceKey, ServiceKeyV4,
-        ServiceKeyV6, ServiceValue,
+        EndpointKey, EndpointValue, EndpointValueV4, EndpointValueV6, NodePortKey, ServiceKey,
+        ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
 };
 use mesh_cni_service_bpf_controller::{Error as BpfControllerError, ServiceBpfState};
 use tracing::warn;
 
 use crate::{Result, bpf::BpfMap};
+
+fn is_map_not_found_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<MapError>()
+        .is_some_and(|map_err| match map_err {
+            MapError::KeyNotFound | MapError::ElementNotFound => true,
+            MapError::SyscallError(sys_err) => {
+                sys_err.io_error.raw_os_error() == Some(libc::ENOENT)
+            }
+            MapError::IoError(io_err) => io_err.raw_os_error() == Some(libc::ENOENT),
+            _ => false,
+        })
+}
 
 pub trait ServiceEndpointBpfMap {
     type SKey: std::hash::Hash + std::cmp::Eq + Clone;
@@ -208,36 +221,42 @@ where
     }
 }
 
-struct Shared<SE4, SE6>
+struct Shared<SE4, SE6, NP>
 where
     SE4: ServiceEndpointBpfMap,
     SE6: ServiceEndpointBpfMap,
+    NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
-    state: Mutex<State<SE4, SE6>>,
+    state: Mutex<State<SE4, SE6, NP>>,
 }
 
-struct State<SE4, SE6>
+struct State<SE4, SE6, NP>
 where
     SE4: ServiceEndpointBpfMap,
     SE6: ServiceEndpointBpfMap,
+    NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     service_endpoint_v4: SE4,
     service_endpoint_v6: SE6,
+    nodeport_cache: ahash::HashMap<NodePortKey, ServiceKeyV4>,
+    nodeport_map: NP,
     id: Id,
 }
 
-pub struct ServiceEndpointState<SE4, SE6>
+pub struct ServiceEndpointState<SE4, SE6, NP>
 where
     SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
     SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
-    shared: Arc<Shared<SE4, SE6>>,
+    shared: Arc<Shared<SE4, SE6, NP>>,
 }
 
-impl<SE4, SE6> Clone for ServiceEndpointState<SE4, SE6>
+impl<SE4, SE6, NP> Clone for ServiceEndpointState<SE4, SE6, NP>
 where
     SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
     SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -246,15 +265,22 @@ where
     }
 }
 
-impl<SE4, SE6> ServiceEndpointState<SE4, SE6>
+impl<SE4, SE6, NP> ServiceEndpointState<SE4, SE6, NP>
 where
     SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
     SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
-    pub(crate) fn new(service_endpoint_v4: SE4, service_endpoint_v6: SE6) -> Self {
+    pub(crate) fn new(
+        service_endpoint_v4: SE4,
+        service_endpoint_v6: SE6,
+        nodeport_map: NP,
+    ) -> Self {
         let state = State {
             service_endpoint_v4,
             service_endpoint_v6,
+            nodeport_cache: ahash::HashMap::default(),
+            nodeport_map,
             id: 128,
         };
 
@@ -318,6 +344,56 @@ where
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn update_nodeport(&self, key: NodePortKey, service_key: ServiceKey) -> Result<()> {
+        let mut state = self.shared.state.lock().unwrap();
+        let service_key_v4 = match service_key {
+            ServiceKey::V4(service_key_v4) => service_key_v4,
+            ServiceKey::V6(_) => {
+                return Err(anyhow!("nodeport map only supports ipv4 service keys"));
+            }
+        };
+        state.nodeport_map.update(key, service_key_v4)?;
+        state.nodeport_cache.insert(key, service_key_v4);
+        Ok(())
+    }
+
+    pub(crate) fn remove_nodeport(&self, key: &NodePortKey) -> Result<()> {
+        let mut state = self.shared.state.lock().unwrap();
+        match state.nodeport_map.delete(key) {
+            Ok(()) => {
+                state.nodeport_cache.remove(key);
+                Ok(())
+            }
+            Err(err) if is_map_not_found_error(&err) => {
+                state.nodeport_cache.remove(key);
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    pub(crate) fn nodeport_state_from_map(
+        &self,
+    ) -> Result<ahash::HashMap<NodePortKey, ServiceKey>> {
+        let state = self.shared.state.lock().unwrap();
+        let map = state.nodeport_map.get_state()?;
+        Ok(map
+            .into_iter()
+            .map(|(nodeport_key, service_key)| (nodeport_key, ServiceKey::V4(service_key)))
+            .collect())
+    }
+
+    pub(crate) fn nodeport_state_from_cache(
+        &self,
+    ) -> Result<ahash::HashMap<NodePortKey, ServiceKey>> {
+        let state = self.shared.state.lock().unwrap();
+        Ok(state
+            .nodeport_cache
+            .iter()
+            .map(|(nodeport_key, service_key)| (*nodeport_key, ServiceKey::V4(*service_key)))
+            .collect())
     }
 
     pub(crate) fn state_from_cache(
@@ -398,10 +474,11 @@ where
     }
 }
 
-impl<SE4, SE6> ServiceBpfState for ServiceEndpointState<SE4, SE6>
+impl<SE4, SE6, NP> ServiceBpfState for ServiceEndpointState<SE4, SE6, NP>
 where
     SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
     SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     fn update(
         &self,
@@ -424,6 +501,27 @@ where
         ServiceEndpointState::state_from_map(self)
             .map_err(|e| BpfControllerError::BpfState(e.to_string()))
     }
+
+    fn update_nodeport(
+        &self,
+        key: NodePortKey,
+        service_key: ServiceKey,
+    ) -> std::result::Result<(), BpfControllerError> {
+        ServiceEndpointState::update_nodeport(self, key, service_key)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn remove_nodeport(&self, key: &NodePortKey) -> std::result::Result<(), BpfControllerError> {
+        ServiceEndpointState::remove_nodeport(self, key)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
+
+    fn nodeport_state(
+        &self,
+    ) -> std::result::Result<ahash::HashMap<NodePortKey, ServiceKey>, BpfControllerError> {
+        ServiceEndpointState::nodeport_state_from_map(self)
+            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -444,6 +542,27 @@ mod test {
         let service_map: HashMap<ServiceKeyV4, ServiceValue> = HashMap::default();
         let endpoint_map: HashMap<EndpointKey, EndpointValueV4> = HashMap::default();
         ServiceEndpoint::new(service_map, endpoint_map)
+    }
+
+    fn new_service_endpoint_state() -> ServiceEndpointState<
+        ServiceEndpoint<
+            HashMap<ServiceKeyV4, ServiceValue>,
+            HashMap<EndpointKey, EndpointValueV4>,
+            ServiceKeyV4,
+            EndpointValueV4,
+        >,
+        ServiceEndpoint<
+            HashMap<ServiceKeyV6, ServiceValue>,
+            HashMap<EndpointKey, EndpointValueV6>,
+            ServiceKeyV6,
+            EndpointValueV6,
+        >,
+        HashMap<NodePortKey, ServiceKeyV4>,
+    > {
+        let service_v4 = ServiceEndpoint::new(HashMap::default(), HashMap::default());
+        let service_v6 = ServiceEndpoint::new(HashMap::default(), HashMap::default());
+        let nodeport = HashMap::default();
+        ServiceEndpointState::new(service_v4, service_v6, nodeport)
     }
 
     #[test]
@@ -517,6 +636,36 @@ mod test {
             1
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn update_nodeport_uses_service_value() -> crate::Result<()> {
+        let state = new_service_endpoint_state();
+        let service_key = ServiceKey::v4(
+            Ipv4Addr::new(10, 96, 0, 10).to_bits(),
+            80,
+            KubeProtocol::Tcp as u8,
+        );
+        let endpoint = EndpointValue::V4(EndpointValueV4 {
+            ip: Ipv4Addr::new(10, 0, 0, 2).to_bits(),
+            port: 8080,
+            _protocol: KubeProtocol::Tcp as u8,
+        });
+        state.update(service_key, vec![endpoint])?;
+
+        let nodeport_key = NodePortKey::new(30080, KubeProtocol::Tcp as u8);
+        state.update_nodeport(
+            nodeport_key,
+            ServiceKey::v4(
+                Ipv4Addr::new(10, 96, 0, 10).to_bits(),
+                80,
+                KubeProtocol::Tcp as u8,
+            ),
+        )?;
+        let nodeport_state = state.nodeport_state_from_map()?;
+
+        assert!(nodeport_state.contains_key(&nodeport_key));
         Ok(())
     }
 }

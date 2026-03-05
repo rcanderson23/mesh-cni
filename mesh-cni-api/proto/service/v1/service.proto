@@ -4,6 +4,7 @@ package grpc.service.v1;
 
 service Service {
     rpc ListServices(ListServicesRequest) returns (ListServicesReply) {};
+    rpc ListNodePorts(ListNodePortsRequest) returns (ListNodePortsReply) {};
 }
 
 message ListServicesReply {
@@ -20,3 +21,14 @@ message ServiceWithEndpoints {
   repeated string endpoints = 3;
 }
 
+message ListNodePortsReply {
+  repeated NodePortService node_ports = 1;
+}
+
+message ListNodePortsRequest {}
+
+message NodePortService {
+  uint32 node_port = 1;
+  string protocol = 2;
+  string service_endpoint = 3;
+}

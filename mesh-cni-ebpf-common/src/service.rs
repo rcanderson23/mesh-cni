@@ -115,3 +115,23 @@ pub struct EndpointValueV6 {
 }
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for EndpointValueV6 {}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct NodePortKey {
+    pub port: u16,
+    pub protocol: u8,
+    pub _pad: u8,
+}
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for NodePortKey {}
+
+impl NodePortKey {
+    pub const fn new(port: u16, protocol: u8) -> Self {
+        Self {
+            port,
+            protocol,
+            _pad: 0,
+        }
+    }
+}

@@ -38,6 +38,26 @@ impl Tabled for crate::service::v1::ServiceWithEndpoints {
     }
 }
 
+impl Tabled for crate::service::v1::NodePortService {
+    const LENGTH: usize = 3;
+
+    fn fields(&self) -> Vec<std::borrow::Cow<'_, str>> {
+        vec![
+            Cow::Owned(self.node_port.to_string()),
+            Cow::Borrowed(&self.protocol),
+            Cow::Borrowed(&self.service_endpoint),
+        ]
+    }
+
+    fn headers() -> Vec<std::borrow::Cow<'static, str>> {
+        vec![
+            Cow::Borrowed("NODEPORT"),
+            Cow::Borrowed("PROTOCOL"),
+            Cow::Borrowed("SERVICE_ENDPOINT"),
+        ]
+    }
+}
+
 impl Tabled for crate::conntrack::v1::Connection {
     const LENGTH: usize = 4;
 
