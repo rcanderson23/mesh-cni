@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
     let ready = tokio_util::sync::CancellationToken::new();
     match cli.command {
         mesh_cni::config::Commands::Agent(agent_args) => {
-            system::ensure_proxy_settings(&agent_args.proxy_settings)?;
+            system::ensure_proxy_settings(&agent_args.proxy_settings).await?;
             cni::ensure_cni_preconditions(&agent_args.cni_settings).await?;
 
             let mut readiness_handle = tokio::spawn(http::serve(
