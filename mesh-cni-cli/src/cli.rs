@@ -46,9 +46,6 @@ pub enum IpCommands {
 pub enum ServiceCommands {
     /// List the Service and their associated IDs
     List {
-        #[arg(long)]
-        /// When set, pulls data from the bpf map instead of the cache
-        from_map: bool,
         #[arg(short = 'o', long, value_enum, default_value_t = OutputFormat::Table)]
         output: OutputFormat,
     },
