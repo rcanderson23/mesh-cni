@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::{
-    Context, Result, SERVICE_OWNER_LABEL, ServiceBpfState,
+    Context, Result, SERVICE_OWNER_LABEL, ServiceDataplane,
     controller::{error_policy, reconcile, reconcile_all_nodeports, reconcile_nodeports},
     utils::shutdown,
 };
@@ -23,7 +23,7 @@ pub async fn start_bpf_service_controller<B>(
     cancel: CancellationToken,
 ) -> Result<()>
 where
-    B: ServiceBpfState + Clone + Send + Sync + 'static,
+    B: ServiceDataplane + Clone + Send + Sync + 'static,
 {
     let service_api: Api<Service> = Api::all(kube_client.clone());
     let (service_state, service_subscriber) =

@@ -17,14 +17,14 @@ use mesh_cni_ebpf_common::{
 use mesh_cni_meshendpoint_gen_controller::ANNOTATION_MESH_SERVICE;
 use tracing::{error, info};
 
-use crate::{Context, Error, Result, ServiceBpfState};
+use crate::{Context, Error, NodePortReader, NodePortWriter, Result, ServiceReader, ServiceWriter};
 
 const DEFAULT_REQUEUE_DURATION: Duration = Duration::from_secs(300);
 const ERROR_REQUEUE_DURATION: Duration = Duration::from_secs(5);
 const MISSING_MESH_ENDPOINT_REQUEUE_DURATION: Duration = Duration::from_secs(5);
 pub const SERVICE_OWNER_LABEL: &str = "kubernetes.io/service-name";
 
-pub async fn reconcile<B: ServiceBpfState>(
+pub async fn reconcile<B: ServiceWriter + ServiceReader>(
     service: Arc<Service>,
     ctx: Arc<Context<B>>,
 ) -> Result<Action> {
@@ -41,7 +41,7 @@ pub async fn reconcile<B: ServiceBpfState>(
     }
 }
 
-pub async fn reconcile_nodeports<B: ServiceBpfState>(
+pub async fn reconcile_nodeports<B: NodePortWriter + NodePortReader>(
     service: Arc<Service>,
     ctx: Arc<Context<B>>,
 ) -> Result<Action> {
@@ -55,7 +55,9 @@ pub async fn reconcile_nodeports<B: ServiceBpfState>(
     Ok(Action::await_change())
 }
 
-pub(crate) fn reconcile_all_nodeports<B: ServiceBpfState>(ctx: &Context<B>) -> Result<()> {
+pub(crate) fn reconcile_all_nodeports<B: NodePortWriter + NodePortReader>(
+    ctx: &Context<B>,
+) -> Result<()> {
     let desired_nodeports = desired_nodeport_mappings_for_services(&ctx.service_state.state());
     let current_nodeports = ctx.service_bpf_state.nodeport_state()?;
     let (keys_to_remove, keys_to_upsert) =
@@ -66,39 +68,39 @@ pub(crate) fn reconcile_all_nodeports<B: ServiceBpfState>(ctx: &Context<B>) -> R
     }
     for (nodeport_key, service_key) in keys_to_upsert {
         ctx.service_bpf_state
-            .update_nodeport(nodeport_key, service_key)?;
+            .upsert_nodeport(nodeport_key, service_key)?;
     }
 
     Ok(())
 }
 
-pub async fn reconcile_local_service<B: ServiceBpfState>(
+pub async fn reconcile_local_service<B: ServiceWriter + ServiceReader>(
     service: Arc<Service>,
     ctx: Arc<Context<B>>,
 ) -> Result<Action> {
     let desired = generate_desired_service_pairs(&service, &ctx);
-    let current = ctx.service_bpf_state.state()?;
+    let current = ctx.service_bpf_state.service_state()?;
     let is_deletion = service.meta().deletion_timestamp.is_some();
     let (keys_to_remove, entries_to_upsert) =
         diff_service_reconcile_actions(&service, &current, &desired, is_deletion);
 
     for key in keys_to_remove {
-        ctx.service_bpf_state.remove(&key)?;
+        ctx.service_bpf_state.remove_service(&key)?;
     }
 
     for (key, endpoints) in entries_to_upsert {
-        ctx.service_bpf_state.update(key, endpoints)?;
+        ctx.service_bpf_state.upsert_service(key, endpoints)?;
     }
 
     Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
 }
 
-pub async fn reconcile_multi_cluster_service<B: ServiceBpfState>(
+pub async fn reconcile_multi_cluster_service<B: ServiceWriter + ServiceReader>(
     service: Arc<Service>,
     ctx: Arc<Context<B>>,
 ) -> Result<Action> {
     let desired = generate_service_pairs_from_meps(&service, &ctx);
-    let current = ctx.service_bpf_state.state()?;
+    let current = ctx.service_bpf_state.service_state()?;
     let is_deletion = service.meta().deletion_timestamp.is_some();
     let mesh_endpoint_count = mesh_endpoint_count_for_service(&service, &ctx);
     let service_owned_key_count = service_owned_keys(&service, &current).len();
@@ -121,28 +123,24 @@ pub async fn reconcile_multi_cluster_service<B: ServiceBpfState>(
         diff_service_reconcile_actions(&service, &current, &desired, is_deletion);
 
     for key in keys_to_remove {
-        ctx.service_bpf_state.remove(&key)?;
+        ctx.service_bpf_state.remove_service(&key)?;
     }
 
     for (key, endpoints) in entries_to_upsert {
-        ctx.service_bpf_state.update(key, endpoints)?;
+        ctx.service_bpf_state.upsert_service(key, endpoints)?;
     }
 
     Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
 }
 
-pub fn error_policy<B: ServiceBpfState>(
-    service: Arc<Service>,
-    err: &Error,
-    _ctx: Arc<Context<B>>,
-) -> Action {
+pub fn error_policy<B>(service: Arc<Service>, err: &Error, _ctx: Arc<Context<B>>) -> Action {
     let ns = service.namespace().unwrap_or_default();
     let ns_name = format!("{}/{}", ns, service.name_any());
     error!(%err, "error reconciling {}", ns_name);
     Action::requeue(ERROR_REQUEUE_DURATION)
 }
 
-fn generate_desired_service_pairs<B: ServiceBpfState>(
+fn generate_desired_service_pairs<B>(
     service: &Service,
     ctx: &Context<B>,
 ) -> HashMap<ServiceKey, Vec<EndpointValue>> {
@@ -152,7 +150,7 @@ fn generate_desired_service_pairs<B: ServiceBpfState>(
     mesh_endpoint.generate_bpf_service_endpoints(&service_ips)
 }
 
-fn generate_service_pairs_from_meps<B: ServiceBpfState>(
+fn generate_service_pairs_from_meps<B>(
     service: &Service,
     ctx: &Context<B>,
 ) -> HashMap<ServiceKey, Vec<EndpointValue>> {
@@ -197,10 +195,7 @@ fn key_matches_service_ip(key: &ServiceKey, ips: &HashSet<IpAddr>) -> bool {
     ips.contains(&service_ip)
 }
 
-fn mesh_endpoint_count_for_service<B: ServiceBpfState>(
-    service: &Service,
-    ctx: &Context<B>,
-) -> usize {
+fn mesh_endpoint_count_for_service<B>(service: &Service, ctx: &Context<B>) -> usize {
     let Some(namespace) = service.namespace() else {
         return 0;
     };
@@ -261,7 +256,7 @@ fn is_meshed_service(service: &Service) -> bool {
     val.to_lowercase() == "true"
 }
 
-fn inner_reconcile_nodeports<B: ServiceBpfState>(
+fn inner_reconcile_nodeports<B: NodePortWriter + NodePortReader>(
     service: &Service,
     ctx: &Context<B>,
 ) -> Result<()> {
@@ -280,7 +275,7 @@ fn inner_reconcile_nodeports<B: ServiceBpfState>(
     }
     for (nodeport_key, service_key) in entries_to_upsert {
         ctx.service_bpf_state
-            .update_nodeport(nodeport_key, service_key)?;
+            .upsert_nodeport(nodeport_key, service_key)?;
     }
     Ok(())
 }

@@ -13,7 +13,9 @@ use mesh_cni_ebpf_common::{
         ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
 };
-use mesh_cni_service_bpf_controller::{Error as BpfControllerError, ServiceBpfState};
+use mesh_cni_service_bpf_controller::{
+    Error as ControllerError, NodePortReader, NodePortWriter, ServiceReader, ServiceWriter,
+};
 use tracing::warn;
 
 use crate::{Result, bpf::BpfMap};
@@ -30,28 +32,118 @@ fn is_map_not_found_error(err: &anyhow::Error) -> bool {
         })
 }
 
-pub trait ServiceEndpointBpfMap {
-    type SKey: std::hash::Hash + std::cmp::Eq + Clone;
-    type EValue: Clone + std::cmp::PartialEq;
-    fn update(&mut self, key: Self::SKey, value: Vec<&Self::EValue>, id: Id) -> Result<Id>;
-    fn remove(&mut self, key: &Self::SKey) -> Result<()>;
-    fn get_from_cache(&self, key: &Self::SKey) -> Option<&ServiceValue>;
-    fn insert_new_service(
-        &mut self,
-        key: Self::SKey,
-        value: Vec<&Self::EValue>,
-        id: Id,
-    ) -> Result<Id>;
-    fn insert_endpoints(
-        &mut self,
-        service_value: &ServiceValue,
-        endpoints: Vec<&Self::EValue>,
-    ) -> Result<()>;
-    fn delete_endpoints(&mut self, service_value: &ServiceValue, range: Range<u16>) -> Result<()>;
-    fn get_service_cache(&self) -> &ahash::HashMap<Self::SKey, ServiceValue>;
-    fn get_service_map(&self) -> Result<ahash::HashMap<Self::SKey, ServiceValue>>;
-    fn get_endpoint_cache(&self) -> &ahash::HashMap<EndpointKey, Self::EValue>;
-    fn get_endpoint_map(&self) -> Result<ahash::HashMap<EndpointKey, Self::EValue>>;
+pub trait ServiceMapStore {
+    type SKey: std::hash::Hash + std::cmp::Eq + Copy;
+    fn update_service(&mut self, key: Self::SKey, value: ServiceValue) -> Result<()>;
+    fn delete_service(&mut self, key: &Self::SKey) -> Result<()>;
+    fn get_cached_service(&self, key: &Self::SKey) -> Option<&ServiceValue>;
+    fn insert_cached_service(&mut self, key: Self::SKey, value: ServiceValue);
+    fn remove_cached_service(&mut self, key: &Self::SKey);
+    fn service_cache(&self) -> &ahash::HashMap<Self::SKey, ServiceValue>;
+    fn service_map_state(&self) -> Result<ahash::HashMap<Self::SKey, ServiceValue>>;
+}
+
+pub trait EndpointMapStore {
+    type EValue: std::cmp::PartialEq + Copy;
+    fn update_endpoint(&mut self, key: EndpointKey, value: Self::EValue) -> Result<()>;
+    fn delete_endpoint(&mut self, key: &EndpointKey) -> Result<()>;
+    fn insert_cached_endpoint(&mut self, key: EndpointKey, value: Self::EValue);
+    fn remove_cached_endpoint(&mut self, key: &EndpointKey);
+    fn endpoint_cache(&self) -> &ahash::HashMap<EndpointKey, Self::EValue>;
+    fn endpoint_map_state(&self) -> Result<ahash::HashMap<EndpointKey, Self::EValue>>;
+}
+
+fn insert_endpoints<S>(
+    store: &mut S,
+    service_value: &ServiceValue,
+    endpoints: Vec<&S::EValue>,
+) -> Result<()>
+where
+    S: EndpointMapStore,
+{
+    for (position, ep) in endpoints.iter().enumerate() {
+        let position =
+            u16::try_from(position).map_err(|e| anyhow!("failed to convert position: {}", e))?;
+        let endpoint_key = EndpointKey::new(service_value.id, position);
+        store.update_endpoint(endpoint_key, **ep)?;
+        store.insert_cached_endpoint(endpoint_key, **ep);
+    }
+    Ok(())
+}
+
+fn delete_endpoints<S>(store: &mut S, service_value: &ServiceValue, range: Range<u16>) -> Result<()>
+where
+    S: EndpointMapStore,
+{
+    for idx in range {
+        let endpoint_key = EndpointKey::new(service_value.id, idx);
+        store.delete_endpoint(&endpoint_key)?;
+        store.remove_cached_endpoint(&endpoint_key);
+    }
+    Ok(())
+}
+
+fn update_service_with_endpoints<S>(
+    store: &mut S,
+    key: S::SKey,
+    endpoints: Vec<&S::EValue>,
+    mut id: Id,
+) -> Result<Id>
+where
+    S: ServiceMapStore + EndpointMapStore,
+{
+    let new_count = u16::try_from(endpoints.len()).map_err(|e| anyhow!(e.to_string()))?;
+
+    let Some(current_service_value) = store.get_cached_service(&key).copied() else {
+        let service_value = ServiceValue {
+            id,
+            count: new_count,
+        };
+        store.update_service(key, service_value)?;
+        store.insert_cached_service(key, service_value);
+        insert_endpoints(store, &service_value, endpoints)?;
+        id += 1;
+        return Ok(id);
+    };
+
+    let new_service_value = ServiceValue {
+        id: current_service_value.id,
+        count: new_count,
+    };
+
+    if new_count > current_service_value.count {
+        // Ensure new endpoint slots are populated before datapath can select them.
+        insert_endpoints(store, &new_service_value, endpoints)?;
+        store.update_service(key, new_service_value)?;
+    } else {
+        store.update_service(key, new_service_value)?;
+        insert_endpoints(store, &new_service_value, endpoints)?;
+
+        if current_service_value.count > new_count {
+            delete_endpoints(
+                store,
+                &new_service_value,
+                new_count..current_service_value.count,
+            )?;
+        }
+    }
+    store.insert_cached_service(key, new_service_value);
+
+    Ok(current_service_value.id)
+}
+
+fn remove_service_with_endpoints<S>(store: &mut S, key: &S::SKey) -> Result<()>
+where
+    S: ServiceMapStore + EndpointMapStore,
+{
+    let Some(service_value) = store.get_cached_service(key).copied() else {
+        return Ok(());
+    };
+
+    delete_endpoints(store, &service_value, 0..service_value.count)?;
+    store.delete_service(key)?;
+    store.remove_cached_service(key);
+    Ok(())
 }
 
 pub struct ServiceEndpoint<S, E, SK, EV>
@@ -74,144 +166,115 @@ where
     SK: std::hash::Hash + std::cmp::Eq + Clone + Copy,
     EV: Clone + std::cmp::PartialEq + Copy,
 {
-    // TODO: create cached maps from bpf maps?
-    pub fn new(service_map: S, endpoint_map: E) -> Self {
-        Self {
-            service_cache: ahash::HashMap::default(),
+    pub fn new(service_map: S, endpoint_map: E) -> Result<Self>
+    where
+        S: BpfMap<Key = SK, Value = ServiceValue, KeyOutput = SK>,
+        E: BpfMap<Key = EndpointKey, Value = EV, KeyOutput = EndpointKey>,
+    {
+        let service_cache = service_map.get_state()?;
+        let endpoint_cache = endpoint_map.get_state()?;
+        Ok(Self {
+            service_cache,
             service_map,
-            endpoint_cache: ahash::HashMap::default(),
+            endpoint_cache,
             endpoint_map,
-        }
+        })
+    }
+    pub fn update(&mut self, key: SK, value: Vec<&EV>, id: Id) -> Result<Id>
+    where
+        Self: ServiceMapStore<SKey = SK> + EndpointMapStore<EValue = EV>,
+    {
+        update_service_with_endpoints(self, key, value, id)
+    }
+
+    pub fn remove(&mut self, key: &SK) -> Result<()>
+    where
+        Self: ServiceMapStore<SKey = SK> + EndpointMapStore<EValue = EV>,
+    {
+        remove_service_with_endpoints(self, key)
+    }
+
+    pub fn get_from_cache(&self, key: &SK) -> Option<&ServiceValue>
+    where
+        Self: ServiceMapStore<SKey = SK>,
+    {
+        self.get_cached_service(key)
     }
 }
 
-impl<S, E, SK, EV> ServiceEndpointBpfMap for ServiceEndpoint<S, E, SK, EV>
+impl<S, E, SK, EV> ServiceMapStore for ServiceEndpoint<S, E, SK, EV>
 where
     S: BpfMap<Key = SK, Value = ServiceValue, KeyOutput = SK>,
     E: BpfMap<Key = EndpointKey, Value = EV, KeyOutput = EndpointKey>,
     SK: std::hash::Hash + std::cmp::Eq + Clone + Copy,
-    EV: Clone + std::cmp::PartialEq + Copy,
+    EV: std::cmp::PartialEq + Copy,
 {
     type SKey = SK;
-    type EValue = EV;
-    fn update(&mut self, key: Self::SKey, value: Vec<&Self::EValue>, id: Id) -> Result<Id> {
-        let new_count = u16::try_from(value.len()).map_err(|e| anyhow!(e.to_string()))?;
 
-        let Some(current_service_value) = self.service_cache.get(&key) else {
-            return self.insert_new_service(key, value, id);
-        };
-
-        let id = current_service_value.id;
-        let old_count = current_service_value.count;
-
-        let new_service_value = ServiceValue {
-            id,
-            count: new_count,
-        };
-
-        if new_count > old_count {
-            // Ensure new endpoint slots are populated before datapath can select them.
-            self.insert_endpoints(&new_service_value, value)?;
-            self.service_map.update(key, new_service_value)?;
-        } else {
-            self.service_map.update(key, new_service_value)?;
-            self.insert_endpoints(&new_service_value, value)?;
-
-            if old_count > new_count {
-                self.delete_endpoints(&new_service_value, new_count..old_count)?;
-            }
-        }
-        self.service_cache.insert(key, new_service_value);
-
-        Ok(id)
+    fn update_service(&mut self, key: Self::SKey, value: ServiceValue) -> Result<()> {
+        self.service_map.update(key, value)
     }
 
-    fn remove(&mut self, key: &Self::SKey) -> Result<()> {
-        let Some(service_value) = self.service_cache.get(key) else {
-            return Ok(());
-        };
-        let service_value = *service_value;
-
-        let range = 0..service_value.count;
-        self.delete_endpoints(&service_value, range)?;
-
-        self.service_map.delete(key)?;
-        self.service_cache.remove(key);
-        Ok(())
+    fn delete_service(&mut self, key: &Self::SKey) -> Result<()> {
+        self.service_map.delete(key)
     }
 
-    fn get_from_cache(&self, key: &Self::SKey) -> Option<&ServiceValue> {
+    fn get_cached_service(&self, key: &Self::SKey) -> Option<&ServiceValue> {
         self.service_cache.get(key)
     }
 
-    fn insert_new_service(
-        &mut self,
-        key: Self::SKey,
-        value: Vec<&Self::EValue>,
-        mut id: Id,
-    ) -> Result<Id> {
-        let count = u16::try_from(value.len()).map_err(|e| anyhow!(e.to_string()))?;
-        let service_value = ServiceValue { id, count };
-
-        self.service_map.update(key, service_value)?;
-        self.service_cache.insert(key, service_value);
-
-        for (position, endpoint) in value.iter().enumerate() {
-            let endpoint_key = EndpointKey::new(
-                id,
-                u16::try_from(position).map_err(|e| anyhow!(e.to_string()))?,
-            );
-
-            self.endpoint_map.update(endpoint_key, **endpoint)?;
-            self.endpoint_cache.insert(endpoint_key, **endpoint);
-        }
-        id += 1;
-        Ok(id)
+    fn insert_cached_service(&mut self, key: Self::SKey, value: ServiceValue) {
+        self.service_cache.insert(key, value);
     }
 
-    fn insert_endpoints(
-        &mut self,
-        service_value: &ServiceValue,
-        endpoints: Vec<&Self::EValue>,
-    ) -> Result<()> {
-        for (position, ep) in endpoints.iter().enumerate() {
-            let position = u16::try_from(position)
-                .map_err(|e| anyhow!("failed to convert position: {}", e))?;
-            let endpoint_key = EndpointKey::new(service_value.id, position);
-            self.endpoint_map.update(endpoint_key, **ep)?;
-            self.endpoint_cache.insert(endpoint_key, **ep);
-        }
-        Ok(())
+    fn remove_cached_service(&mut self, key: &Self::SKey) {
+        self.service_cache.remove(key);
     }
 
-    fn delete_endpoints(&mut self, service_value: &ServiceValue, range: Range<u16>) -> Result<()> {
-        for idx in range {
-            let endpoint_key = EndpointKey::new(service_value.id, idx);
-            self.endpoint_map.delete(&endpoint_key)?;
-            self.endpoint_cache.remove(&endpoint_key);
-        }
-        Ok(())
-    }
-
-    fn get_service_cache(&self) -> &ahash::HashMap<Self::SKey, ServiceValue> {
+    fn service_cache(&self) -> &ahash::HashMap<Self::SKey, ServiceValue> {
         &self.service_cache
     }
 
-    fn get_service_map(&self) -> Result<ahash::HashMap<Self::SKey, ServiceValue>> {
+    fn service_map_state(&self) -> Result<ahash::HashMap<Self::SKey, ServiceValue>> {
         let mut map = HashMap::default();
         let state = self.service_map.get_state()?;
-
         for (k, v) in state.iter() {
             map.insert(*k, *v);
         }
         Ok(map)
     }
+}
 
-    fn get_endpoint_cache(&self) -> &ahash::HashMap<EndpointKey, Self::EValue> {
+impl<S, E, SK, EV> EndpointMapStore for ServiceEndpoint<S, E, SK, EV>
+where
+    S: BpfMap<Key = SK, Value = ServiceValue, KeyOutput = SK>,
+    E: BpfMap<Key = EndpointKey, Value = EV, KeyOutput = EndpointKey>,
+    SK: std::hash::Hash + std::cmp::Eq + Clone + Copy,
+    EV: std::cmp::PartialEq + Copy,
+{
+    type EValue = EV;
+
+    fn update_endpoint(&mut self, key: EndpointKey, value: Self::EValue) -> Result<()> {
+        self.endpoint_map.update(key, value)
+    }
+
+    fn delete_endpoint(&mut self, key: &EndpointKey) -> Result<()> {
+        self.endpoint_map.delete(key)
+    }
+
+    fn insert_cached_endpoint(&mut self, key: EndpointKey, value: Self::EValue) {
+        self.endpoint_cache.insert(key, value);
+    }
+
+    fn remove_cached_endpoint(&mut self, key: &EndpointKey) {
+        self.endpoint_cache.remove(key);
+    }
+
+    fn endpoint_cache(&self) -> &ahash::HashMap<EndpointKey, Self::EValue> {
         &self.endpoint_cache
     }
 
-    fn get_endpoint_map(&self) -> Result<ahash::HashMap<EndpointKey, Self::EValue>> {
+    fn endpoint_map_state(&self) -> Result<ahash::HashMap<EndpointKey, Self::EValue>> {
         let mut map = HashMap::default();
         let state = self.endpoint_map.get_state()?;
         for (k, v) in state.iter() {
@@ -223,8 +286,8 @@ where
 
 struct Shared<SE4, SE6, NP>
 where
-    SE4: ServiceEndpointBpfMap,
-    SE6: ServiceEndpointBpfMap,
+    SE4: ServiceMapStore + EndpointMapStore,
+    SE6: ServiceMapStore + EndpointMapStore,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     state: Mutex<State<SE4, SE6, NP>>,
@@ -232,8 +295,8 @@ where
 
 struct State<SE4, SE6, NP>
 where
-    SE4: ServiceEndpointBpfMap,
-    SE6: ServiceEndpointBpfMap,
+    SE4: ServiceMapStore + EndpointMapStore,
+    SE6: ServiceMapStore + EndpointMapStore,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     service_endpoint_v4: SE4,
@@ -245,8 +308,8 @@ where
 
 pub struct ServiceEndpointState<SE4, SE6, NP>
 where
-    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
-    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    SE4: ServiceMapStore<SKey = ServiceKeyV4> + EndpointMapStore<EValue = EndpointValueV4>,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6> + EndpointMapStore<EValue = EndpointValueV6>,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     shared: Arc<Shared<SE4, SE6, NP>>,
@@ -254,8 +317,8 @@ where
 
 impl<SE4, SE6, NP> Clone for ServiceEndpointState<SE4, SE6, NP>
 where
-    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
-    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    SE4: ServiceMapStore<SKey = ServiceKeyV4> + EndpointMapStore<EValue = EndpointValueV4>,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6> + EndpointMapStore<EValue = EndpointValueV6>,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     fn clone(&self) -> Self {
@@ -267,21 +330,39 @@ where
 
 impl<SE4, SE6, NP> ServiceEndpointState<SE4, SE6, NP>
 where
-    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
-    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    SE4: ServiceMapStore<SKey = ServiceKeyV4> + EndpointMapStore<EValue = EndpointValueV4>,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6> + EndpointMapStore<EValue = EndpointValueV6>,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     pub(crate) fn new(
         service_endpoint_v4: SE4,
         service_endpoint_v6: SE6,
         nodeport_map: NP,
-    ) -> Self {
+    ) -> Result<Self> {
+        let nodeport_cache = nodeport_map.get_state()?;
+        let next_id = {
+            let max_id_v4 = service_endpoint_v4
+                .service_cache()
+                .values()
+                .map(|service_value| service_value.id)
+                .max();
+            let max_id_v6 = service_endpoint_v6
+                .service_cache()
+                .values()
+                .map(|service_value| service_value.id)
+                .max();
+            let max_existing = max_id_v4.into_iter().chain(max_id_v6).max();
+            std::cmp::max(
+                128,
+                max_existing.map(|id| id.saturating_add(1)).unwrap_or(128),
+            )
+        };
         let state = State {
             service_endpoint_v4,
             service_endpoint_v6,
-            nodeport_cache: ahash::HashMap::default(),
+            nodeport_cache,
             nodeport_map,
-            id: 128,
+            id: next_id,
         };
 
         let shared = Shared {
@@ -289,7 +370,7 @@ where
         };
         let shared = Arc::new(shared);
 
-        Self { shared }
+        Ok(Self { shared })
     }
 
     pub(crate) fn update(&self, key: ServiceKey, value: Vec<EndpointValue>) -> Result<()> {
@@ -307,9 +388,12 @@ where
                         }
                     })
                     .collect();
-                state
-                    .service_endpoint_v4
-                    .update(service_key_v4, endpoints, current_id)?
+                update_service_with_endpoints(
+                    &mut state.service_endpoint_v4,
+                    service_key_v4,
+                    endpoints,
+                    current_id,
+                )?
             }
             ServiceKey::V6(service_key_v6) => {
                 let endpoints = value
@@ -322,9 +406,12 @@ where
                         }
                     })
                     .collect();
-                state
-                    .service_endpoint_v6
-                    .update(service_key_v6, endpoints, current_id)?
+                update_service_with_endpoints(
+                    &mut state.service_endpoint_v6,
+                    service_key_v6,
+                    endpoints,
+                    current_id,
+                )?
             }
         };
         if new_id > current_id {
@@ -337,10 +424,10 @@ where
         let mut state = self.shared.state.lock().unwrap();
         match key {
             ServiceKey::V4(service_key_v4) => {
-                state.service_endpoint_v4.remove(service_key_v4)?;
+                remove_service_with_endpoints(&mut state.service_endpoint_v4, service_key_v4)?;
             }
             ServiceKey::V6(service_key_v6) => {
-                state.service_endpoint_v6.remove(service_key_v6)?;
+                remove_service_with_endpoints(&mut state.service_endpoint_v6, service_key_v6)?;
             }
         }
         Ok(())
@@ -374,17 +461,6 @@ where
         }
     }
 
-    pub(crate) fn nodeport_state_from_map(
-        &self,
-    ) -> Result<ahash::HashMap<NodePortKey, ServiceKey>> {
-        let state = self.shared.state.lock().unwrap();
-        let map = state.nodeport_map.get_state()?;
-        Ok(map
-            .into_iter()
-            .map(|(nodeport_key, service_key)| (nodeport_key, ServiceKey::V4(service_key)))
-            .collect())
-    }
-
     pub(crate) fn nodeport_state_from_cache(
         &self,
     ) -> Result<ahash::HashMap<NodePortKey, ServiceKey>> {
@@ -401,8 +477,8 @@ where
     ) -> Result<ahash::HashMap<ServiceKey, Vec<EndpointValue>>> {
         let state = self.shared.state.lock().unwrap();
         let mut map = ahash::HashMap::new();
-        let cached_service_v4 = state.service_endpoint_v4.get_service_cache();
-        let cached_endpoints_v4 = state.service_endpoint_v4.get_endpoint_cache();
+        let cached_service_v4 = state.service_endpoint_v4.service_cache();
+        let cached_endpoints_v4 = state.service_endpoint_v4.endpoint_cache();
         for (k, v) in cached_service_v4 {
             let mut endpoints = vec![];
             let count = v.count;
@@ -416,8 +492,8 @@ where
             }
             map.insert(ServiceKey::V4(k.to_owned()), endpoints);
         }
-        let cached_service_v6 = state.service_endpoint_v6.get_service_cache();
-        let cached_endpoints_v6 = state.service_endpoint_v6.get_endpoint_cache();
+        let cached_service_v6 = state.service_endpoint_v6.service_cache();
+        let cached_endpoints_v6 = state.service_endpoint_v6.endpoint_cache();
         for (k, v) in cached_service_v6 {
             let mut endpoints = vec![];
             let count = v.count;
@@ -433,94 +509,75 @@ where
         }
         Ok(map)
     }
-
-    // TODO: refactor with state from cache into one func
-    pub(crate) fn state_from_map(&self) -> Result<ahash::HashMap<ServiceKey, Vec<EndpointValue>>> {
-        let mut map = ahash::HashMap::default();
-        let guard = self.shared.state.lock().unwrap();
-        let service_map_v4 = guard.service_endpoint_v4.get_service_map()?;
-        let endpoint_map_v4 = guard.service_endpoint_v4.get_endpoint_map()?;
-
-        for (k, v) in service_map_v4 {
-            let mut endpoints = vec![];
-            let count = v.count;
-            for idx in 0..count {
-                let Some(endpoint_value) = endpoint_map_v4.get(&EndpointKey::new(v.id, idx)) else {
-                    warn!("did not find endpoints with id {} and idx {}", v.id, idx);
-                    continue;
-                };
-                endpoints.push(EndpointValue::V4(endpoint_value.to_owned()));
-            }
-            map.insert(ServiceKey::V4(k.to_owned()), endpoints);
-        }
-
-        let service_map_v6 = guard.service_endpoint_v6.get_service_map()?;
-        let endpoint_map_v6 = guard.service_endpoint_v6.get_endpoint_map()?;
-
-        for (k, v) in service_map_v6 {
-            let mut endpoints = vec![];
-            let count = v.count;
-            for idx in 0..count {
-                let Some(endpoint_value) = endpoint_map_v6.get(&EndpointKey::new(v.id, idx)) else {
-                    warn!("did not find endpoints with id {} and idx {}", v.id, idx);
-                    continue;
-                };
-                endpoints.push(EndpointValue::V6(endpoint_value.to_owned()));
-            }
-            map.insert(ServiceKey::V6(k.to_owned()), endpoints);
-        }
-
-        Ok(map)
-    }
 }
 
-impl<SE4, SE6, NP> ServiceBpfState for ServiceEndpointState<SE4, SE6, NP>
+impl<SE4, SE6, NP> ServiceWriter for ServiceEndpointState<SE4, SE6, NP>
 where
-    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
-    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    SE4: ServiceMapStore<SKey = ServiceKeyV4> + EndpointMapStore<EValue = EndpointValueV4>,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6> + EndpointMapStore<EValue = EndpointValueV6>,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
-    fn update(
+    fn upsert_service(
         &self,
         key: ServiceKey,
         value: Vec<EndpointValue>,
-    ) -> std::result::Result<(), BpfControllerError> {
+    ) -> std::result::Result<(), ControllerError> {
         ServiceEndpointState::update(self, key, value)
-            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+            .map_err(|e| ControllerError::BpfState(e.to_string()))
     }
 
-    fn remove(&self, key: &ServiceKey) -> std::result::Result<(), BpfControllerError> {
+    fn remove_service(&self, key: &ServiceKey) -> std::result::Result<(), ControllerError> {
         ServiceEndpointState::remove(self, key)
-            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+            .map_err(|e| ControllerError::BpfState(e.to_string()))
     }
+}
 
-    fn state(
-        &self,
-    ) -> std::result::Result<ahash::HashMap<ServiceKey, Vec<EndpointValue>>, BpfControllerError>
-    {
-        ServiceEndpointState::state_from_map(self)
-            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
-    }
-
-    fn update_nodeport(
+impl<SE4, SE6, NP> NodePortWriter for ServiceEndpointState<SE4, SE6, NP>
+where
+    SE4: ServiceMapStore<SKey = ServiceKeyV4> + EndpointMapStore<EValue = EndpointValueV4>,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6> + EndpointMapStore<EValue = EndpointValueV6>,
+    NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+{
+    fn upsert_nodeport(
         &self,
         key: NodePortKey,
         service_key: ServiceKey,
-    ) -> std::result::Result<(), BpfControllerError> {
+    ) -> std::result::Result<(), ControllerError> {
         ServiceEndpointState::update_nodeport(self, key, service_key)
-            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+            .map_err(|e| ControllerError::BpfState(e.to_string()))
     }
 
-    fn remove_nodeport(&self, key: &NodePortKey) -> std::result::Result<(), BpfControllerError> {
+    fn remove_nodeport(&self, key: &NodePortKey) -> std::result::Result<(), ControllerError> {
         ServiceEndpointState::remove_nodeport(self, key)
-            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+            .map_err(|e| ControllerError::BpfState(e.to_string()))
     }
+}
 
+impl<SE4, SE6, NP> ServiceReader for ServiceEndpointState<SE4, SE6, NP>
+where
+    SE4: ServiceMapStore<SKey = ServiceKeyV4> + EndpointMapStore<EValue = EndpointValueV4>,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6> + EndpointMapStore<EValue = EndpointValueV6>,
+    NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+{
+    fn service_state(
+        &self,
+    ) -> std::result::Result<ahash::HashMap<ServiceKey, Vec<EndpointValue>>, ControllerError> {
+        ServiceEndpointState::state_from_cache(self)
+            .map_err(|e| ControllerError::BpfState(e.to_string()))
+    }
+}
+
+impl<SE4, SE6, NP> NodePortReader for ServiceEndpointState<SE4, SE6, NP>
+where
+    SE4: ServiceMapStore<SKey = ServiceKeyV4> + EndpointMapStore<EValue = EndpointValueV4>,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6> + EndpointMapStore<EValue = EndpointValueV6>,
+    NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
+{
     fn nodeport_state(
         &self,
-    ) -> std::result::Result<ahash::HashMap<NodePortKey, ServiceKey>, BpfControllerError> {
-        ServiceEndpointState::nodeport_state_from_map(self)
-            .map_err(|e| BpfControllerError::BpfState(e.to_string()))
+    ) -> std::result::Result<ahash::HashMap<NodePortKey, ServiceKey>, ControllerError> {
+        ServiceEndpointState::nodeport_state_from_cache(self)
+            .map_err(|e| ControllerError::BpfState(e.to_string()))
     }
 }
 
@@ -541,7 +598,7 @@ mod test {
     > {
         let service_map: HashMap<ServiceKeyV4, ServiceValue> = HashMap::default();
         let endpoint_map: HashMap<EndpointKey, EndpointValueV4> = HashMap::default();
-        ServiceEndpoint::new(service_map, endpoint_map)
+        ServiceEndpoint::new(service_map, endpoint_map).unwrap()
     }
 
     fn new_service_endpoint_state() -> ServiceEndpointState<
@@ -559,10 +616,10 @@ mod test {
         >,
         HashMap<NodePortKey, ServiceKeyV4>,
     > {
-        let service_v4 = ServiceEndpoint::new(HashMap::default(), HashMap::default());
-        let service_v6 = ServiceEndpoint::new(HashMap::default(), HashMap::default());
+        let service_v4 = ServiceEndpoint::new(HashMap::default(), HashMap::default()).unwrap();
+        let service_v6 = ServiceEndpoint::new(HashMap::default(), HashMap::default()).unwrap();
         let nodeport = HashMap::default();
-        ServiceEndpointState::new(service_v4, service_v6, nodeport)
+        ServiceEndpointState::new(service_v4, service_v6, nodeport).unwrap()
     }
 
     #[test]
@@ -663,7 +720,7 @@ mod test {
                 KubeProtocol::Tcp as u8,
             ),
         )?;
-        let nodeport_state = state.nodeport_state_from_map()?;
+        let nodeport_state = state.nodeport_state_from_cache()?;
 
         assert!(nodeport_state.contains_key(&nodeport_key));
         Ok(())

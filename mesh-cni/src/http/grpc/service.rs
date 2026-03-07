@@ -17,15 +17,21 @@ use tracing::info;
 
 use crate::bpf::{
     BpfMap,
-    service::{ServiceEndpointBpfMap, ServiceEndpointState},
+    service::{EndpointMapStore, ServiceEndpointState, ServiceMapStore},
 };
 
 pub fn server<SE4, SE6, NP>(
     state: ServiceEndpointState<SE4, SE6, NP>,
 ) -> ServiceServer<Server<SE4, SE6, NP>>
 where
-    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4> + Send + 'static,
-    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6> + Send + 'static,
+    SE4: ServiceMapStore<SKey = ServiceKeyV4>
+        + EndpointMapStore<EValue = EndpointValueV4>
+        + Send
+        + 'static,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6>
+        + EndpointMapStore<EValue = EndpointValueV6>
+        + Send
+        + 'static,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey> + Send + 'static,
 {
     info!("creating new service state");
@@ -36,8 +42,8 @@ where
 #[derive(Clone)]
 pub struct Server<SE4, SE6, NP>
 where
-    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
-    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    SE4: ServiceMapStore<SKey = ServiceKeyV4> + EndpointMapStore<EValue = EndpointValueV4>,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6> + EndpointMapStore<EValue = EndpointValueV6>,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     state: ServiceEndpointState<SE4, SE6, NP>,
@@ -45,8 +51,8 @@ where
 
 impl<SE4, SE6, NP> Server<SE4, SE6, NP>
 where
-    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>,
-    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>,
+    SE4: ServiceMapStore<SKey = ServiceKeyV4> + EndpointMapStore<EValue = EndpointValueV4>,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6> + EndpointMapStore<EValue = EndpointValueV6>,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey>,
 {
     pub fn new(state: ServiceEndpointState<SE4, SE6, NP>) -> Self {
@@ -57,24 +63,24 @@ where
 #[tonic::async_trait]
 impl<SE4, SE6, NP> ServiceApi for Server<SE4, SE6, NP>
 where
-    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4> + Send + 'static,
-    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6> + Send + 'static,
+    SE4: ServiceMapStore<SKey = ServiceKeyV4>
+        + EndpointMapStore<EValue = EndpointValueV4>
+        + Send
+        + 'static,
+    SE6: ServiceMapStore<SKey = ServiceKeyV6>
+        + EndpointMapStore<EValue = EndpointValueV6>
+        + Send
+        + 'static,
     NP: BpfMap<Key = NodePortKey, Value = ServiceKeyV4, KeyOutput = NodePortKey> + Send + 'static,
 {
     async fn list_services(
         &self,
-        request: Request<ListServicesRequest>,
+        _request: Request<ListServicesRequest>,
     ) -> std::result::Result<Response<ListServicesReply>, Status> {
-        let request = request.into_inner();
-        let state = if request.from_map {
-            self.state
-                .state_from_map()
-                .map_err(|e| Status::new(tonic::Code::Internal, e.to_string()))?
-        } else {
-            self.state
-                .state_from_cache()
-                .map_err(|e| Status::new(tonic::Code::Internal, e.to_string()))?
-        };
+        let state = self
+            .state
+            .state_from_cache()
+            .map_err(|e| Status::new(tonic::Code::Internal, e.to_string()))?;
         let mut services = vec![];
         for (k, v) in state.iter() {
             let (service_endpoint, protocol, endpoints) = match k {

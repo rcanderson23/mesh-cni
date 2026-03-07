@@ -8,7 +8,7 @@ use mesh_cni_ebpf_common::service::{
     ServiceValue,
 };
 use mesh_cni_service_bpf_controller::start_bpf_service_controller;
-pub use state::{ServiceEndpoint, ServiceEndpointBpfMap, ServiceEndpointState};
+pub use state::{EndpointMapStore, ServiceEndpoint, ServiceEndpointState, ServiceMapStore};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -33,11 +33,13 @@ pub async fn run<SE4, SE6, NP>(
     cancel: CancellationToken,
 ) -> Result<()>
 where
-    SE4: ServiceEndpointBpfMap<SKey = ServiceKeyV4, EValue = EndpointValueV4>
+    SE4: ServiceMapStore<SKey = ServiceKeyV4>
+        + EndpointMapStore<EValue = EndpointValueV4>
         + Send
         + Sync
         + 'static,
-    SE6: ServiceEndpointBpfMap<SKey = ServiceKeyV6, EValue = EndpointValueV6>
+    SE6: ServiceMapStore<SKey = ServiceKeyV6>
+        + EndpointMapStore<EValue = EndpointValueV6>
         + Send
         + Sync
         + 'static,

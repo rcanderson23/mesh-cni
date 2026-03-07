@@ -65,13 +65,13 @@ pub async fn start(
     let nodeport_service_map = bpf::service::load_nodeport_service_map()?;
 
     info!("starting kube service service");
-    let service_endpoint_v4 = ServiceEndpoint::new(service_map_v4, endpoint_map_v4);
-    let service_endpoint_v6 = ServiceEndpoint::new(service_map_v6, endpoint_map_v6);
+    let service_endpoint_v4 = ServiceEndpoint::new(service_map_v4, endpoint_map_v4)?;
+    let service_endpoint_v6 = ServiceEndpoint::new(service_map_v6, endpoint_map_v6)?;
     let state = ServiceEndpointState::new(
         service_endpoint_v4,
         service_endpoint_v6,
         nodeport_service_map,
-    );
+    )?;
     bpf::service::run(
         kube_client.clone(),
         state.clone(),
