@@ -25,8 +25,14 @@ pub async fn run<IP4, IP6>(
     cancel: CancellationToken,
 ) -> Result<()>
 where
-    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId> + Send + Sync + 'static,
-    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId> + Send + Sync + 'static,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>
+        + Send
+        + Sync
+        + 'static,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>
+        + Send
+        + Sync
+        + 'static,
 {
     bootstrap_default_identities(&ipstate)?;
 
@@ -38,8 +44,14 @@ where
 
 fn bootstrap_default_identities<IP4, IP6>(ipstate: &IpNetworkState<IP4, IP6>) -> Result<()>
 where
-    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId> + Send + Sync + 'static,
-    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId> + Send + Sync + 'static,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>
+        + Send
+        + Sync
+        + 'static,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>
+        + Send
+        + Sync
+        + 'static,
 {
     let defaults = [
         IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(127, 0, 0, 0), 8)?),

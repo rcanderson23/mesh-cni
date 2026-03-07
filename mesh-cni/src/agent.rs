@@ -47,7 +47,7 @@ pub async fn start(
 
     info!("loading ip maps");
     let (ipv4_map, ipv6_map) = bpf::ip::load_maps()?;
-    let state = IpNetworkState::new(ipv4_map, ipv6_map);
+    let state = IpNetworkState::try_new(ipv4_map, ipv6_map)?;
 
     info!("starting ip service");
     bpf::ip::run(
@@ -65,8 +65,8 @@ pub async fn start(
     let nodeport_service_map = bpf::service::load_nodeport_service_map()?;
 
     info!("starting kube service service");
-    let service_endpoint_v4 = ServiceEndpoint::new(service_map_v4, endpoint_map_v4)?;
-    let service_endpoint_v6 = ServiceEndpoint::new(service_map_v6, endpoint_map_v6)?;
+    let service_endpoint_v4 = ServiceEndpoint::try_new(service_map_v4, endpoint_map_v4)?;
+    let service_endpoint_v6 = ServiceEndpoint::try_new(service_map_v6, endpoint_map_v6)?;
     let state = ServiceEndpointState::new(
         service_endpoint_v4,
         service_endpoint_v6,
