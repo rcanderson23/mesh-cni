@@ -1,17 +1,27 @@
 use core::net::Ipv4Addr;
 
 use aya_ebpf::{
-    bindings::{TC_ACT_PIPE, bpf_sock_addr},
-    helpers::generated::bpf_get_prandom_u32,
+    bindings::{BPF_F_INGRESS, TC_ACT_PIPE, bpf_sock_addr},
+    helpers::{bpf_redirect, generated::bpf_get_prandom_u32},
     programs::{SockAddrContext, TcContext},
 };
 use aya_log_ebpf::debug;
-use mesh_cni_ebpf_common::service::{EndpointKey, ServiceKeyV4};
+use mesh_cni_ebpf_common::service::{EndpointKey, NodePortKey, ServiceKeyV4};
+use network_types::{
+    eth::{EthHdr, EtherType},
+    ip::{IpProto, Ipv4Hdr},
+    tcp::TcpHdr,
+    udp::UdpHdr,
+};
 
-use crate::{ENDPOINTS_V4, SERVICES_V4};
+use crate::{
+    ENDPOINTS_V4, NODEPORT_IFACE_INDEXES, NODEPORT_LOCAL_ADDRS_V4, NODEPORT_SERVICES_V4,
+    SERVICES_V4,
+};
 
 const AF_INET: u16 = 2;
 const _AF_INET6: u16 = 10;
+const MESH_HOST_IFACE_KEY: u32 = 0;
 
 // https://docs.ebpf.io/linux/program-type/BPF_PROG_TYPE_CGROUP_SOCK_ADDR/#context
 // Example: https://docs.ebpf.io/linux/program-type/BPF_PROG_TYPE_CGROUP_SOCK_ADDR/#example
@@ -102,7 +112,58 @@ fn get_position(count: u16) -> u16 {
     rand % count
 }
 
+// TODO: implement ipv6
+// TODO: consider sctp?
 #[inline]
-pub fn try_mesh_cni_nodeport_ingress(_ctx: TcContext) -> Result<i32, i32> {
-    Ok(TC_ACT_PIPE)
+pub fn try_mesh_cni_nodeport_ingress(ctx: TcContext) -> Result<i32, i32> {
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let Ok(ether_type) = ethhdr.ether_type() else {
+        return Ok(TC_ACT_PIPE);
+    };
+    if !matches!(ether_type, EtherType::Ipv4) {
+        return Ok(TC_ACT_PIPE);
+    }
+
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let ihl = ipv4hdr.ihl();
+    let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
+
+    // pass traffic that isn't pointed at IPs assigned to attached ifaces
+    // as this could meant for pods
+    if unsafe { NODEPORT_LOCAL_ADDRS_V4.get(dst_ip) }.is_none() {
+        return Ok(TC_ACT_PIPE);
+    }
+
+    let (dst_port, proto) = match ipv4hdr.proto {
+        IpProto::Tcp => {
+            let tcphdr: TcpHdr = ctx
+                .load(EthHdr::LEN + ihl as usize)
+                .map_err(|_| TC_ACT_PIPE)?;
+            (u16::from_be_bytes(tcphdr.dest), IpProto::Tcp as u8)
+        }
+        IpProto::Udp => {
+            let udphdr: UdpHdr = ctx
+                .load(EthHdr::LEN + ihl as usize)
+                .map_err(|_| TC_ACT_PIPE)?;
+            (u16::from_be_bytes(udphdr.dst), IpProto::Udp as u8)
+        }
+        _ => return Ok(TC_ACT_PIPE),
+    };
+
+    let nodeport_key = NodePortKey::new(dst_port, proto);
+    let Some(service_key) = (unsafe { NODEPORT_SERVICES_V4.get(nodeport_key).copied() }) else {
+        return Ok(TC_ACT_PIPE);
+    };
+    if unsafe { SERVICES_V4.get(service_key).is_none() } {
+        return Ok(TC_ACT_PIPE);
+    };
+
+    let Some(mesh_host_ifindex) = NODEPORT_IFACE_INDEXES.get(MESH_HOST_IFACE_KEY).copied() else {
+        return Ok(TC_ACT_PIPE);
+    };
+    if mesh_host_ifindex == 0 {
+        return Ok(TC_ACT_PIPE);
+    }
+
+    Ok(unsafe { bpf_redirect(mesh_host_ifindex, BPF_F_INGRESS as u64) as i32 })
 }

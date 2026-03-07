@@ -52,6 +52,11 @@ pub enum ServiceCommands {
         #[arg(short = 'o', long, value_enum, default_value_t = OutputFormat::Table)]
         output: OutputFormat,
     },
+    /// List NodePort to Service mappings
+    ListNodePorts {
+        #[arg(short = 'o', long, value_enum, default_value_t = OutputFormat::Table)]
+        output: OutputFormat,
+    },
 }
 
 #[derive(Clone, Subcommand, Debug)]
