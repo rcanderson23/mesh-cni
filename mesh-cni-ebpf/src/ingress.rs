@@ -1,3 +1,5 @@
+use core::net::Ipv4Addr;
+
 use aya_ebpf::{
     bindings::{TC_ACT_PIPE, TC_ACT_SHOT},
     helpers::bpf_ktime_get_ns,
@@ -52,8 +54,8 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         warn!(
             &ctx,
             "dropping ingress packet with unknown dst identity src_ip: {}; dst_ip: {}",
-            src_ip,
-            dst_ip
+            Ipv4Addr::from_bits(src_ip),
+            Ipv4Addr::from_bits(dst_ip),
         );
         return Ok(TC_ACT_SHOT);
     };

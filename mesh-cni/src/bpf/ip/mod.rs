@@ -36,9 +36,12 @@ where
 {
     bootstrap_default_identities(&ipstate)?;
 
-    let controllers = start_identity_controllers(kube_client, node_name, cancel, ipstate);
-
-    tokio::spawn(controllers);
+    tokio::spawn(start_identity_controllers(
+        kube_client,
+        node_name,
+        cancel,
+        ipstate,
+    ));
     Ok(())
 }
 

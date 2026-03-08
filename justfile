@@ -1,6 +1,6 @@
 name := "mesh-cni"
 container_image := "ghcr.io/rcanderson23/" + name
-kind_path := "./kind/single-node.yaml"
+kind_path := "./kind/two-node.yaml"
 kindnet_image := "docker.io/kindest/kindnetd:v20230809-80a64d96"
 kubeconfig_dir := "./.kube"
 cluster1_name := "cluster1"

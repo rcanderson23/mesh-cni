@@ -55,16 +55,16 @@ pub fn delete(args: &Args, input: Input) -> Response {
     let mut seen_iface = HashSet::new();
 
     for interface in &prev.interfaces {
-        let Some(netns) = interface.sandbox.as_ref() else {
-            continue;
-        };
-        let netns = netns.clone();
-
-        let iface_key = format!("{netns}:{}", interface.name);
+        let netns = interface.sandbox.clone();
+        let iface_key = format!(
+            "{}:{}",
+            netns.clone().unwrap_or_else(|| "NONE".into()),
+            interface.name
+        );
         if seen_iface.insert(iface_key) {
             reqs.push(DeletePodRequest {
                 iface: interface.name.clone(),
-                net_namespace: Some(netns.clone()),
+                net_namespace: netns,
                 container_id: args.container_id.clone(),
                 chained: true,
             });

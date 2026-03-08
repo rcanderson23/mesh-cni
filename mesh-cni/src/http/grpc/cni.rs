@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use aya::programs::{
     SchedClassifier, TcAttachType,
     links::{FdLink, LinkError, PinnedLink},
@@ -19,7 +19,7 @@ use mesh_cni_policy_controller::{Context, PolicyDataplane, reconcile_identity};
 use netns_rs::get_from_path;
 use tokio::time::{Duration, sleep};
 use tonic::{Code, Request, Response, Status};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::{
     Result,
@@ -84,6 +84,11 @@ impl<P: ReconcilePolicy + Send + Sync + 'static> CniApi for CniState<P> {
             unpin_iface_paths(&request.container_id, iface)
                 .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
         }
+        if let Some(netns) = request.net_namespace.as_deref() {
+            let _netns_path = netns_path(self.netns_dir.clone(), netns).map_err(|e| {
+                tonic::Status::new(Code::Internal, format!("failed to build netns path: {}", e))
+            })?;
+        }
 
         Ok(Response::new(DeletePodReply {}))
     }
@@ -92,8 +97,12 @@ impl<P: ReconcilePolicy + Send + Sync + 'static> CniApi for CniState<P> {
 async fn add_pod<P: ReconcilePolicy>(
     reconciler: &P,
     request: AddPodRequest,
-    mut netns_dir: PathBuf,
+    netns_dir: PathBuf,
 ) -> Result<AddPodReply> {
+    let Some(netns) = &request.net_namespace else {
+        warn!(iface = %request.iface, "skipping add_pod for interface without sandbox");
+        return Ok(AddPodReply::default());
+    };
     let mut last_error = None;
     for attempt in 0..5 {
         match reconciler.reconcile_policy(&request.pod_name, &request.pod_namespace) {
@@ -117,19 +126,10 @@ async fn add_pod<P: ReconcilePolicy>(
         bail!(e);
     }
 
-    let Some(netns) = &request.net_namespace else {
-        bail!("recieved add request for interface not in a network namespace");
-    };
-    let netns_name = PathBuf::from(netns);
-    let netns_name = netns_name
-        .file_name()
-        .ok_or(anyhow::anyhow!("failed to get file name from netns path"))?
-        .to_str()
-        .ok_or(anyhow::anyhow!("failed to convert netns path file to str"))?;
-    netns_dir.push(netns_name);
+    let netns_path = netns_path(netns_dir, netns)?;
 
-    let ns = get_from_path(netns_dir)?;
-    let _ = ns.run(|_| {
+    let ns = get_from_path(netns_path)?;
+    ns.run(|_| {
         let mut attached = Vec::new();
         for iface in [&request.iface, "lo"] {
             if let Err(e) = attach_for_iface(
@@ -149,14 +149,9 @@ async fn add_pod<P: ReconcilePolicy>(
             attached.push(iface);
         }
         Ok(())
-    })?;
+    })??;
 
-    Ok(AddPodReply {
-        interfaces: Vec::new(),
-        ips: Vec::new(),
-        routes: Vec::new(),
-        dns: None,
-    })
+    Ok(AddPodReply::default())
 }
 
 fn unpin_path(path: impl AsRef<Path>) -> Result<()> {
@@ -178,14 +173,10 @@ fn unpin_path(path: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
-fn link_name(container_id: &str, iface: &str) -> String {
+fn pin_path(container_id: &str, iface: &str, attach_type: TcAttachType) -> PathBuf {
     let container_id = container_id.replace('/', "_");
     let iface = iface.replace('/', "_");
-    format!("{}_{}", container_id, iface)
-}
-
-fn pin_path(container_id: &str, iface: &str, attach_type: TcAttachType) -> PathBuf {
-    let link_name = link_name(container_id, iface);
+    let link_name = format!("{}_{}", container_id, iface);
     match attach_type {
         TcAttachType::Ingress => PathBuf::from(BPF_MESH_LINKS_DIR)
             .join(format!("{}{link_name}_ingress", MESH_LINK_PREFIX)),
@@ -255,6 +246,17 @@ fn attach_for_iface(
     }
 
     Ok(())
+}
+
+fn netns_path(mut netns_dir: PathBuf, netns: &str) -> Result<PathBuf> {
+    let netns_name = PathBuf::from(netns);
+    let netns_name = netns_name
+        .file_name()
+        .ok_or(anyhow!("failed to get file name from netns path"))?
+        .to_str()
+        .ok_or(anyhow!("failed to convert netns path file to str"))?;
+    netns_dir.push(netns_name);
+    Ok(netns_dir)
 }
 
 pub trait ReconcilePolicy {

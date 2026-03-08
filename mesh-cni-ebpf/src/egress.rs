@@ -10,6 +10,7 @@ use aya_log_ebpf::{error, warn};
 use mesh_cni_ebpf_common::{
     conntrack::ConntrackValue,
     policy::{Action, PolicyDirection, WORLD_ID},
+    service::NodePortRevNatV4Key,
 };
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -20,8 +21,9 @@ use network_types::{
 };
 
 use crate::{
-    CONNTRACK_V4, id_v4,
+    CONNTRACK_V4, NODEPORT_REV_NAT_V4, id_v4,
     policy::{check_cidr_policy_v4, check_identity_policy, conntrack_hit, conntrack_keys},
+    service::Protocol,
 };
 
 #[inline]
@@ -47,6 +49,53 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     let src_ip = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
+    let (proto, src_port, dst_port, should_insert) = match ipv4hdr.proto {
+        network_types::ip::IpProto::Tcp => {
+            let tcphdr: TcpHdr = ctx
+                .load(EthHdr::LEN + ipv4hdr.ihl() as usize)
+                .map_err(|_| TC_ACT_PIPE)?;
+            let syn = tcphdr.syn() == 1;
+            let ack = tcphdr.ack() == 1;
+            (
+                Protocol::Tcp,
+                u16::from_be_bytes(tcphdr.source),
+                u16::from_be_bytes(tcphdr.dest),
+                syn && !ack,
+            )
+        }
+        network_types::ip::IpProto::Udp => {
+            let udphdr: UdpHdr = ctx
+                .load(EthHdr::LEN + ipv4hdr.ihl() as usize)
+                .map_err(|_| TC_ACT_PIPE)?;
+            (
+                Protocol::Udp,
+                u16::from_be_bytes(udphdr.src),
+                u16::from_be_bytes(udphdr.dst),
+                true,
+            )
+        }
+        network_types::ip::IpProto::Sctp => {
+            let sctphdr: SctpHdr = ctx
+                .load(EthHdr::LEN + ipv4hdr.ihl() as usize)
+                .map_err(|_| TC_ACT_PIPE)?;
+            (
+                Protocol::Sctp,
+                u16::from_be_bytes(sctphdr.src),
+                u16::from_be_bytes(sctphdr.dst),
+                true,
+            )
+        }
+        _ => return Ok(TC_ACT_PIPE),
+    };
+
+    // Let NodePort reply traffic pass policy/identity checks on this hook.
+    // It will be redirected by pod-veth egress and reverse-NATed on mesh_pod ingress.
+    let rev_nat_key =
+        NodePortRevNatV4Key::new_egress(src_ip, dst_ip, src_port, dst_port, proto as u8);
+    if unsafe { NODEPORT_REV_NAT_V4.get(rev_nat_key) }.is_some() {
+        return Ok(TC_ACT_PIPE);
+    }
+
     // LpmTrie expects big endian order for comparisons.
     // Local endpoint identity must exist; unresolved peer identity is treated as world.
     let Some(src_id) = id_v4(LpmKey::new(32, src_ip.to_be())) else {
@@ -59,61 +108,36 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         return Ok(TC_ACT_SHOT);
     };
     let dst_id = id_v4(LpmKey::new(32, dst_ip.to_be())).unwrap_or(WORLD_ID);
-
-    let (proto, src_port, dst_port, should_insert) = match ipv4hdr.proto {
-        network_types::ip::IpProto::Tcp => {
-            let tcphdr: TcpHdr = ctx
-                .load(EthHdr::LEN + Ipv4Hdr::LEN)
-                .map_err(|_| TC_ACT_PIPE)?;
-            let syn = tcphdr.syn() == 1;
-            let ack = tcphdr.ack() == 1;
-            (
-                ipv4hdr.proto as u8,
-                u16::from_be_bytes(tcphdr.source),
-                u16::from_be_bytes(tcphdr.dest),
-                syn && !ack,
-            )
-        }
-        network_types::ip::IpProto::Udp => {
-            let udphdr: UdpHdr = ctx
-                .load(EthHdr::LEN + Ipv4Hdr::LEN)
-                .map_err(|_| TC_ACT_PIPE)?;
-            (
-                ipv4hdr.proto as u8,
-                u16::from_be_bytes(udphdr.src),
-                u16::from_be_bytes(udphdr.dst),
-                true,
-            )
-        }
-        network_types::ip::IpProto::Sctp => {
-            let sctphdr: SctpHdr = ctx
-                .load(EthHdr::LEN + Ipv4Hdr::LEN)
-                .map_err(|_| TC_ACT_PIPE)?;
-            (
-                ipv4hdr.proto as u8,
-                u16::from_be_bytes(sctphdr.src),
-                u16::from_be_bytes(sctphdr.dst),
-                true,
-            )
-        }
-        _ => return Ok(TC_ACT_PIPE),
-    };
-
-    let (ct_key, ct_rev) = conntrack_keys(src_ip, dst_ip, src_port, dst_port, proto, src_id);
+    let (ct_key, ct_rev) = conntrack_keys(src_ip, dst_ip, src_port, dst_port, proto as u8, src_id);
 
     let now = unsafe { bpf_ktime_get_ns() };
     if conntrack_hit(&ctx, ct_key, ct_rev, now) {
         return Ok(TC_ACT_PIPE);
     }
 
-    if check_identity_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Egress)
-        == Action::Deny
-        && check_cidr_policy_v4(src_id, dst_ip, dst_port, proto, PolicyDirection::Egress)
-            == Action::Deny
+    if check_identity_policy(
+        src_id,
+        dst_id,
+        dst_port,
+        proto as u8,
+        PolicyDirection::Egress,
+    ) == Action::Deny
+        && check_cidr_policy_v4(
+            src_id,
+            dst_ip,
+            dst_port,
+            proto as u8,
+            PolicyDirection::Egress,
+        ) == Action::Deny
     {
         warn!(
             &ctx,
-            "denied src: {}:{}; dst: {}:{}; proto: {}", src_id, src_port, dst_id, dst_port, proto
+            "denied src: {}:{}; dst: {}:{}; proto: {}",
+            src_id,
+            src_port,
+            dst_id,
+            dst_port,
+            proto as u8
         );
         return Ok(TC_ACT_SHOT);
     }

@@ -102,16 +102,14 @@ pub fn add(args: &Args, input: Input) -> Response {
     let mut seen_iface = HashSet::new();
 
     for interface in &prev.interfaces {
-        let Some(netns) = &interface.sandbox else {
+        let Some(netns) = interface.sandbox.clone() else {
             continue;
         };
-        let netns = netns.clone();
-
-        let iface_key = format!("{netns}:{}", interface.name);
+        let iface_key = format!("{}:{}", netns, interface.name);
         if seen_iface.insert(iface_key) {
             reqs.push(AddPodRequest {
                 iface: interface.name.clone(),
-                net_namespace: Some(netns.clone()),
+                net_namespace: Some(netns),
                 container_id: args.container_id.clone(),
                 chained: true,
                 pod_name: pod_name.clone(),
