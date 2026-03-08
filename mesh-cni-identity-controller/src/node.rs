@@ -6,12 +6,12 @@ use mesh_cni_ebpf_common::policy::{LOCAL_NODE_ID, REMOTE_NODE_ID};
 use tracing::{debug, info};
 
 use crate::{
-    IdentityBpfState, IdentityControllerExt, Result, context::Context,
+    IdentityControllerExt, IdentityWriter, Result, context::Context,
     controller::DEFAULT_REQUEUE_DURATION,
 };
 
 impl IdentityControllerExt for Node {
-    async fn reconcile<B: IdentityBpfState>(&self, ctx: Arc<Context<B>>) -> Result<Action> {
+    async fn reconcile<B: IdentityWriter>(&self, ctx: Arc<Context<B>>) -> Result<Action> {
         let node_name = self.name_any();
 
         info!("Started reconciling Node {}", node_name);
@@ -29,7 +29,7 @@ impl IdentityControllerExt for Node {
                 IpAddr::V6(_) => 128,
             };
             let ip_net = ipnetwork::IpNetwork::new(ip, prefix)?;
-            ctx.bpf_maps.update(ip_net, id)?;
+            ctx.bpf_maps.upsert_identity(ip_net, id)?;
             debug!("Added IP/Identity {}/{}", ip, id);
         }
 

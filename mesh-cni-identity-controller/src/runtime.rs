@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use crate::{
-    IdentityBpfState, Result,
+    IdentityDataplane, Result,
     context::Context,
     controller::{error_policy, reconcile},
 };
@@ -26,7 +26,7 @@ pub async fn start_identity_controllers<B>(
     bpf_maps: B,
 ) -> Result<()>
 where
-    B: IdentityBpfState + Send + Sync + 'static,
+    B: IdentityDataplane + Send + Sync + 'static,
 {
     let store_init = tokio::try_join!(
         create_store_and_subscriber(
@@ -134,7 +134,7 @@ async fn shutdown(cancel: CancellationToken) {
 
 async fn run_orphan_ip_sweeper<B>(ctx: Arc<Context<B>>, cancel: CancellationToken)
 where
-    B: IdentityBpfState + Send + Sync + 'static,
+    B: IdentityDataplane + Send + Sync + 'static,
 {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
     loop {
@@ -151,7 +151,7 @@ where
 
 fn sweep_orphan_pod_ips<B>(ctx: &Arc<Context<B>>) -> Result<()>
 where
-    B: IdentityBpfState + Send + Sync + 'static,
+    B: IdentityDataplane + Send + Sync + 'static,
 {
     let mut live_pod_ips: HashSet<IpAddr> = HashSet::default();
     for pod in ctx.pod_store.state() {
@@ -165,7 +165,7 @@ where
         live_pod_ips.extend(crate::pod::pod_ips(&pod));
     }
 
-    for (ip_net, id) in ctx.bpf_maps.state()? {
+    for (ip_net, id) in ctx.bpf_maps.identity_state()? {
         if RESERVED_IDENTITY_IDS.contains(&id) {
             continue;
         }
@@ -178,7 +178,7 @@ where
             continue;
         }
         info!(ip = %ip, id, "deleting orphan pod IP identity entry");
-        ctx.bpf_maps.delete(ip_net)?;
+        ctx.bpf_maps.remove_identity(ip_net)?;
     }
     Ok(())
 }

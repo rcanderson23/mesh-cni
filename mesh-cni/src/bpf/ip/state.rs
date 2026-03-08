@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use aya::maps::lpm_trie::Key as LpmKey;
 use ipnetwork::IpNetwork;
 use mesh_cni_ebpf_common::IdentityId;
-use mesh_cni_identity_controller::IdentityBpfState;
+use mesh_cni_identity_controller::{IdentityReader, IdentityWriter};
 
 use crate::{
     Result,
@@ -119,12 +119,12 @@ where
     }
 }
 
-impl<IP4, IP6> IdentityBpfState for IpNetworkState<IP4, IP6>
+impl<IP4, IP6> IdentityWriter for IpNetworkState<IP4, IP6>
 where
     IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
     IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
-    fn update(
+    fn upsert_identity(
         &self,
         key: IpNetwork,
         value: IdentityId,
@@ -133,12 +133,18 @@ where
             .map_err(|e| mesh_cni_identity_controller::Error::OpError(e.to_string()))
     }
 
-    fn delete(&self, key: IpNetwork) -> mesh_cni_identity_controller::Result<()> {
+    fn remove_identity(&self, key: IpNetwork) -> mesh_cni_identity_controller::Result<()> {
         self.delete_network(key)
             .map_err(|e| mesh_cni_identity_controller::Error::OpError(e.to_string()))
     }
+}
 
-    fn state(&self) -> mesh_cni_identity_controller::Result<Vec<(IpNetwork, IdentityId)>> {
+impl<IP4, IP6> IdentityReader for IpNetworkState<IP4, IP6>
+where
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
+{
+    fn identity_state(&self) -> mesh_cni_identity_controller::Result<Vec<(IpNetwork, IdentityId)>> {
         Ok(self.state())
     }
 }

@@ -8,14 +8,14 @@ use kube::{
 use tracing::{debug, info};
 
 use crate::{
-    Error, IdentityBpfState, IdentityControllerExt, Result, context::Context,
+    Error, IdentityControllerExt, IdentityWriter, Result, context::Context,
     controller::DEFAULT_REQUEUE_DURATION,
 };
 
 const PENDING_POD_IP_REQUEUE_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl IdentityControllerExt for Pod {
-    async fn reconcile<B: IdentityBpfState>(&self, ctx: Arc<Context<B>>) -> Result<Action> {
+    async fn reconcile<B: IdentityWriter>(&self, ctx: Arc<Context<B>>) -> Result<Action> {
         let pod_name = self.name_any();
         let namespace = ctx
             .namespace_store
@@ -46,7 +46,7 @@ impl IdentityControllerExt for Pod {
                     IpAddr::V6(_) => 128,
                 };
                 let ip_net = ipnetwork::IpNetwork::new(ip, prefix)?;
-                ctx.bpf_maps.delete(ip_net)?;
+                ctx.bpf_maps.remove_identity(ip_net)?;
                 debug!("Removed IP/Identity mapping for deleted pod IP {}", ip);
             }
             return Ok(Action::await_change());
@@ -81,7 +81,7 @@ impl IdentityControllerExt for Pod {
                 IpAddr::V6(_) => 128,
             };
             let ip_net = ipnetwork::IpNetwork::new(ip, prefix)?;
-            ctx.bpf_maps.update(ip_net, identity.spec.id)?;
+            ctx.bpf_maps.upsert_identity(ip_net, identity.spec.id)?;
             debug!("Added IP/Identity {}/{}", ip, identity.spec.id);
         }
 
