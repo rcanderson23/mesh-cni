@@ -13,7 +13,7 @@ use crate::{
     Result,
     bpf::{
         BPF_MAP_POLICY_CIDR_V4, BPF_MAP_POLICY_CIDR_V6, BPF_MAP_POLICY_INDEX,
-        BPF_MAP_POLICY_RULESET, BpfMap, SharedBpfMap,
+        BPF_MAP_POLICY_RULESET, BpfMap, SharedBpfMap, is_map_not_found_error,
     },
 };
 
@@ -335,7 +335,11 @@ impl PolicyIndexBpfStateInner {
                 self.cache.remove(key);
                 Ok(())
             }
-            Err(e) => Err(e),
+            Err(err) if is_map_not_found_error(&err) => {
+                self.cache.remove(key);
+                Ok(())
+            }
+            Err(err) => Err(err),
         }
     }
 }
@@ -432,7 +436,11 @@ impl PolicyRulesetBpfStateInner {
                 self.cache.remove(key);
                 Ok(())
             }
-            Err(e) => Err(e),
+            Err(err) if is_map_not_found_error(&err) => {
+                self.cache.remove(key);
+                Ok(())
+            }
+            Err(err) => Err(err),
         }
     }
 }
@@ -506,7 +514,15 @@ impl PolicyCidrV4BpfStateInner {
                 self.cache.remove(key);
                 Ok(())
             }
-            Err(e) => Err(e.into()),
+            Err(e) => {
+                let err = anyhow::Error::from(e);
+                if is_map_not_found_error(&err) {
+                    self.cache.remove(key);
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            }
         }
     }
 }
@@ -580,7 +596,15 @@ impl PolicyCidrV6BpfStateInner {
                 self.cache.remove(key);
                 Ok(())
             }
-            Err(e) => Err(e.into()),
+            Err(e) => {
+                let err = anyhow::Error::from(e);
+                if is_map_not_found_error(&err) {
+                    self.cache.remove(key);
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            }
         }
     }
 }

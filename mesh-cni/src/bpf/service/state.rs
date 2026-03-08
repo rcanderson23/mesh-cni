@@ -5,7 +5,6 @@ use std::{
 
 use ahash::{HashMap, HashMapExt};
 use anyhow::anyhow;
-use aya::maps::MapError;
 use mesh_cni_ebpf_common::{
     Id,
     service::{
@@ -18,19 +17,10 @@ use mesh_cni_service_bpf_controller::{
 };
 use tracing::warn;
 
-use crate::{Result, bpf::BpfMap};
-
-fn is_map_not_found_error(err: &anyhow::Error) -> bool {
-    err.downcast_ref::<MapError>()
-        .is_some_and(|map_err| match map_err {
-            MapError::KeyNotFound | MapError::ElementNotFound => true,
-            MapError::SyscallError(sys_err) => {
-                sys_err.io_error.raw_os_error() == Some(libc::ENOENT)
-            }
-            MapError::IoError(io_err) => io_err.raw_os_error() == Some(libc::ENOENT),
-            _ => false,
-        })
-}
+use crate::{
+    Result,
+    bpf::{BpfMap, is_map_not_found_error},
+};
 
 pub trait ServiceMapStore {
     type SKey: std::hash::Hash + std::cmp::Eq + Copy;
@@ -216,7 +206,11 @@ where
     }
 
     fn delete_service(&mut self, key: &Self::SKey) -> Result<()> {
-        self.service_map.delete(key)
+        match self.service_map.delete(key) {
+            Ok(()) => Ok(()),
+            Err(err) if is_map_not_found_error(&err) => Ok(()),
+            Err(err) => Err(err),
+        }
     }
 
     fn get_cached_service(&self, key: &Self::SKey) -> Option<&ServiceValue> {
@@ -259,7 +253,11 @@ where
     }
 
     fn delete_endpoint(&mut self, key: &EndpointKey) -> Result<()> {
-        self.endpoint_map.delete(key)
+        match self.endpoint_map.delete(key) {
+            Ok(()) => Ok(()),
+            Err(err) if is_map_not_found_error(&err) => Ok(()),
+            Err(err) => Err(err),
+        }
     }
 
     fn insert_cached_endpoint(&mut self, key: EndpointKey, value: Self::EValue) {

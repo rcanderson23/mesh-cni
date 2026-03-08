@@ -7,7 +7,7 @@ use mesh_cni_identity_controller::IdentityBpfState;
 
 use crate::{
     Result,
-    bpf::{BpfMap, ip::LpmKeyNetwork},
+    bpf::{BpfMap, ip::LpmKeyNetwork, is_map_not_found_error},
 };
 
 struct Shared<IP4, IP6>
@@ -183,6 +183,11 @@ where
                 self.cache.remove(&network);
                 Ok(())
             }
+            Err(err) if is_map_not_found_error(&err) => {
+                let network = <u32 as LpmKeyNetwork>::key_to_network(*key);
+                self.cache.remove(&network);
+                Ok(())
+            }
             Err(e) => Err(e),
         }
     }
@@ -224,6 +229,11 @@ where
     pub fn delete(&mut self, key: &M::Key) -> Result<()> {
         match self.bpf_map.delete(key) {
             Ok(_) => {
+                let network = <u128 as LpmKeyNetwork>::key_to_network(*key);
+                self.cache.remove(&network);
+                Ok(())
+            }
+            Err(err) if is_map_not_found_error(&err) => {
                 let network = <u128 as LpmKeyNetwork>::key_to_network(*key);
                 self.cache.remove(&network);
                 Ok(())

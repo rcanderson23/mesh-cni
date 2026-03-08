@@ -9,7 +9,7 @@ use std::{borrow::BorrowMut, hash::Hash};
 use anyhow::anyhow;
 use aya::{
     Pod,
-    maps::{HashMap, LpmTrie, MapData, lpm_trie::Key as LpmKey},
+    maps::{HashMap, LpmTrie, MapData, MapError, lpm_trie::Key as LpmKey},
 };
 use ipnetwork::IpNetwork;
 use mesh_cni_ebpf_common::IdentityId;
@@ -114,6 +114,18 @@ pub trait SharedBpfMap: Send + Sync + 'static {
     fn delete(&self, key: &Self::Key) -> Result<()>;
     fn get(&self, key: &Self::Key) -> Result<Self::Value>;
     fn get_state(&self) -> Result<ahash::HashMap<Self::KeyOutput, Self::Value>>;
+}
+
+pub(crate) fn is_map_not_found_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<MapError>()
+        .is_some_and(|map_err| match map_err {
+            MapError::KeyNotFound | MapError::ElementNotFound => true,
+            MapError::SyscallError(sys_err) => {
+                sys_err.io_error.raw_os_error() == Some(libc::ENOENT)
+            }
+            MapError::IoError(io_err) => io_err.raw_os_error() == Some(libc::ENOENT),
+            _ => false,
+        })
 }
 
 impl<T, K, V> BpfMap for HashMap<T, K, V>
