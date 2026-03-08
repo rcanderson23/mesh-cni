@@ -1,12 +1,15 @@
 use std::sync::{Arc, Mutex};
 
+use ahash::HashMap;
 use anyhow::bail;
 use aya::maps::{LpmTrie, Map, MapData, lpm_trie::Key as LpmKey};
 use mesh_cni_ebpf_common::policy::{
     CidrPolicyMapDataV4, CidrPolicyMapDataV6, CidrPolicyMapKey, CidrPolicyMapKeyV4,
     CidrPolicyMapKeyV6, PolicyIndexKey, PolicyRuleKey, PolicyValue, RulesetId,
 };
-use mesh_cni_policy_controller::PolicyControllerBpf;
+use mesh_cni_policy_controller::{
+    PolicyCidrWriter, PolicyIndexWriter, PolicyReader, PolicyRulesetWriter,
+};
 use tracing::info;
 
 use crate::{
@@ -60,7 +63,7 @@ where
         self.index.delete(policy_key)
     }
 
-    pub fn index_state(&self) -> Result<ahash::HashMap<PolicyIndexKey, RulesetId>> {
+    pub fn index_state(&self) -> Result<HashMap<PolicyIndexKey, RulesetId>> {
         self.index.get_state()
     }
 
@@ -72,7 +75,7 @@ where
         self.ruleset.delete(rule_key)
     }
 
-    pub fn ruleset_state(&self) -> Result<ahash::HashMap<PolicyRuleKey, PolicyValue>> {
+    pub fn ruleset_state(&self) -> Result<HashMap<PolicyRuleKey, PolicyValue>> {
         self.ruleset.get_state()
     }
 
@@ -88,7 +91,7 @@ where
         self.cidr_v4.delete(key)
     }
 
-    pub fn cidr_v4_index_state(&self) -> Result<ahash::HashMap<CidrPolicyMapKeyV4, RulesetId>> {
+    pub fn cidr_v4_index_state(&self) -> Result<HashMap<CidrPolicyMapKeyV4, RulesetId>> {
         self.cidr_v4.get_state()
     }
 
@@ -104,7 +107,7 @@ where
         self.cidr_v6.delete(key)
     }
 
-    pub fn cidr_v6_index_state(&self) -> Result<ahash::HashMap<CidrPolicyMapKeyV6, RulesetId>> {
+    pub fn cidr_v6_index_state(&self) -> Result<HashMap<CidrPolicyMapKeyV6, RulesetId>> {
         self.cidr_v6.get_state()
     }
 
@@ -122,8 +125,8 @@ where
         }
     }
 
-    pub fn cidr_index_state(&self) -> Result<ahash::HashMap<CidrPolicyMapKey, RulesetId>> {
-        let mut state: ahash::HashMap<CidrPolicyMapKey, RulesetId> = ahash::HashMap::default();
+    pub fn cidr_index_state(&self) -> Result<HashMap<CidrPolicyMapKey, RulesetId>> {
+        let mut state: HashMap<CidrPolicyMapKey, RulesetId> = HashMap::default();
         for (key, value) in self.cidr_v4_index_state()? {
             state.insert(CidrPolicyMapKey::V4(key), value);
         }
@@ -134,12 +137,12 @@ where
     }
 }
 
-impl<PI, PR> PolicyControllerBpf for PolicyState<PI, PR>
+impl<PI, PR> PolicyIndexWriter for PolicyState<PI, PR>
 where
     PI: SharedBpfMap<Key = PolicyIndexKey, Value = RulesetId, KeyOutput = PolicyIndexKey>,
     PR: SharedBpfMap<Key = PolicyRuleKey, Value = PolicyValue, KeyOutput = PolicyRuleKey>,
 {
-    fn update_index(
+    fn upsert_policy_index(
         &self,
         key: PolicyIndexKey,
         ruleset_id: RulesetId,
@@ -148,12 +151,18 @@ where
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 
-    fn delete_index(&self, key: &PolicyIndexKey) -> mesh_cni_policy_controller::Result<()> {
+    fn remove_policy_index(&self, key: &PolicyIndexKey) -> mesh_cni_policy_controller::Result<()> {
         PolicyState::delete_index(self, key)
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
+}
 
-    fn update_rule(
+impl<PI, PR> PolicyRulesetWriter for PolicyState<PI, PR>
+where
+    PI: SharedBpfMap<Key = PolicyIndexKey, Value = RulesetId, KeyOutput = PolicyIndexKey>,
+    PR: SharedBpfMap<Key = PolicyRuleKey, Value = PolicyValue, KeyOutput = PolicyRuleKey>,
+{
+    fn upsert_policy_rule(
         &self,
         key: PolicyRuleKey,
         value: PolicyValue,
@@ -162,26 +171,45 @@ where
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 
-    fn delete_rule(&self, key: &PolicyRuleKey) -> mesh_cni_policy_controller::Result<()> {
+    fn remove_policy_rule(&self, key: &PolicyRuleKey) -> mesh_cni_policy_controller::Result<()> {
         PolicyState::delete_rule(self, key)
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
+}
 
-    fn index_state(
+impl<PI, PR> PolicyReader for PolicyState<PI, PR>
+where
+    PI: SharedBpfMap<Key = PolicyIndexKey, Value = RulesetId, KeyOutput = PolicyIndexKey>,
+    PR: SharedBpfMap<Key = PolicyRuleKey, Value = PolicyValue, KeyOutput = PolicyRuleKey>,
+{
+    fn policy_index_state(
         &self,
-    ) -> mesh_cni_policy_controller::Result<ahash::HashMap<PolicyIndexKey, RulesetId>> {
+    ) -> mesh_cni_policy_controller::Result<HashMap<PolicyIndexKey, RulesetId>> {
         PolicyState::index_state(self)
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 
-    fn ruleset_state(
+    fn policy_ruleset_state(
         &self,
-    ) -> mesh_cni_policy_controller::Result<ahash::HashMap<PolicyRuleKey, PolicyValue>> {
+    ) -> mesh_cni_policy_controller::Result<HashMap<PolicyRuleKey, PolicyValue>> {
         PolicyState::ruleset_state(self)
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 
-    fn update_cidr_index(
+    fn policy_cidr_index_state(
+        &self,
+    ) -> mesh_cni_policy_controller::Result<HashMap<CidrPolicyMapKey, RulesetId>> {
+        PolicyState::cidr_index_state(self)
+            .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
+    }
+}
+
+impl<PI, PR> PolicyCidrWriter for PolicyState<PI, PR>
+where
+    PI: SharedBpfMap<Key = PolicyIndexKey, Value = RulesetId, KeyOutput = PolicyIndexKey>,
+    PR: SharedBpfMap<Key = PolicyRuleKey, Value = PolicyValue, KeyOutput = PolicyRuleKey>,
+{
+    fn upsert_cidr_index(
         &self,
         key: CidrPolicyMapKey,
         ruleset_id: RulesetId,
@@ -190,15 +218,8 @@ where
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 
-    fn delete_cidr_index(&self, key: &CidrPolicyMapKey) -> mesh_cni_policy_controller::Result<()> {
+    fn remove_cidr_index(&self, key: &CidrPolicyMapKey) -> mesh_cni_policy_controller::Result<()> {
         PolicyState::delete_cidr_index(self, key)
-            .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
-    }
-
-    fn cidr_index_state(
-        &self,
-    ) -> mesh_cni_policy_controller::Result<ahash::HashMap<CidrPolicyMapKey, RulesetId>> {
-        PolicyState::cidr_index_state(self)
             .map_err(|e| mesh_cni_policy_controller::Error::BpfError(e.to_string()))
     }
 }
@@ -289,21 +310,21 @@ impl SharedBpfMap for PolicyIndexBpfState {
             .copied()
     }
 
-    fn get_state(&self) -> Result<ahash::HashMap<Self::KeyOutput, Self::Value>> {
+    fn get_state(&self) -> Result<HashMap<Self::KeyOutput, Self::Value>> {
         let guard = self.state.lock().unwrap();
         Ok(guard.cache.clone())
     }
 }
 
 struct PolicyIndexBpfStateInner {
-    cache: ahash::HashMap<PolicyIndexKey, RulesetId>,
+    cache: HashMap<PolicyIndexKey, RulesetId>,
     bpf_map: PolicyIndexMap,
 }
 
 impl PolicyIndexBpfStateInner {
     pub fn try_new() -> Result<Self> {
         let bpf_map = load_policy_index_map()?;
-        let mut cache = ahash::HashMap::default();
+        let mut cache = HashMap::default();
         for kv in bpf_map.iter() {
             match kv {
                 Ok((k, v)) => cache.insert(k, v),
@@ -390,21 +411,21 @@ impl SharedBpfMap for PolicyRulesetBpfState {
             .copied()
     }
 
-    fn get_state(&self) -> Result<ahash::HashMap<Self::KeyOutput, Self::Value>> {
+    fn get_state(&self) -> Result<HashMap<Self::KeyOutput, Self::Value>> {
         let guard = self.state.lock().unwrap();
         Ok(guard.cache.clone())
     }
 }
 
 struct PolicyRulesetBpfStateInner {
-    cache: ahash::HashMap<PolicyRuleKey, PolicyValue>,
+    cache: HashMap<PolicyRuleKey, PolicyValue>,
     bpf_map: PolicyRulesetMap,
 }
 
 impl PolicyRulesetBpfStateInner {
     pub fn try_new() -> Result<Self> {
         let bpf_map = load_policy_ruleset_map()?;
-        let mut cache = ahash::HashMap::default();
+        let mut cache = HashMap::default();
         for kv in bpf_map.iter() {
             match kv {
                 Ok((k, v)) => cache.insert(k, v),
@@ -467,21 +488,21 @@ impl PolicyCidrV4BpfState {
         guard.delete(key)
     }
 
-    pub fn get_state(&self) -> Result<ahash::HashMap<CidrPolicyMapKeyV4, RulesetId>> {
+    pub fn get_state(&self) -> Result<HashMap<CidrPolicyMapKeyV4, RulesetId>> {
         let guard = self.state.lock().unwrap();
         Ok(guard.cache.clone())
     }
 }
 
 struct PolicyCidrV4BpfStateInner {
-    cache: ahash::HashMap<CidrPolicyMapKeyV4, RulesetId>,
+    cache: HashMap<CidrPolicyMapKeyV4, RulesetId>,
     bpf_map: PolicyCidrV4Map,
 }
 
 impl PolicyCidrV4BpfStateInner {
     fn try_new() -> Result<Self> {
         let bpf_map = load_policy_cidr_v4_map()?;
-        let mut cache = ahash::HashMap::default();
+        let mut cache = HashMap::default();
         for kv in bpf_map.iter() {
             match kv {
                 Ok((key, value)) => cache.insert(cidr_v4_from_lpm_key(key), value),
@@ -549,21 +570,21 @@ impl PolicyCidrV6BpfState {
         guard.delete(key)
     }
 
-    pub fn get_state(&self) -> Result<ahash::HashMap<CidrPolicyMapKeyV6, RulesetId>> {
+    pub fn get_state(&self) -> Result<HashMap<CidrPolicyMapKeyV6, RulesetId>> {
         let guard = self.state.lock().unwrap();
         Ok(guard.cache.clone())
     }
 }
 
 struct PolicyCidrV6BpfStateInner {
-    cache: ahash::HashMap<CidrPolicyMapKeyV6, RulesetId>,
+    cache: HashMap<CidrPolicyMapKeyV6, RulesetId>,
     bpf_map: PolicyCidrV6Map,
 }
 
 impl PolicyCidrV6BpfStateInner {
     fn try_new() -> Result<Self> {
         let bpf_map = load_policy_cidr_v6_map()?;
-        let mut cache = ahash::HashMap::default();
+        let mut cache = HashMap::default();
         for kv in bpf_map.iter() {
             match kv {
                 Ok((key, value)) => cache.insert(cidr_v6_from_lpm_key(key), value),

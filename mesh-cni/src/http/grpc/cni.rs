@@ -15,7 +15,7 @@ use mesh_cni_api::cni::v1::{
 };
 use mesh_cni_crds::v1alpha1::identity::Identity;
 use mesh_cni_k8s_utils::sanitize_pod_labels;
-use mesh_cni_policy_controller::{Context, PolicyControllerBpf, reconcile_identity};
+use mesh_cni_policy_controller::{Context, PolicyDataplane, reconcile_identity};
 use netns_rs::get_from_path;
 use tokio::time::{Duration, sleep};
 use tonic::{Code, Request, Response, Status};
@@ -265,7 +265,7 @@ pub trait ReconcilePolicy {
     ) -> std::result::Result<(), PolicyReconcileError>;
 }
 
-impl<P: PolicyControllerBpf + Send + Sync + 'static> ReconcilePolicy for Arc<Context<P>> {
+impl<P: PolicyDataplane + Send + Sync + 'static> ReconcilePolicy for Arc<Context<P>> {
     fn reconcile_policy(
         &self,
         pod_name: &str,

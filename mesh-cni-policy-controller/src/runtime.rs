@@ -17,7 +17,7 @@ use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    Error, PolicyControllerBpf, Result,
+    Error, PolicyDataplane, Result,
     context::{Context, RulesetState},
     controller::error_policy,
     identity::reconcile_policy_with_identity,
@@ -32,7 +32,7 @@ pub async fn start_policy_controllers<P>(
     cancel: CancellationToken,
 ) -> Result<Arc<Context<P>>>
 where
-    P: PolicyControllerBpf + Send + Sync + 'static,
+    P: PolicyDataplane + Send + Sync + 'static,
 {
     let store_init = timeout(Duration::from_secs(30), async {
         tokio::try_join!(
@@ -74,9 +74,9 @@ where
         (mesh_identity_slice_store, mesh_identity_slice_subscriber),
     ) = store_init;
 
-    let index_state = policy_bpf_state.index_state()?;
-    let cidr_state = policy_bpf_state.cidr_index_state()?;
-    let ruleset_state = policy_bpf_state.ruleset_state()?;
+    let index_state = policy_bpf_state.policy_index_state()?;
+    let cidr_state = policy_bpf_state.policy_cidr_index_state()?;
+    let ruleset_state = policy_bpf_state.policy_ruleset_state()?;
     let ruleset_state = RulesetState::new_with_cidr(&index_state, &cidr_state, &ruleset_state);
 
     let context = Arc::new(Context {

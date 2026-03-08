@@ -11,8 +11,6 @@ use mesh_cni_ebpf_common::policy::{
     CidrPolicyMapKey, PolicyIndexKey, PolicyRuleKey, PolicyValue, RulesetId,
 };
 
-use crate::PolicyControllerBpf;
-
 pub type RulesetHash = u64;
 
 pub fn hash_rule_triples<I>(triples: I) -> RulesetHash
@@ -27,7 +25,7 @@ where
     hasher.finish()
 }
 
-pub struct Context<P: PolicyControllerBpf> {
+pub struct Context<P> {
     pub pod_store: Store<Pod>,
     pub policy_store: Store<NetworkPolicy>,
     pub identity_store: Store<Identity>,

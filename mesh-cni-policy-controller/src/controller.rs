@@ -4,7 +4,7 @@ use kube::{ResourceExt, runtime::controller::Action};
 use serde::de::DeserializeOwned;
 use tracing::error;
 
-use crate::{Error, PolicyControllerBpf, context::Context};
+use crate::{Error, context::Context};
 
 pub(crate) const DEFAULT_REQUEUE_DURATION: Duration = Duration::from_secs(300);
 const ERROR_REQUEUE_DURATION: Duration = Duration::from_secs(5);
@@ -14,7 +14,6 @@ pub(crate) fn error_policy<K, P>(k: Arc<K>, error: &Error, _ctx: Arc<Context<P>>
 where
     K: ResourceExt<DynamicType = ()>,
     K: DeserializeOwned + Clone + Send + Sync + std::fmt::Debug + 'static,
-    P: PolicyControllerBpf,
 {
     let name = k.name_any();
     let ns = k.namespace().unwrap_or_default();

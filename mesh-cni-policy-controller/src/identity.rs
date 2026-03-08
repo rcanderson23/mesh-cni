@@ -26,7 +26,7 @@ use mesh_cni_ebpf_common::{
 use tracing::info;
 
 use crate::{
-    PolicyControllerBpf, Result,
+    PolicyDataplane, Result,
     context::{Context, hash_rule_triples},
     controller::DEFAULT_REQUEUE_DURATION,
     selector::{
@@ -35,7 +35,7 @@ use crate::{
     },
 };
 
-pub(crate) async fn reconcile_policy_with_identity<P: PolicyControllerBpf>(
+pub(crate) async fn reconcile_policy_with_identity<P: PolicyDataplane>(
     identity: Arc<Identity>,
     ctx: Arc<Context<P>>,
 ) -> Result<Action> {
@@ -50,7 +50,7 @@ pub(crate) async fn reconcile_policy_with_identity<P: PolicyControllerBpf>(
 // We compute per-peer ingress/egress rules, resolve named ports against the peer
 // identity's pods (when used in the policy), then diff desired vs current index
 // entries and update BPF maps while releasing unused rulesets.
-pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
+pub fn inner_reconcile_policy_with_identity<P: PolicyDataplane>(
     identity: Arc<Identity>,
     ctx: Arc<Context<P>>,
 ) -> Result<Action> {
@@ -75,8 +75,8 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
         &pods,
     );
 
-    let index_state = ctx.policy_bpf_state.index_state()?;
-    let cidr_state = ctx.policy_bpf_state.cidr_index_state()?;
+    let index_state = ctx.policy_bpf_state.policy_index_state()?;
+    let cidr_state = ctx.policy_bpf_state.policy_cidr_index_state()?;
     let mut written_rulesets: HashSet<RulesetId> = HashSet::default();
 
     reconcile_identity_phase(
@@ -99,7 +99,7 @@ pub fn inner_reconcile_policy_with_identity<P: PolicyControllerBpf>(
     Ok(Action::requeue(DEFAULT_REQUEUE_DURATION))
 }
 
-fn reconcile_identity_phase<P: PolicyControllerBpf>(
+fn reconcile_identity_phase<P: PolicyDataplane>(
     ctx: &Context<P>,
     identity_id: IdentityId,
     selected_netpols: &[&Arc<NetworkPolicy>],
@@ -130,7 +130,7 @@ fn reconcile_identity_phase<P: PolicyControllerBpf>(
         let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
         if written_rulesets.insert(ruleset_id) {
             for (key, value) in &ruleset_entries {
-                ctx.policy_bpf_state.update_rule(*key, *value)?;
+                ctx.policy_bpf_state.upsert_policy_rule(*key, *value)?;
             }
         }
         desired_index.insert(
@@ -152,7 +152,7 @@ fn reconcile_identity_phase<P: PolicyControllerBpf>(
         let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs.to_vec(), &ctx.ruleset_state);
         if written_rulesets.insert(ruleset_id) {
             for (key, value) in &ruleset_entries {
-                ctx.policy_bpf_state.update_rule(*key, *value)?;
+                ctx.policy_bpf_state.upsert_policy_rule(*key, *value)?;
             }
         }
         desired_index.insert(
@@ -192,12 +192,12 @@ fn reconcile_identity_phase<P: PolicyControllerBpf>(
             }
             Some(desired_ruleset_id) => {
                 ctx.policy_bpf_state
-                    .update_index(*key, *desired_ruleset_id)?;
+                    .upsert_policy_index(*key, *desired_ruleset_id)?;
                 release_ruleset_if_unused(ctx, *current_ruleset_id)?;
                 updated_count += 1;
             }
             None => {
-                ctx.policy_bpf_state.delete_index(key)?;
+                ctx.policy_bpf_state.remove_policy_index(key)?;
                 release_ruleset_if_unused(ctx, *current_ruleset_id)?;
                 deleted_count += 1;
             }
@@ -208,7 +208,7 @@ fn reconcile_identity_phase<P: PolicyControllerBpf>(
         if current_index.contains_key(&key) {
             continue;
         }
-        ctx.policy_bpf_state.update_index(key, ruleset_id)?;
+        ctx.policy_bpf_state.upsert_policy_index(key, ruleset_id)?;
         added_count += 1;
     }
 
@@ -223,7 +223,7 @@ fn reconcile_identity_phase<P: PolicyControllerBpf>(
     Ok(())
 }
 
-fn reconcile_cidr_phase<P: PolicyControllerBpf>(
+fn reconcile_cidr_phase<P: PolicyDataplane>(
     ctx: &Context<P>,
     identity_id: IdentityId,
     selected_netpols: &[&Arc<NetworkPolicy>],
@@ -241,7 +241,8 @@ fn reconcile_cidr_phase<P: PolicyControllerBpf>(
         let (ruleset_id, ruleset_entries) = build_ruleset(rule_specs, &ctx.ruleset_state);
         if written_rulesets.insert(ruleset_id) {
             for (rule_key, rule_value) in &ruleset_entries {
-                ctx.policy_bpf_state.update_rule(*rule_key, *rule_value)?;
+                ctx.policy_bpf_state
+                    .upsert_policy_rule(*rule_key, *rule_value)?;
             }
         }
         desired_cidr.insert(key, ruleset_id);
@@ -273,12 +274,12 @@ fn reconcile_cidr_phase<P: PolicyControllerBpf>(
             }
             Some(desired_ruleset_id) => {
                 ctx.policy_bpf_state
-                    .update_cidr_index(key.clone(), *desired_ruleset_id)?;
+                    .upsert_cidr_index(key.clone(), *desired_ruleset_id)?;
                 release_ruleset_if_unused(ctx, *current_ruleset_id)?;
                 cidr_updated_count += 1;
             }
             None => {
-                ctx.policy_bpf_state.delete_cidr_index(key)?;
+                ctx.policy_bpf_state.remove_cidr_index(key)?;
                 release_ruleset_if_unused(ctx, *current_ruleset_id)?;
                 cidr_deleted_count += 1;
             }
@@ -289,7 +290,7 @@ fn reconcile_cidr_phase<P: PolicyControllerBpf>(
         if current_cidr.contains_key(&key) {
             continue;
         }
-        ctx.policy_bpf_state.update_cidr_index(key, ruleset_id)?;
+        ctx.policy_bpf_state.upsert_cidr_index(key, ruleset_id)?;
         cidr_added_count += 1;
     }
 
@@ -1036,7 +1037,7 @@ fn cidr_key_applies(identity_id: IdentityId, selected_id: IdentityId) -> bool {
     selected_id == identity_id
 }
 
-fn release_ruleset_if_unused<P: PolicyControllerBpf>(
+fn release_ruleset_if_unused<P: PolicyDataplane>(
     ctx: &Context<P>,
     ruleset_id: RulesetId,
 ) -> Result<()> {
@@ -1045,7 +1046,7 @@ fn release_ruleset_if_unused<P: PolicyControllerBpf>(
     }
     if let Some(rules) = ctx.ruleset_state.release_ruleset(ruleset_id) {
         for (key, _) in rules {
-            ctx.policy_bpf_state.delete_rule(&key)?;
+            ctx.policy_bpf_state.remove_policy_rule(&key)?;
         }
     }
     Ok(())
@@ -1085,7 +1086,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        Result,
+        PolicyCidrWriter, PolicyIndexWriter, PolicyReader, PolicyRulesetWriter, Result,
         context::{Context, RulesetState},
     };
 
@@ -1107,36 +1108,53 @@ mod tests {
         }
     }
 
-    impl PolicyControllerBpf for TestPolicyBpfState {
-        fn update_index(&self, key: PolicyIndexKey, ruleset_id: RulesetId) -> Result<()> {
+    impl PolicyIndexWriter for TestPolicyBpfState {
+        fn upsert_policy_index(&self, key: PolicyIndexKey, ruleset_id: RulesetId) -> Result<()> {
             self.index.lock().unwrap().insert(key, ruleset_id);
             Ok(())
         }
 
-        fn delete_index(&self, key: &PolicyIndexKey) -> Result<()> {
+        fn remove_policy_index(&self, key: &PolicyIndexKey) -> Result<()> {
             self.index.lock().unwrap().remove(key);
             Ok(())
         }
+    }
 
-        fn update_rule(&self, key: PolicyRuleKey, value: PolicyValue) -> Result<()> {
+    impl PolicyRulesetWriter for TestPolicyBpfState {
+        fn upsert_policy_rule(&self, key: PolicyRuleKey, value: PolicyValue) -> Result<()> {
             self.ruleset.lock().unwrap().insert(key, value);
             Ok(())
         }
 
-        fn delete_rule(&self, key: &PolicyRuleKey) -> Result<()> {
+        fn remove_policy_rule(&self, key: &PolicyRuleKey) -> Result<()> {
             self.ruleset.lock().unwrap().remove(key);
             Ok(())
         }
+    }
 
-        fn index_state(&self) -> Result<HashMap<PolicyIndexKey, RulesetId>> {
+    impl PolicyReader for TestPolicyBpfState {
+        fn policy_index_state(&self) -> Result<HashMap<PolicyIndexKey, RulesetId>> {
             Ok(self.index.lock().unwrap().clone())
         }
 
-        fn ruleset_state(&self) -> Result<HashMap<PolicyRuleKey, PolicyValue>> {
+        fn policy_ruleset_state(&self) -> Result<HashMap<PolicyRuleKey, PolicyValue>> {
             Ok(self.ruleset.lock().unwrap().clone())
         }
 
-        fn update_cidr_index(&self, key: CidrPolicyMapKey, ruleset_id: RulesetId) -> Result<()> {
+        fn policy_cidr_index_state(&self) -> Result<HashMap<CidrPolicyMapKey, RulesetId>> {
+            let mut state = HashMap::default();
+            for (key, value) in self.cidr_v4.lock().unwrap().iter() {
+                state.insert(CidrPolicyMapKey::V4(*key), *value);
+            }
+            for (key, value) in self.cidr_v6.lock().unwrap().iter() {
+                state.insert(CidrPolicyMapKey::V6(*key), *value);
+            }
+            Ok(state)
+        }
+    }
+
+    impl PolicyCidrWriter for TestPolicyBpfState {
+        fn upsert_cidr_index(&self, key: CidrPolicyMapKey, ruleset_id: RulesetId) -> Result<()> {
             match key {
                 CidrPolicyMapKey::V4(key) => {
                     self.cidr_v4.lock().unwrap().insert(key, ruleset_id);
@@ -1148,7 +1166,7 @@ mod tests {
             Ok(())
         }
 
-        fn delete_cidr_index(&self, key: &CidrPolicyMapKey) -> Result<()> {
+        fn remove_cidr_index(&self, key: &CidrPolicyMapKey) -> Result<()> {
             match key {
                 CidrPolicyMapKey::V4(key) => {
                     self.cidr_v4.lock().unwrap().remove(key);
@@ -1158,17 +1176,6 @@ mod tests {
                 }
             }
             Ok(())
-        }
-
-        fn cidr_index_state(&self) -> Result<HashMap<CidrPolicyMapKey, RulesetId>> {
-            let mut state = HashMap::default();
-            for (key, value) in self.cidr_v4.lock().unwrap().iter() {
-                state.insert(CidrPolicyMapKey::V4(*key), *value);
-            }
-            for (key, value) in self.cidr_v6.lock().unwrap().iter() {
-                state.insert(CidrPolicyMapKey::V6(*key), *value);
-            }
-            Ok(state)
         }
     }
 
@@ -1309,8 +1316,8 @@ mod tests {
         insert(&mut identity_writer, identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -1327,8 +1334,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
 
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
@@ -1390,8 +1397,8 @@ mod tests {
         insert(&mut identity_writer, identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -1408,8 +1415,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
 
         let idx_key = PolicyIndexKey {
             src_id: 42,
@@ -1479,8 +1486,8 @@ mod tests {
         insert(&mut identity_writer, identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -1497,8 +1504,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
             dst_id: 7,
@@ -1569,8 +1576,8 @@ mod tests {
         insert(&mut identity_writer, identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -1587,8 +1594,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
 
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
@@ -1663,8 +1670,8 @@ mod tests {
         insert(&mut identity_writer, identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -1681,8 +1688,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
 
         let idx_key = PolicyIndexKey {
             src_id: 11,
@@ -1755,8 +1762,8 @@ mod tests {
         insert(&mut identity_writer, identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -1773,8 +1780,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
 
         let idx_key = PolicyIndexKey {
             src_id: 12,
@@ -1849,8 +1856,8 @@ mod tests {
         insert(&mut identity_writer, identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -1867,7 +1874,7 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
 
         let ingress_key = PolicyIndexKey {
             src_id: ANY_ID,
@@ -1964,8 +1971,8 @@ mod tests {
         insert(&mut identity_writer, identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -1982,8 +1989,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
 
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
@@ -2106,8 +2113,8 @@ mod tests {
         insert(&mut identity_writer, peer_denied.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -2124,8 +2131,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
 
         let allowed_key = PolicyIndexKey {
             src_id: 22,
@@ -2268,8 +2275,8 @@ mod tests {
         insert(&mut identity_writer, peer.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -2286,8 +2293,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
 
         let idx_key = PolicyIndexKey {
             src_id: 42,
@@ -2399,8 +2406,8 @@ mod tests {
         insert(&mut cidr_identity_writer, cidr_identity);
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -2417,7 +2424,7 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
+        let cidr = ctx.policy_bpf_state.policy_cidr_index_state().unwrap();
         let allow_key = CidrPolicyMapKeyV4 {
             prefix_len: 64 + 24,
             selected_id: 501,
@@ -2505,8 +2512,8 @@ mod tests {
         insert(&mut cidr_identity_writer, cidr_identity);
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -2523,8 +2530,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let cidr = ctx.policy_bpf_state.policy_cidr_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
         let allow_key = CidrPolicyMapKeyV4 {
             prefix_len: 64 + 24,
             selected_id: 601,
@@ -2648,8 +2655,8 @@ mod tests {
         insert(&mut mesh_identity_slice_writer, remote_slice);
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -2666,7 +2673,7 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
+        let cidr = ctx.policy_bpf_state.policy_cidr_index_state().unwrap();
         let key = CidrPolicyMapKey::V4(CidrPolicyMapKeyV4 {
             prefix_len: 64 + 32,
             selected_id: 7771,
@@ -2814,8 +2821,8 @@ mod tests {
         insert(&mut mesh_identity_slice_writer, remote_slice);
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -2832,8 +2839,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let cidr = ctx.policy_bpf_state.policy_cidr_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
         let key = CidrPolicyMapKey::V4(CidrPolicyMapKeyV4 {
             prefix_len: 64 + 32,
             selected_id: 7772,
@@ -3004,8 +3011,8 @@ mod tests {
         insert(&mut mesh_identity_slice_writer, remote_slice);
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -3022,8 +3029,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let cidr = ctx.policy_bpf_state.policy_cidr_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
         let key = CidrPolicyMapKey::V4(CidrPolicyMapKeyV4 {
             prefix_len: 64 + 32,
             selected_id: 7773,
@@ -3161,8 +3168,8 @@ mod tests {
         insert(&mut cidr_identity_writer, narrow_cidr_identity);
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -3179,8 +3186,8 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity, ctx.clone()).unwrap();
 
-        let cidr = ctx.policy_bpf_state.cidr_index_state().unwrap();
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let cidr = ctx.policy_bpf_state.policy_cidr_index_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
 
         let broad_key = CidrPolicyMapKeyV4 {
             prefix_len: 64 + 8,
@@ -3339,8 +3346,8 @@ mod tests {
         insert(&mut identity_writer, source_identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -3356,7 +3363,7 @@ mod tests {
         let ctx = Arc::new(ctx);
         inner_reconcile_policy_with_identity(Arc::new(target_identity), ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
         let allow_key = PolicyIndexKey {
             src_id: 702,
             dst_id: 701,
@@ -3462,8 +3469,8 @@ mod tests {
         insert(&mut identity_writer, dst_identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -3479,7 +3486,7 @@ mod tests {
         let ctx = Arc::new(ctx);
         inner_reconcile_policy_with_identity(Arc::new(source_identity), ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
         let allow_key = PolicyIndexKey {
             src_id: 751,
             dst_id: 752,
@@ -3585,8 +3592,8 @@ mod tests {
         insert(&mut identity_writer, dst_identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -3602,7 +3609,7 @@ mod tests {
         let ctx = Arc::new(ctx);
         inner_reconcile_policy_with_identity(Arc::new(source_identity), ctx.clone()).unwrap();
 
-        let index = ctx.policy_bpf_state.index_state().unwrap();
+        let index = ctx.policy_bpf_state.policy_index_state().unwrap();
         let allow_key = PolicyIndexKey {
             src_id: 801,
             dst_id: 802,
@@ -3720,8 +3727,8 @@ mod tests {
         insert(&mut identity_writer, identity.clone());
 
         let policy_bpf_state = TestPolicyBpfState::new();
-        let index_state = policy_bpf_state.index_state().unwrap();
-        let ruleset_state = policy_bpf_state.ruleset_state().unwrap();
+        let index_state = policy_bpf_state.policy_index_state().unwrap();
+        let ruleset_state = policy_bpf_state.policy_ruleset_state().unwrap();
         let ruleset_state = RulesetState::new(&index_state, &ruleset_state);
 
         let ctx = Context {
@@ -3738,7 +3745,7 @@ mod tests {
         let identity = Arc::new(identity);
         inner_reconcile_policy_with_identity(identity.clone(), ctx.clone()).unwrap();
 
-        let index_before = ctx.policy_bpf_state.index_state().unwrap();
+        let index_before = ctx.policy_bpf_state.policy_index_state().unwrap();
         let idx_key = PolicyIndexKey {
             src_id: ANY_ID,
             dst_id: 31,
@@ -3751,13 +3758,13 @@ mod tests {
 
         insert(&mut policy_writer, policy_v2);
         inner_reconcile_policy_with_identity(identity.clone(), ctx.clone()).unwrap();
-        let index_after = ctx.policy_bpf_state.index_state().unwrap();
+        let index_after = ctx.policy_bpf_state.policy_index_state().unwrap();
         let new_ruleset_id = *index_after
             .get(&idx_key)
             .expect("expected updated ingress entry");
         assert_ne!(old_ruleset_id, new_ruleset_id);
 
-        let rules = ctx.policy_bpf_state.ruleset_state().unwrap();
+        let rules = ctx.policy_bpf_state.policy_ruleset_state().unwrap();
         assert!(
             rules.keys().all(|key| key.ruleset_id != old_ruleset_id),
             "old ruleset entries should be removed"
