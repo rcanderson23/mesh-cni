@@ -166,7 +166,7 @@ where
     SK: std::hash::Hash + std::cmp::Eq + Clone + Copy,
     EV: Clone + std::cmp::PartialEq + Copy,
 {
-    pub fn new(service_map: S, endpoint_map: E) -> Result<Self>
+    pub fn try_new(service_map: S, endpoint_map: E) -> Result<Self>
     where
         S: BpfMap<Key = SK, Value = ServiceValue, KeyOutput = SK>,
         E: BpfMap<Key = EndpointKey, Value = EV, KeyOutput = EndpointKey>,
@@ -598,7 +598,7 @@ mod test {
     > {
         let service_map: HashMap<ServiceKeyV4, ServiceValue> = HashMap::default();
         let endpoint_map: HashMap<EndpointKey, EndpointValueV4> = HashMap::default();
-        ServiceEndpoint::new(service_map, endpoint_map).unwrap()
+        ServiceEndpoint::try_new(service_map, endpoint_map).unwrap()
     }
 
     fn new_service_endpoint_state() -> ServiceEndpointState<
@@ -616,8 +616,8 @@ mod test {
         >,
         HashMap<NodePortKey, ServiceKeyV4>,
     > {
-        let service_v4 = ServiceEndpoint::new(HashMap::default(), HashMap::default()).unwrap();
-        let service_v6 = ServiceEndpoint::new(HashMap::default(), HashMap::default()).unwrap();
+        let service_v4 = ServiceEndpoint::try_new(HashMap::default(), HashMap::default()).unwrap();
+        let service_v6 = ServiceEndpoint::try_new(HashMap::default(), HashMap::default()).unwrap();
         let nodeport = HashMap::default();
         ServiceEndpointState::new(service_v4, service_v6, nodeport).unwrap()
     }

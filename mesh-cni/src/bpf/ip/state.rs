@@ -12,8 +12,8 @@ use crate::{
 
 struct Shared<IP4, IP6>
 where
-    IP4: BpfMap,
-    IP6: BpfMap,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
     shared: Mutex<State<IP4, IP6>>,
 }
@@ -23,8 +23,8 @@ where
 // the map permanently
 struct State<IP4, IP6>
 where
-    IP4: BpfMap,
-    IP6: BpfMap,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
     ipv4_state: IpBpfStateV4<IP4>,
     ipv6_state: IpBpfStateV6<IP6>,
@@ -32,8 +32,8 @@ where
 
 impl<IP4, IP6> Clone for IpNetworkState<IP4, IP6>
 where
-    IP4: BpfMap,
-    IP6: BpfMap,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
     fn clone(&self) -> Self {
         let new = Arc::clone(&self.state);
@@ -43,20 +43,20 @@ where
 
 pub struct IpNetworkState<IP4, IP6>
 where
-    IP4: BpfMap,
-    IP6: BpfMap,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
     state: Arc<Shared<IP4, IP6>>,
 }
 
 impl<IP4, IP6> IpNetworkState<IP4, IP6>
 where
-    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId>,
-    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId>,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
-    pub fn new(ipv4_map: IP4, ipv6_map: IP6) -> Self {
-        let ipv4_state = IpBpfStateV4::new(ipv4_map);
-        let ipv6_state = IpBpfStateV6::new(ipv6_map);
+    pub fn try_new(ipv4_map: IP4, ipv6_map: IP6) -> Result<Self> {
+        let ipv4_state = IpBpfStateV4::try_new(ipv4_map)?;
+        let ipv6_state = IpBpfStateV6::try_new(ipv6_map)?;
         let state = State {
             ipv4_state,
             ipv6_state,
@@ -64,9 +64,9 @@ where
         let shared = Shared {
             shared: Mutex::new(state),
         };
-        Self {
+        Ok(Self {
             state: Arc::new(shared),
-        }
+        })
     }
     // TODO: check if this can error with notifications
     // LpmTrie expects big endian order for comparisons
@@ -121,8 +121,8 @@ where
 
 impl<IP4, IP6> IdentityBpfState for IpNetworkState<IP4, IP6>
 where
-    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId>,
-    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId>,
+    IP4: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
+    IP6: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
     fn update(
         &self,
@@ -145,7 +145,7 @@ where
 
 pub struct IpBpfStateV4<M>
 where
-    M: BpfMap,
+    M: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
     cache: ahash::HashMap<IpNetwork, IdentityId>,
     bpf_map: M,
@@ -153,11 +153,11 @@ where
 
 impl<M> IpBpfStateV4<M>
 where
-    M: BpfMap<Key = LpmKey<u32>, Value = IdentityId>,
+    M: BpfMap<Key = LpmKey<u32>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
-    pub fn new(bpf_map: M) -> Self {
-        let cache = ahash::HashMap::default();
-        Self { cache, bpf_map }
+    pub fn try_new(bpf_map: M) -> Result<Self> {
+        let cache = bpf_map.get_state()?;
+        Ok(Self { cache, bpf_map })
     }
 
     pub fn update(&mut self, key: M::Key, value: M::Value) -> Result<()> {
@@ -190,7 +190,7 @@ where
 
 pub struct IpBpfStateV6<M>
 where
-    M: BpfMap,
+    M: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
     cache: ahash::HashMap<IpNetwork, IdentityId>,
     bpf_map: M,
@@ -198,11 +198,11 @@ where
 
 impl<M> IpBpfStateV6<M>
 where
-    M: BpfMap<Key = LpmKey<u128>, Value = IdentityId>,
+    M: BpfMap<Key = LpmKey<u128>, Value = IdentityId, KeyOutput = IpNetwork>,
 {
-    pub fn new(bpf_map: M) -> Self {
-        let cache = ahash::HashMap::default();
-        Self { cache, bpf_map }
+    pub fn try_new(bpf_map: M) -> Result<Self> {
+        let cache = bpf_map.get_state()?;
+        Ok(Self { cache, bpf_map })
     }
 
     pub fn update(&mut self, key: M::Key, value: M::Value) -> Result<()> {
