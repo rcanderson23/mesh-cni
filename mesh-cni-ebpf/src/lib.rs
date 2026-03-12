@@ -7,7 +7,7 @@ pub mod service;
 
 use aya_ebpf::{
     macros::map,
-    maps::{Array, HashMap, LpmTrie, LruHashMap, lpm_trie::Key as LpmKey},
+    maps::{HashMap, LpmTrie, LruHashMap, lpm_trie::Key as LpmKey},
 };
 use mesh_cni_ebpf_common::{
     IdentityId,
@@ -17,8 +17,9 @@ use mesh_cni_ebpf_common::{
         RulesetId,
     },
     service::{
-        EndpointKey, EndpointValueV4, EndpointValueV6, NodePortKey, ServiceKeyV4, ServiceKeyV6,
-        ServiceValue,
+        EndpointKey, EndpointValueV4, EndpointValueV6, NodePortConntrackV4Key,
+        NodePortConntrackV4Value, NodePortKey, NodePortRevNatV4Key, NodePortRevNatV4Value,
+        ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
 };
 
@@ -58,15 +59,20 @@ static ENDPOINTS_V4: HashMap<EndpointKey, EndpointValueV4> = HashMap::with_max_e
 #[map(name = "endpoints_v6")]
 static ENDPOINTS_V6: HashMap<EndpointKey, EndpointValueV6> = HashMap::with_max_entries(65535, 0);
 
-#[map(name = "nodeport_iface_indexes")]
-static NODEPORT_IFACE_INDEXES: Array<u32> = Array::with_max_entries(2, 0);
-
 #[map(name = "nodeport_local_addrs_v4")]
 static NODEPORT_LOCAL_ADDRS_V4: HashMap<u32, u8> = HashMap::with_max_entries(65535, 0);
 
 #[map(name = "nodeport_services_v4")]
 static NODEPORT_SERVICES_V4: HashMap<NodePortKey, ServiceKeyV4> =
     HashMap::with_max_entries(65535, 0);
+
+#[map(name = "nodeport_rev_nat_v4")]
+static NODEPORT_REV_NAT_V4: LruHashMap<NodePortRevNatV4Key, NodePortRevNatV4Value> =
+    LruHashMap::with_max_entries(65535, 0);
+
+#[map(name = "nodeport_conntrack_v4")]
+static NODEPORT_CONNTRACK_V4: LruHashMap<NodePortConntrackV4Key, NodePortConntrackV4Value> =
+    LruHashMap::with_max_entries(65535, 0);
 
 #[inline]
 fn id_v4(ip: LpmKey<u32>) -> Option<IdentityId> {

@@ -20,6 +20,8 @@ pub(crate) const BPF_PROGRAM_INGRESS_TC: BpfNamePath = BpfNamePath::Program("mes
 pub(crate) const BPF_PROGRAM_EGRESS_TC: BpfNamePath = BpfNamePath::Program("mesh_cni_egress");
 pub(crate) const BPF_PROGRAM_NODEPORT_INGRESS_TC: BpfNamePath =
     BpfNamePath::Program("mesh_cni_nodeport_ingress");
+pub(crate) const BPF_PROGRAM_NODEPORT_EGRESS_TC: BpfNamePath =
+    BpfNamePath::Program("mesh_cni_nodeport_egress");
 pub const BPF_PROGRAM_CGROUP_CONNECT_V4: BpfNamePath =
     BpfNamePath::Program("mesh_cni_cgroup_connect4");
 pub const BPF_LINK_CGROUP_CONNECT_V4_PATH: &str = "/sys/fs/bpf/mesh/links/mesh_cni_cgroup_connect4";
@@ -34,10 +36,11 @@ pub const BPF_MAP_SERVICES_V4: BpfNamePath = BpfNamePath::Map("services_v4");
 pub const BPF_MAP_SERVICES_V6: BpfNamePath = BpfNamePath::Map("services_v6");
 pub const BPF_MAP_ENDPOINTS_V4: BpfNamePath = BpfNamePath::Map("endpoints_v4");
 pub const BPF_MAP_ENDPOINTS_V6: BpfNamePath = BpfNamePath::Map("endpoints_v6");
-pub const BPF_MAP_NODEPORT_IFACE_INDEXES: BpfNamePath = BpfNamePath::Map("nodeport_iface_indexes");
 pub const BPF_MAP_NODEPORT_LOCAL_ADDRS_V4: BpfNamePath =
     BpfNamePath::Map("nodeport_local_addrs_v4");
 pub const BPF_MAP_NODEPORT_SERVICES_V4: BpfNamePath = BpfNamePath::Map("nodeport_services_v4");
+pub const BPF_MAP_NODEPORT_REV_NAT_V4: BpfNamePath = BpfNamePath::Map("nodeport_rev_nat_v4");
+pub const BPF_MAP_NODEPORT_CONNTRACK_V4: BpfNamePath = BpfNamePath::Map("nodeport_conntrack_v4");
 pub const BPF_MAP_POLICY_INDEX: BpfNamePath = BpfNamePath::Map("policy_index");
 pub const BPF_MAP_POLICY_RULESET: BpfNamePath = BpfNamePath::Map("policy_ruleset");
 pub const BPF_MAP_POLICY_CIDR_V4: BpfNamePath = BpfNamePath::Map("policy_cidr_v4");
@@ -63,16 +66,17 @@ pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 7] = [
     BPF_MAP_SERVICES_V6,
     BPF_MAP_ENDPOINTS_V4,
     BPF_MAP_ENDPOINTS_V6,
-    BPF_MAP_NODEPORT_IFACE_INDEXES,
     BPF_MAP_NODEPORT_LOCAL_ADDRS_V4,
     BPF_MAP_NODEPORT_SERVICES_V4,
+    BPF_MAP_NODEPORT_REV_NAT_V4,
 ];
 
-pub(crate) const PROG_LIST: [BpfNamePath; 4] = [
+pub(crate) const PROG_LIST: [BpfNamePath; 5] = [
     BPF_PROGRAM_CGROUP_CONNECT_V4,
     BPF_PROGRAM_INGRESS_TC,
     BPF_PROGRAM_EGRESS_TC,
     BPF_PROGRAM_NODEPORT_INGRESS_TC,
+    BPF_PROGRAM_NODEPORT_EGRESS_TC,
 ];
 
 pub enum BpfNamePath {

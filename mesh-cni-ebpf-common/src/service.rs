@@ -135,3 +135,122 @@ impl NodePortKey {
         }
     }
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct NodePortRevNatV4Key {
+    pub src_ip: u32,
+    pub dst_ip: u32,
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub protocol: u8,
+    pub _pad: [u8; 3],
+}
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for NodePortRevNatV4Key {}
+
+impl NodePortRevNatV4Key {
+    pub const fn new_ingress(
+        src_ip: u32,
+        dst_ip: u32,
+        src_port: u16,
+        dst_port: u16,
+        protocol: u8,
+    ) -> Self {
+        Self {
+            src_ip: dst_ip,
+            dst_ip: src_ip,
+            src_port: dst_port,
+            dst_port: src_port,
+            protocol,
+            _pad: [0, 0, 0],
+        }
+    }
+    pub const fn new_egress(
+        src_ip: u32,
+        dst_ip: u32,
+        src_port: u16,
+        dst_port: u16,
+        protocol: u8,
+    ) -> Self {
+        Self {
+            src_ip,
+            dst_ip,
+            src_port,
+            dst_port,
+            protocol,
+            _pad: [0, 0, 0],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct NodePortRevNatV4Value {
+    // src_ip matches to original IP incoming to the host
+    pub src_ip: u32,
+    // src_port matches to the original port incoming on the the host
+    pub src_port: u16,
+    pub protocol: u8,
+    pub _pad: u8,
+}
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for NodePortRevNatV4Value {}
+
+impl NodePortRevNatV4Value {
+    /// src_ip/scr_port should the original dst_ip/dst_port before DNAT.
+    pub const fn new(src_ip: u32, src_port: u16, protocol: u8) -> Self {
+        Self {
+            src_ip,
+            src_port,
+            protocol,
+            _pad: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct NodePortConntrackV4Key {
+    src_ip: u32,
+    dst_ip: u32,
+    src_port: u16,
+    dst_port: u16,
+    protocol: u8,
+    _pad: [u8; 3],
+}
+
+impl NodePortConntrackV4Key {
+    pub const fn new(src_ip: u32, dst_ip: u32, src_port: u16, dst_port: u16, protocol: u8) -> Self {
+        Self {
+            src_ip,
+            dst_ip,
+            src_port,
+            dst_port,
+            protocol,
+            _pad: [0, 0, 0],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct NodePortConntrackV4Value {
+    pub dst_ip: u32,
+    pub dst_port: u16,
+    pub protocol: u8,
+    pub _pad: u8,
+}
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for NodePortConntrackV4Value {}
+
+impl NodePortConntrackV4Value {
+    pub const fn new(dst_ip: u32, dst_port: u16, protocol: u8) -> Self {
+        Self {
+            dst_ip,
+            dst_port,
+            protocol,
+            _pad: 0,
+        }
+    }
+}
