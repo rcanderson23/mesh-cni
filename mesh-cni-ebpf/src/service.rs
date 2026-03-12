@@ -2,13 +2,18 @@ use core::mem::offset_of;
 
 use aya_ebpf::{
     bindings::{BPF_F_MARK_MANGLED_0, BPF_F_PSEUDO_HDR, TC_ACT_PIPE, TC_ACT_SHOT, bpf_sock_addr},
-    helpers::generated::bpf_get_prandom_u32,
+    helpers::generated::{bpf_get_prandom_u32, bpf_ktime_get_ns},
     programs::{SockAddrContext, TcContext},
 };
 use aya_log_ebpf::error;
-use mesh_cni_ebpf_common::service::{
-    EndpointKey, NodePortConntrackV4Key, NodePortConntrackV4Value, NodePortKey,
-    NodePortRevNatV4Key, NodePortRevNatV4Value, ServiceKeyV4,
+use mesh_cni_ebpf_common::{
+    KubeProtocol,
+    conntrack::{
+        CT_TIMEOUT_TCP_ESTABLISHED_NS, CT_TIMEOUT_TCP_FIN_NS, CT_TIMEOUT_TCP_RST_NS,
+        CT_TIMEOUT_TCP_SYN_NS, CT_TIMEOUT_UDP_NS, NodePortConntrackV4Key, NodePortConntrackV4Value,
+        TcpFlags, TcpState,
+    },
+    service::{EndpointKey, NodePortKey, NodePortRevNatV4Key, NodePortRevNatV4Value, ServiceKeyV4},
 };
 use network_types::{
     eth::{EthHdr, EtherType},
@@ -24,7 +29,6 @@ use crate::{
 
 const AF_INET: u16 = 2;
 const _AF_INET6: u16 = 10;
-
 // https://docs.ebpf.io/linux/program-type/BPF_PROG_TYPE_CGROUP_SOCK_ADDR/#context
 // Example: https://docs.ebpf.io/linux/program-type/BPF_PROG_TYPE_CGROUP_SOCK_ADDR/#example
 // struct bpf_sock_addr {
@@ -134,15 +138,20 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
         return Ok(TC_ACT_PIPE);
     }
 
-    let (orig_dst_port, src_port, proto) = match ipv4hdr.proto {
+    let (orig_dst_port, src_port, proto, tcp_flags) = match ipv4hdr.proto {
         IpProto::Tcp => {
             let tcphdr: TcpHdr = ctx
                 .load(EthHdr::LEN + ihl as usize)
                 .map_err(|_| TC_ACT_PIPE)?;
+            let syn = tcphdr.syn() == 1;
+            let ack = tcphdr.ack() == 1;
+            let fin = tcphdr.fin() == 1;
+            let rst = tcphdr.rst() == 1;
             (
                 u16::from_be_bytes(tcphdr.dest),
                 u16::from_be_bytes(tcphdr.source),
-                Protocol::Tcp,
+                KubeProtocol::Tcp,
+                Some(TcpFlags { syn, ack, fin, rst }),
             )
         }
         IpProto::Udp => {
@@ -152,7 +161,8 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
             (
                 u16::from_be_bytes(udphdr.dst),
                 u16::from_be_bytes(udphdr.src),
-                Protocol::Udp,
+                KubeProtocol::Udp,
+                None,
             )
         }
         _ => return Ok(TC_ACT_PIPE),
@@ -201,19 +211,44 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
     let mut new_dst_port = endpoints_value.port.to_be();
     let l4_ip_flags = proto.l4_ip_flags();
     let l4_port_flags = proto.l4_port_flags();
-    let proto = proto as u8;
+    let proto_u8 = proto as u8;
+    let now = unsafe { bpf_ktime_get_ns() };
 
     let conntrack_key =
-        NodePortConntrackV4Key::new(src_ip, orig_dst_ip, src_port, orig_dst_port, proto);
+        NodePortConntrackV4Key::new(src_ip, orig_dst_ip, src_port, orig_dst_port, proto_u8);
+    let mut current_state = TcpState::None;
+    let mut has_mapping = false;
     if let Some(value) = unsafe { NODEPORT_CONNTRACK_V4.get(conntrack_key).copied() } {
-        new_dst_ip = value.dst_ip;
-        new_dst_port = value.dst_port;
-    } else {
-        let conntrack_value = NodePortConntrackV4Value::new(new_dst_ip, new_dst_port, proto);
-        NODEPORT_CONNTRACK_V4
-            .insert(conntrack_key, conntrack_value, 0)
-            .map_err(|_| TC_ACT_PIPE)?;
+        if is_nodeport_conntrack_expired(value, now, proto_u8) {
+            let _ = NODEPORT_CONNTRACK_V4.remove(conntrack_key);
+            let rev_nat_key = NodePortRevNatV4Key::new_egress(
+                u32::from_be(value.dst_ip),
+                src_ip,
+                u16::from_be(value.dst_port),
+                src_port,
+                proto as u8,
+            );
+            let _ = NODEPORT_REV_NAT_V4.remove(rev_nat_key);
+        } else {
+            new_dst_ip = value.dst_ip;
+            new_dst_port = value.dst_port;
+            current_state = value.tcp_state();
+            has_mapping = true;
+        }
     }
+    if !has_mapping
+        && proto == KubeProtocol::Tcp
+        && service_value.count > 1
+        && !is_initial_tcp_syn(tcp_flags)
+    {
+        return Ok(TC_ACT_SHOT);
+    }
+    let next_state = current_state.advance(TcpState::from_packet(proto, tcp_flags, false));
+    let conntrack_value =
+        NodePortConntrackV4Value::new(new_dst_ip, new_dst_port, proto_u8, next_state, now);
+    NODEPORT_CONNTRACK_V4
+        .insert(conntrack_key, conntrack_value, 0)
+        .map_err(|_| TC_ACT_PIPE)?;
 
     // Reverse-NAT keys must match reply traffic tuple seen on mesh_pod ingress:
     // backend_ip:backend_port -> client_ip:client_port.
@@ -222,11 +257,11 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
         src_ip,
         u16::from_be(new_dst_port),
         src_port,
-        proto,
+        proto_u8,
     );
     if unsafe { NODEPORT_REV_NAT_V4.get(rev_nat_key) }.is_none() {
         let rev_nat_value =
-            NodePortRevNatV4Value::new(orig_dst_ip.to_be(), orig_dst_port.to_be(), proto);
+            NodePortRevNatV4Value::new(orig_dst_ip.to_be(), orig_dst_port.to_be(), proto_u8);
         NODEPORT_REV_NAT_V4
             .insert(rev_nat_key, rev_nat_value, 0)
             .map_err(|_| {
@@ -284,15 +319,20 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
     let src_ip = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
-    let (src_port, dst_port, proto) = match ipv4hdr.proto {
+    let (src_port, dst_port, proto, tcp_flags) = match ipv4hdr.proto {
         IpProto::Tcp => {
             let tcphdr: TcpHdr = ctx
                 .load(EthHdr::LEN + ihl as usize)
                 .map_err(|_| TC_ACT_PIPE)?;
+            let syn = tcphdr.syn() == 1;
+            let ack = tcphdr.ack() == 1;
+            let fin = tcphdr.fin() == 1;
+            let rst = tcphdr.rst() == 1;
             (
                 u16::from_be_bytes(tcphdr.source),
                 u16::from_be_bytes(tcphdr.dest),
-                Protocol::Tcp,
+                KubeProtocol::Tcp,
+                Some(TcpFlags { syn, ack, fin, rst }),
             )
         }
         IpProto::Udp => {
@@ -302,7 +342,8 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
             (
                 u16::from_be_bytes(udphdr.src),
                 u16::from_be_bytes(udphdr.dst),
-                Protocol::Udp,
+                KubeProtocol::Udp,
+                None,
             )
         }
         _ => return Ok(TC_ACT_PIPE),
@@ -328,12 +369,39 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
 
     let l4_ip_flags = proto.l4_ip_flags();
     let l4_port_flags = proto.l4_port_flags();
-    let proto = proto as u8;
+    let proto_u8 = proto as u8;
+    let now = unsafe { bpf_ktime_get_ns() };
 
-    let rev_nat_key = NodePortRevNatV4Key::new_egress(src_ip, dst_ip, src_port, dst_port, proto);
+    let rev_nat_key = NodePortRevNatV4Key::new_egress(src_ip, dst_ip, src_port, dst_port, proto_u8);
     let Some(rev_nat_value) = (unsafe { NODEPORT_REV_NAT_V4.get(rev_nat_key).copied() }) else {
         return Ok(TC_ACT_PIPE);
     };
+
+    let client_ip = dst_ip;
+    let node_ip = u32::from_be(rev_nat_value.src_ip);
+    let client_port = dst_port;
+    let node_port = u16::from_be(rev_nat_value.src_port);
+    let conntrack_key =
+        NodePortConntrackV4Key::new(client_ip, node_ip, client_port, node_port, proto_u8);
+    if let Some(value) = unsafe { NODEPORT_CONNTRACK_V4.get(conntrack_key).copied() } {
+        if is_nodeport_conntrack_expired(value, now, proto_u8) {
+            let _ = NODEPORT_CONNTRACK_V4.remove(&conntrack_key);
+            let _ = NODEPORT_REV_NAT_V4.remove(&rev_nat_key);
+            return Ok(TC_ACT_SHOT);
+        } else {
+            let next_state = value
+                .tcp_state()
+                .advance(TcpState::from_packet(proto, tcp_flags, true));
+            let next_value = NodePortConntrackV4Value::new(
+                value.dst_ip,
+                value.dst_port,
+                value.protocol,
+                next_state,
+                now,
+            );
+            let _ = NODEPORT_CONNTRACK_V4.insert(conntrack_key, next_value, 0);
+        }
+    }
 
     ctx.l3_csum_replace(
         ipv4_check_offset,
@@ -367,29 +435,53 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
     Ok(TC_ACT_PIPE)
 }
 
-// TODO: check if this can be combined with KubeProtocol in mesh-cni-ebpf-common
-#[repr(u8)]
-#[derive(Clone, Copy)]
-pub enum Protocol {
-    Tcp = 6,
-    Udp = 17,
-    Sctp = 132,
+#[inline]
+fn is_nodeport_conntrack_expired(value: NodePortConntrackV4Value, now: u64, proto: u8) -> bool {
+    let timeout = match proto {
+        x if x == IpProto::Tcp as u8 => match value.tcp_state() {
+            TcpState::Syn => CT_TIMEOUT_TCP_SYN_NS,
+            TcpState::Established => CT_TIMEOUT_TCP_ESTABLISHED_NS,
+            TcpState::FinInitiator | TcpState::FinResponder => CT_TIMEOUT_TCP_ESTABLISHED_NS,
+            TcpState::Closed => CT_TIMEOUT_TCP_FIN_NS,
+            TcpState::Rst => CT_TIMEOUT_TCP_RST_NS,
+            _ => CT_TIMEOUT_TCP_SYN_NS,
+        },
+        _ => CT_TIMEOUT_UDP_NS,
+    };
+    now.saturating_sub(value.last_seen_ns) > timeout
 }
 
-impl Protocol {
-    pub const fn l4_ip_flags(&self) -> u64 {
+#[inline]
+fn is_initial_tcp_syn(tcp_flags: Option<TcpFlags>) -> bool {
+    matches!(
+        tcp_flags,
+        Some(TcpFlags {
+            syn: true,
+            ack: false,
+            ..
+        })
+    )
+}
+
+trait ProtocolExt {
+    fn l4_ip_flags(&self) -> u64;
+    fn l4_port_flags(&self) -> u64;
+}
+
+impl ProtocolExt for KubeProtocol {
+    fn l4_ip_flags(&self) -> u64 {
         match self {
-            Protocol::Tcp => BPF_F_PSEUDO_HDR as u64 | 4,
-            Protocol::Udp => BPF_F_PSEUDO_HDR as u64 | BPF_F_MARK_MANGLED_0 as u64 | 4,
-            Protocol::Sctp => todo!(),
+            KubeProtocol::Tcp => BPF_F_PSEUDO_HDR as u64 | 4,
+            KubeProtocol::Udp => BPF_F_PSEUDO_HDR as u64 | BPF_F_MARK_MANGLED_0 as u64 | 4,
+            KubeProtocol::Sctp => todo!(),
         }
     }
 
-    pub const fn l4_port_flags(&self) -> u64 {
+    fn l4_port_flags(&self) -> u64 {
         match self {
-            Protocol::Tcp => 2,
-            Protocol::Udp => BPF_F_MARK_MANGLED_0 as u64 | 2,
-            Protocol::Sctp => todo!(),
+            KubeProtocol::Tcp => 2,
+            KubeProtocol::Udp => BPF_F_MARK_MANGLED_0 as u64 | 2,
+            KubeProtocol::Sctp => todo!(),
         }
     }
 }

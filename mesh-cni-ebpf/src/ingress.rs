@@ -8,7 +8,8 @@ use aya_ebpf::{
 };
 use aya_log_ebpf::{error, warn};
 use mesh_cni_ebpf_common::{
-    conntrack::ConntrackValue,
+    KubeProtocol,
+    conntrack::{ConntrackValue, TcpFlags},
     policy::{Action, PolicyDirection, WORLD_ID},
 };
 use network_types::{
@@ -60,18 +61,21 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         return Ok(TC_ACT_SHOT);
     };
 
-    let (proto, src_port, dst_port, should_insert) = match ipv4hdr.proto {
+    let (proto, src_port, dst_port, should_insert, tcp_flags) = match ipv4hdr.proto {
         network_types::ip::IpProto::Tcp => {
             let tcphdr: TcpHdr = ctx
                 .load(EthHdr::LEN + Ipv4Hdr::LEN)
                 .map_err(|_| TC_ACT_PIPE)?;
             let syn = tcphdr.syn() == 1;
             let ack = tcphdr.ack() == 1;
+            let fin = tcphdr.fin() == 1;
+            let rst = tcphdr.rst() == 1;
             (
-                ipv4hdr.proto as u8,
+                KubeProtocol::Tcp,
                 u16::from_be_bytes(tcphdr.source),
                 u16::from_be_bytes(tcphdr.dest),
                 syn && !ack,
+                Some(TcpFlags { syn, ack, fin, rst }),
             )
         }
         network_types::ip::IpProto::Udp => {
@@ -79,10 +83,11 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
                 .load(EthHdr::LEN + Ipv4Hdr::LEN)
                 .map_err(|_| TC_ACT_PIPE)?;
             (
-                ipv4hdr.proto as u8,
+                KubeProtocol::Udp,
                 u16::from_be_bytes(udphdr.src),
                 u16::from_be_bytes(udphdr.dst),
                 true,
+                None,
             )
         }
         network_types::ip::IpProto::Sctp => {
@@ -90,10 +95,11 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
                 .load(EthHdr::LEN + Ipv4Hdr::LEN)
                 .map_err(|_| TC_ACT_PIPE)?;
             (
-                network_types::ip::IpProto::Sctp as u8,
+                KubeProtocol::Sctp,
                 u16::from_be_bytes(sctphdr.src),
                 u16::from_be_bytes(sctphdr.dst),
                 true,
+                None,
             )
         }
         _ => return Ok(TC_ACT_PIPE),
@@ -102,7 +108,7 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     let (ct_key, ct_rev) = conntrack_keys(src_ip, dst_ip, src_port, dst_port, proto, dst_id);
 
     let now = unsafe { bpf_ktime_get_ns() };
-    if conntrack_hit(&ctx, ct_key, ct_rev, now) {
+    if conntrack_hit(&ctx, ct_key, ct_rev, now, proto, tcp_flags) {
         return Ok(TC_ACT_PIPE);
     }
     if check_identity_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Ingress)
@@ -112,14 +118,23 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     {
         warn!(
             &ctx,
-            "denied src: {}:{}; dst: {}:{}; proto: {}", src_id, src_port, dst_id, dst_port, proto
+            "denied src: {}:{}; dst: {}:{}; proto: {}",
+            src_id,
+            src_port,
+            dst_id,
+            dst_port,
+            proto as u8
         );
         return Ok(TC_ACT_SHOT);
     }
 
     if should_insert
         && src_ip != dst_ip
-        && let Err(e) = CONNTRACK_V4.insert(ct_key, ConntrackValue { last_seen_ns: now }, 0)
+        && let Err(e) = CONNTRACK_V4.insert(
+            ct_key,
+            ConntrackValue::from_packet(proto, now, tcp_flags),
+            0,
+        )
     {
         error!(&ctx, "failed to insert into conntrack: {}", e);
     }

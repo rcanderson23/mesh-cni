@@ -61,7 +61,7 @@ pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 7] = [
     BPF_MAP_POLICY_CIDR_V6,
 ];
 
-pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 7] = [
+pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 8] = [
     BPF_MAP_SERVICES_V4,
     BPF_MAP_SERVICES_V6,
     BPF_MAP_ENDPOINTS_V4,
@@ -69,6 +69,7 @@ pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 7] = [
     BPF_MAP_NODEPORT_LOCAL_ADDRS_V4,
     BPF_MAP_NODEPORT_SERVICES_V4,
     BPF_MAP_NODEPORT_REV_NAT_V4,
+    BPF_MAP_NODEPORT_CONNTRACK_V4,
 ];
 
 pub(crate) const PROG_LIST: [BpfNamePath; 5] = [
