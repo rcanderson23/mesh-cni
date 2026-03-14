@@ -136,7 +136,6 @@ pub async fn start(
                     bail!("failed to join tasks");
                 },
             }
-
         }
     }
     Ok(())

@@ -1,8 +1,12 @@
 use aya_ebpf::{maps::lpm_trie::Key as LpmKey, programs::TcContext};
 use aya_log_ebpf::error;
 use mesh_cni_ebpf_common::{
-    IdentityId,
-    conntrack::{ConntrackKeyV4, ConntrackValue},
+    IdentityId, KubeProtocol,
+    conntrack::{
+        CT_TIMEOUT_TCP_ESTABLISHED_NS, CT_TIMEOUT_TCP_FIN_NS, CT_TIMEOUT_TCP_RST_NS,
+        CT_TIMEOUT_TCP_SYN_NS, CT_TIMEOUT_UDP_NS, ConntrackKeyV4, ConntrackValue, TcpFlags,
+        TcpState,
+    },
     policy::{
         ANY_ID, ANY_PORT, Action, CidrPolicyMapDataV4, PolicyDirection, PolicyIndexKey,
         PolicyProtocol, PolicyRuleKey, RULESET_NONE, RulesetId,
@@ -17,26 +21,66 @@ pub(crate) fn conntrack_hit(
     ct_key: ConntrackKeyV4,
     ct_rev: ConntrackKeyV4,
     now: u64,
+    proto: KubeProtocol,
+    tcp_flags: Option<TcpFlags>,
 ) -> bool {
-    if unsafe { CONNTRACK_V4.get(ct_key) }.is_some() {
-        if CONNTRACK_V4
-            .insert(ct_key, ConntrackValue { last_seen_ns: now }, 0)
-            .is_err()
-        {
-            error!(ctx, "failed to insert into conntrack");
-        };
-        return true;
+    if let Some(value) = unsafe { CONNTRACK_V4.get(ct_key) } {
+        if is_conntrack_expired(*value, now, proto) {
+            if CONNTRACK_V4.remove(ct_key).is_err() {
+                error!(ctx, "failed to remove expired conntrack key");
+            };
+        } else {
+            let new_value = next_conntrack_value(*value, now, proto, tcp_flags, false);
+            if CONNTRACK_V4.insert(ct_key, new_value, 0).is_err() {
+                error!(ctx, "failed to insert into conntrack");
+            };
+            return true;
+        }
     }
-    if unsafe { CONNTRACK_V4.get(ct_rev) }.is_some() {
-        if CONNTRACK_V4
-            .insert(ct_rev, ConntrackValue { last_seen_ns: now }, 0)
-            .is_err()
-        {
-            error!(ctx, "failed to insert into conntrack");
-        };
-        return true;
+    if let Some(value) = unsafe { CONNTRACK_V4.get(ct_rev) } {
+        if is_conntrack_expired(*value, now, proto) {
+            if CONNTRACK_V4.remove(ct_rev).is_err() {
+                error!(ctx, "failed to remove expired conntrack reverse key");
+            };
+        } else {
+            let new_value = next_conntrack_value(*value, now, proto, tcp_flags, true);
+            if CONNTRACK_V4.insert(ct_rev, new_value, 0).is_err() {
+                error!(ctx, "failed to insert into conntrack");
+            };
+            return true;
+        }
     }
     false
+}
+
+#[inline]
+fn next_conntrack_value(
+    current: ConntrackValue,
+    now: u64,
+    proto: KubeProtocol,
+    tcp_flags: Option<TcpFlags>,
+    is_reply: bool,
+) -> ConntrackValue {
+    let next_state = current
+        .tcp_state()
+        .advance(TcpState::from_packet(proto, tcp_flags, is_reply));
+    ConntrackValue::new(now, next_state)
+}
+
+#[inline]
+fn is_conntrack_expired(value: ConntrackValue, now: u64, proto: KubeProtocol) -> bool {
+    let timeout = match proto {
+        KubeProtocol::Tcp => match value.tcp_state() {
+            TcpState::Syn => CT_TIMEOUT_TCP_SYN_NS,
+            TcpState::Established => CT_TIMEOUT_TCP_ESTABLISHED_NS,
+            TcpState::FinInitiator | TcpState::FinResponder => CT_TIMEOUT_TCP_ESTABLISHED_NS,
+            TcpState::Closed => CT_TIMEOUT_TCP_FIN_NS,
+            TcpState::Rst => CT_TIMEOUT_TCP_RST_NS,
+            _ => CT_TIMEOUT_TCP_SYN_NS,
+        },
+        _ => CT_TIMEOUT_UDP_NS,
+    };
+    now.saturating_sub(value.last_seen_ns) > timeout
 }
 
 #[inline]
@@ -47,7 +91,7 @@ pub(crate) fn conntrack_keys(
     dst_ip: u32,
     src_port: u16,
     dst_port: u16,
-    proto: u8,
+    proto: KubeProtocol,
     initiator_id: IdentityId,
 ) -> (ConntrackKeyV4, ConntrackKeyV4) {
     (
@@ -56,7 +100,7 @@ pub(crate) fn conntrack_keys(
             dst_ip,
             src_port,
             dst_port,
-            proto,
+            proto: proto as u8,
             _pad: [0; 3],
             initiator_id,
         },
@@ -65,7 +109,7 @@ pub(crate) fn conntrack_keys(
             dst_ip: src_ip,
             src_port: dst_port,
             dst_port: src_port,
-            proto,
+            proto: proto as u8,
             _pad: [0; 3],
             initiator_id,
         },
@@ -79,7 +123,7 @@ pub(crate) fn check_identity_policy(
     src_id: IdentityId,
     dst_id: IdentityId,
     dst_port: u16,
-    proto: u8,
+    proto: KubeProtocol,
     direction: PolicyDirection,
 ) -> Action {
     let direction_u8: u8 = direction.into();
@@ -144,7 +188,7 @@ pub(crate) fn check_cidr_policy_v4(
     selected_id: IdentityId,
     peer_ip: u32,
     dst_port: u16,
-    proto: u8,
+    proto: KubeProtocol,
     direction: PolicyDirection,
 ) -> Action {
     let Some(ruleset_id) = cidr_ruleset_v4(selected_id, peer_ip, direction) else {
@@ -183,7 +227,7 @@ fn cidr_ruleset_v4(
 }
 
 #[inline]
-fn ruleset_allows(ruleset_id: RulesetId, dst_port: u16, proto: u8) -> bool {
+fn ruleset_allows(ruleset_id: RulesetId, dst_port: u16, proto: KubeProtocol) -> bool {
     if ruleset_id == RULESET_NONE {
         return false;
     }
@@ -191,14 +235,14 @@ fn ruleset_allows(ruleset_id: RulesetId, dst_port: u16, proto: u8) -> bool {
     let rule_candidates = [
         PolicyRuleKey {
             ruleset_id,
-            proto,
+            proto: proto as u8,
             _pad0: [0; 3],
             port: dst_port,
             _pad1: [0; 2],
         },
         PolicyRuleKey {
             ruleset_id,
-            proto,
+            proto: proto as u8,
             _pad0: [0; 3],
             port: ANY_PORT,
             _pad1: [0; 2],

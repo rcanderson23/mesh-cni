@@ -11,15 +11,14 @@ use aya_ebpf::{
 };
 use mesh_cni_ebpf_common::{
     IdentityId,
-    conntrack::{ConntrackKeyV4, ConntrackValue},
+    conntrack::{ConntrackKeyV4, ConntrackValue, NodePortConntrackV4Key, NodePortConntrackV4Value},
     policy::{
         CidrPolicyMapDataV4, CidrPolicyMapDataV6, PolicyIndexKey, PolicyRuleKey, PolicyValue,
         RulesetId,
     },
     service::{
-        EndpointKey, EndpointValueV4, EndpointValueV6, NodePortConntrackV4Key,
-        NodePortConntrackV4Value, NodePortKey, NodePortRevNatV4Key, NodePortRevNatV4Value,
-        ServiceKeyV4, ServiceKeyV6, ServiceValue,
+        EndpointKey, EndpointValueV4, EndpointValueV6, NodePortKey, NodePortRevNatV4Key,
+        NodePortRevNatV4Value, ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
 };
 
