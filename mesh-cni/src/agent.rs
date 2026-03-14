@@ -12,7 +12,7 @@ use crate::{
         policy::{PolicyBpfState, PolicyState},
         service::{ServiceEndpoint, ServiceEndpointState},
     },
-    config::AgentArgs,
+    config::{AgentArgs, CniMode},
     http, kubernetes,
 };
 
@@ -103,7 +103,10 @@ pub async fn start(
 
     // TODO: move to something less brittle
     info!("removing node taint");
-    kubernetes::node::remove_startup_taint(kube_client, args.node_name).await?;
+    kubernetes::node::remove_startup_taint(kube_client.clone(), args.node_name.clone()).await?;
+    if args.cni_settings.mode == CniMode::Vxlan {
+        kubernetes::node::set_network_ready(kube_client, args.node_name).await?;
+    }
 
     // TODO: do something else than a cancellation token for readiness probe
     ready.cancel();

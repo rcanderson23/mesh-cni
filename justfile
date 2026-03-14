@@ -36,7 +36,7 @@ test target=host_target:
 kind-up:
   kind create cluster --name={{name}} --config={{kind_path}}
   # Set to version of kindnet that does not support network policy
-  kubectl -n kube-system set image ds kindnet kindnet-cni={{kindnet_image}}
+  # kubectl -n kube-system set image ds kindnet kindnet-cni={{kindnet_image}}
 
 kind-down:
   kind delete cluster --name={{name}}
@@ -65,8 +65,8 @@ multi-kind-up:
   kind export kubeconfig --name={{cluster1_name}} --internal --kubeconfig={{cluster1_internal_kubeconfig}}
   kind export kubeconfig --name={{cluster2_name}} --internal --kubeconfig={{cluster2_internal_kubeconfig}}
   # Set to version of kindnet that does not support network policy
-  kubectl --kubeconfig {{cluster1_kubeconfig}} -n kube-system set image ds kindnet kindnet-cni={{kindnet_image}}
-  kubectl --kubeconfig {{cluster2_kubeconfig}} -n kube-system set image ds kindnet kindnet-cni={{kindnet_image}}
+  # kubectl --kubeconfig {{cluster1_kubeconfig}} -n kube-system set image ds kindnet kindnet-cni={{kindnet_image}}
+  # kubectl --kubeconfig {{cluster2_kubeconfig}} -n kube-system set image ds kindnet kindnet-cni={{kindnet_image}}
 
 multi-kind-down:
   kind delete cluster --name={{cluster1_name}} || true

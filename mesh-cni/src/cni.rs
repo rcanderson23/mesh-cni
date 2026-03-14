@@ -15,14 +15,17 @@ use mesh_cni_plugin::{
 use serde_json::Value;
 use tracing::{info, warn};
 
-use crate::{Result, config::CniSettings};
+use crate::{
+    Result,
+    config::{CniMode, CniSettings},
+};
 
 const CONFLIST_NAME: &str = "05-mesh.conflist";
 
 pub async fn ensure_cni_preconditions(settings: &CniSettings) -> Result<()> {
     ensure_cni_log_dir(&settings.plugin_log_dir)?;
     ensure_cni_bin(&settings.bin_dir, &settings.plugin_bin)?;
-    let conf = if settings.chained {
+    let conf = if settings.mode == CniMode::Chained {
         // first startup can have issues where the main CNI has not written its
         // conf yet so retry a few times before completely failing
         let mut attempts = 0;
@@ -133,11 +136,14 @@ fn default_cni_config() -> Result<Vec<u8>> {
     let conf = Config {
         cni_version: CNI_VERSION,
         cni_versions: vec![CNI_VERSION],
-        name: "mesh-cni".into(),
+        name: "mesh-cni".to_string(),
         disable_check: None,
         disable_gc: None,
         load_only_inlined_plugins: None,
-        plugins: Vec::new(),
+        plugins: vec![PluginConfig {
+            r#type: "mesh-cni".to_string(),
+            options: HashMap::default(),
+        }],
     };
     serde_json::to_vec_pretty(&conf).map_err(|e| e.into())
 }

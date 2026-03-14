@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use http::Uri;
 
 #[derive(Debug, Parser)]
@@ -65,6 +65,9 @@ pub struct AgentArgs {
 
     #[clap(flatten)]
     pub cni_settings: CniSettings,
+
+    #[clap(flatten)]
+    pub vxlan_settings: VxlanSettings,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -122,9 +125,14 @@ pub struct CniSettings {
     )]
     pub plugin_bin: PathBuf,
 
-    /// Determines if CNI should be configured as chained
-    #[arg(long, env = "CHAINED", default_value = "false")]
-    pub chained: bool,
+    /// Determines what mode the CNI should use
+    #[arg(
+        long,
+        env = "MESH_CNI_MODE",
+        value_enum,
+        default_value_t = CniMode::Chained
+    )]
+    pub mode: CniMode,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -136,4 +144,17 @@ pub struct ControllerArgs {
     /// Namespace the controller is running in
     #[arg(long, env = "NAMESPACE")]
     pub namespace: String,
+}
+
+#[derive(Clone, Debug, ValueEnum, PartialEq, PartialOrd)]
+pub enum CniMode {
+    Chained,
+    Vxlan,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct VxlanSettings {
+    /// Regex used to select host interfaces for vxlan dev
+    #[arg(long, env = "MESH_CNI_VXLAN_IFACE_REGEX", default_value = "^eth.*$")]
+    pub iface_regex: String,
 }
