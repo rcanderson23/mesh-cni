@@ -1,5 +1,6 @@
 use std::{
-    net::Ipv4Addr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    os::fd::{AsRawFd, RawFd},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -12,19 +13,29 @@ use aya::programs::{
 };
 use kube::{ResourceExt, runtime::reflector::ObjectRef};
 use mesh_cni_api::cni::v1::{
-    AddPodReply, AddPodRequest, DeletePodReply, DeletePodRequest, cni_server::Cni as CniApi,
+    AddPodReply, AddPodRequest, DeletePodReply, DeletePodRequest, Interface, Ip,
+    cni_server::Cni as CniApi,
 };
 use mesh_cni_crds::v1alpha1::identity::Identity;
 use mesh_cni_k8s_utils::sanitize_pod_labels;
 use mesh_cni_policy_controller::{Context, PolicyDataplane, reconcile_identity};
-use netns_rs::get_from_path;
+use rtnetlink::{
+    Handle, LinkUnspec, LinkVeth, RouteMessageBuilder,
+    packet_route::{
+        address::{AddressAttribute, AddressMessage},
+        route::{RouteHeader, RouteScope},
+    },
+};
+use sha2::{Digest, Sha256};
 use tokio::time::{Duration, sleep};
+use tokio_stream::StreamExt;
 use tonic::{Code, Request, Response, Status};
 use tracing::{error, info, warn};
 
 use crate::{
     Result,
     bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC},
+    config::CniMode,
 };
 
 pub struct CniState<P, I>
@@ -36,11 +47,18 @@ where
     netns_dir: PathBuf,
     #[allow(dead_code)]
     ipam: Option<I>,
+    mode: CniMode,
 }
 
 pub trait Ipam {
+    /// Return the first non-network IP Addr
+    fn first_v4(&self) -> Result<Ipv4Addr>;
+    /// Allocate a IPv4 Address
     fn allocate_v4_ip(&self) -> Result<Ipv4Addr>;
+    /// Return the IPv4 Address back to the pool
     fn release_v4_ip(&self, ip: Ipv4Addr) -> Result<()>;
+    /// Returns the length of bits for the shared prefix
+    fn network_length_v4(&self) -> u8;
 }
 
 const MESH_LINK_PREFIX: &str = "mesh_cni_link_";
@@ -50,17 +68,16 @@ where
     P: ReconcilePolicy + Send + Sync + 'static,
     I: Ipam + Send + Sync + 'static,
 {
-    pub fn new(policy_reconciler: P, netns_dir: PathBuf, ipam: Option<I>) -> Self {
+    pub fn new(policy_reconciler: P, netns_dir: PathBuf, ipam: Option<I>, mode: CniMode) -> Self {
         Self {
             policy_reconciler,
             netns_dir,
             ipam,
+            mode,
         }
     }
 }
 
-// TODO: this only handles chained creation correctly
-//
 // Spec says there SHOULD be a DEL call in between ADD calls so we need
 // to try to clean up on failed attach and pin calls
 //
@@ -72,8 +89,8 @@ where
 #[tonic::async_trait]
 impl<P, I> CniApi for CniState<P, I>
 where
-    P: ReconcilePolicy + Send + Sync + 'static,
-    I: Ipam + Send + Sync + 'static,
+    P: ReconcilePolicy + Clone + Send + Sync + 'static,
+    I: Ipam + Clone + Send + Sync + 'static,
 {
     async fn add_pod(
         &self,
@@ -81,16 +98,25 @@ where
     ) -> std::result::Result<Response<AddPodReply>, Status> {
         // TODO: replace logging here with request middleware on the tonic server
         info!("received add request {:?}", request);
-        let reply = add_pod(
-            &self.policy_reconciler,
-            request.into_inner(),
-            self.netns_dir.clone(),
-        )
+
+        let reconciler = self.policy_reconciler.clone();
+        let req = request.into_inner();
+        let netns_dir = self.netns_dir.clone();
+        let mode = self.mode.clone();
+        let ipam = self.ipam.clone();
+
+        // To simplify logic in the add_pod call and switching network namespaces, we will spawn a
+        // new thread and runtime
+        let reply = tokio::task::spawn_blocking(move || -> Result<AddPodReply> {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            rt.block_on(add_pod(reconciler, req, netns_dir, mode, ipam))
+        })
         .await
-        .map_err(|e| {
-            error!(%e, "failed to add pod");
-            Status::new(Code::Internal, e.to_string())
-        })?;
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(|e| Status::internal(e.to_string()))?;
+
         Ok(Response::new(reply))
     }
 
@@ -115,10 +141,12 @@ where
     }
 }
 
-async fn add_pod<P: ReconcilePolicy>(
-    reconciler: &P,
+async fn add_pod<P: ReconcilePolicy, I: Ipam>(
+    reconciler: P,
     request: AddPodRequest,
     netns_dir: PathBuf,
+    mode: CniMode,
+    ipam: Option<I>,
 ) -> Result<AddPodReply> {
     let Some(netns) = &request.net_namespace else {
         warn!(iface = %request.iface, "skipping add_pod for interface without sandbox");
@@ -137,42 +165,304 @@ async fn add_pod<P: ReconcilePolicy>(
                 let backoff_ms = 500u64.saturating_mul(1 + attempt);
                 sleep(Duration::from_millis(backoff_ms)).await;
             }
-            Err(err) => {
-                bail!(err);
+            Err(e) => {
+                return Err(e.into());
             }
         }
     }
 
     if let Some(e) = last_error {
-        bail!(e);
+        return Err(e.into());
     }
 
-    let netns_path = netns_path(netns_dir, netns)?;
-
-    let ns = get_from_path(netns_path)?;
-    ns.run(|_| {
-        let mut attached = Vec::new();
-        for iface in [&request.iface, "lo"] {
-            if let Err(e) = attach_for_iface(
-                iface,
-                &request.container_id,
-                TcAttachType::Ingress,
-                TcAttachType::Egress,
-            ) {
-                error!(%e, "failed to attach tc programs");
-                for attached_iface in attached {
-                    if let Err(u) = unpin_iface_paths(&request.container_id, attached_iface) {
-                        error!(%u, "failed to unpin path");
-                    };
-                }
-                return Err(e);
-            }
-            attached.push(iface);
+    let reply: AddPodReply = match mode {
+        CniMode::Chained => add_chained(&request, netns, netns_dir).await?,
+        CniMode::Vxlan => {
+            let Some(ipam) = ipam else {
+                bail!("ipam not initialized when in vxlan mode");
+            };
+            add_vxlan(&request, netns, netns_dir, ipam).await?
         }
-        Ok(())
-    })??;
+    };
+    Ok(reply)
+}
 
-    Ok(AddPodReply::default())
+// WHen in vxlan we need to setup the primary network interface for the pod as well as its peer. We
+// do this by creating the veth pair inside the pod network namespace, bringing up the interfaces,
+// attaching bpf programs to the primary pod interface as well as lo for network policy enforcement
+// on hairpin traffic. The peer interface needs to be moved to the host network namespace and then
+// assinged its gateway addr and brought up.
+//
+// The reply message expects to know the IPs and interfaces given to the pod.
+async fn add_vxlan<I: Ipam>(
+    request: &AddPodRequest,
+    netns: &str,
+    netns_dir: PathBuf,
+    ipam: I,
+) -> Result<AddPodReply> {
+    let host_netns = netns_rs::get_from_current_thread()?;
+    let pod_netns_path = netns_path(netns_dir, netns)?;
+    let pod_ns = netns_rs::get_from_path(pod_netns_path)?;
+    pod_ns.enter()?;
+
+    let (conn, handle, _) = rtnetlink::new_connection()?;
+    tokio::task::spawn(conn);
+    let addr = ipam.allocate_v4_ip()?;
+    let addr_prefix = ipam.network_length_v4();
+    let first = ipam.first_v4()?;
+
+    info!("setting lo up");
+    set_lo_up(&handle).await?;
+
+    let host_veth_name = host_veth_name(&request.container_id);
+
+    info!("creating veth pair");
+    let (iface_idx, veth_idx) =
+        create_veth_pair(&handle, request.iface.clone(), host_veth_name.clone()).await?;
+
+    attach_pod_bpf(&request.iface, &request.container_id)?;
+
+    info!(%iface_idx, "bringing pod interface up");
+    set_link_up(&handle, iface_idx).await?;
+
+    info!(%veth_idx, "bringing peer interface up before move");
+    set_link_up(&handle, veth_idx).await?;
+
+    set_addr(&handle, iface_idx, IpAddr::V4(addr)).await?;
+
+    add_link_scope_route(&handle, iface_idx, IpAddr::V4(first)).await?;
+
+    add_default_route(&handle, iface_idx, IpAddr::V4(first)).await?;
+
+    set_iface_to_host_ns(&handle, veth_idx, host_netns.file().as_raw_fd()).await?;
+
+    host_netns.enter()?;
+
+    let (conn, handle, _) = rtnetlink::new_connection()?;
+    tokio::task::spawn(conn);
+    let host_veth = handle
+        .link()
+        .get()
+        .match_name(host_veth_name.clone())
+        .execute()
+        .try_next()
+        .await?
+        .ok_or_else(|| anyhow!("failed to get host veth {host_veth_name}"))?;
+
+    set_addr(&handle, host_veth.header.index, IpAddr::V4(first)).await?;
+
+    set_link_up(&handle, host_veth.header.index).await?;
+
+    add_host_route(&handle, host_veth.header.index, IpAddr::V4(addr)).await?;
+
+    Ok(AddPodReply {
+        interfaces: vec![
+            Interface {
+                name: request.iface.clone(),
+                sandbox: Some(netns.to_string()),
+                ..Default::default()
+            },
+            Interface {
+                name: host_veth_name.clone(),
+                sandbox: None,
+                ..Default::default()
+            },
+        ],
+        ips: vec![Ip {
+            address: format!("{}/{}", addr, addr_prefix),
+            gateway: first.to_string(),
+            iface: Some(0),
+        }],
+        ..Default::default()
+    })
+}
+
+async fn add_chained(
+    request: &AddPodRequest,
+    netns: &str,
+    netns_dir: PathBuf,
+) -> Result<AddPodReply> {
+    let reply = AddPodReply::default();
+    let host_netns = netns_rs::get_from_current_thread()?;
+    let pod_netns_path = netns_path(netns_dir, netns)?;
+    let pod_ns = netns_rs::get_from_path(pod_netns_path)?;
+    pod_ns.enter()?;
+
+    attach_pod_bpf(&request.iface, &request.container_id)?;
+    host_netns.enter()?;
+    Ok(reply)
+}
+
+fn attach_pod_bpf(pod_iface: &str, container_id: &str) -> Result<()> {
+    let mut attached = Vec::new();
+    for iface in [pod_iface, "lo"] {
+        if let Err(e) = attach_for_iface(
+            iface,
+            container_id,
+            TcAttachType::Ingress,
+            TcAttachType::Egress,
+        ) {
+            error!(%e, "failed to attach tc programs");
+            for attached_iface in attached {
+                if let Err(u) = unpin_iface_paths(container_id, attached_iface) {
+                    error!(%u, "failed to unpin path");
+                };
+            }
+            return Err(e);
+        }
+        attached.push(iface);
+    }
+    Ok(())
+}
+
+async fn add_link_scope_route(handle: &Handle, idx: u32, addr: IpAddr) -> Result<()> {
+    let route = match addr {
+        IpAddr::V4(ipv4_addr) => RouteMessageBuilder::<Ipv4Addr>::new()
+            .destination_prefix(ipv4_addr, 32)
+            .output_interface(idx)
+            .scope(RouteScope::Link)
+            .build(),
+        IpAddr::V6(ipv6_addr) => RouteMessageBuilder::<Ipv6Addr>::new()
+            .destination_prefix(ipv6_addr, 128)
+            .output_interface(idx)
+            .scope(RouteScope::Link)
+            .build(),
+    };
+    handle.route().add(route).execute().await?;
+    Ok(())
+}
+
+async fn add_default_route(handle: &Handle, idx: u32, addr: IpAddr) -> Result<()> {
+    let route = match addr {
+        IpAddr::V4(ipv4_addr) => RouteMessageBuilder::<Ipv4Addr>::new()
+            .output_interface(idx)
+            .gateway(ipv4_addr)
+            .build(),
+        IpAddr::V6(ipv6_addr) => RouteMessageBuilder::<Ipv6Addr>::new()
+            .output_interface(idx)
+            .gateway(ipv6_addr)
+            .build(),
+    };
+    handle.route().add(route).execute().await?;
+    Ok(())
+}
+
+async fn add_host_route(handle: &Handle, idx: u32, addr: IpAddr) -> Result<()> {
+    let route = match addr {
+        IpAddr::V4(ipv4_addr) => RouteMessageBuilder::<Ipv4Addr>::new()
+            .destination_prefix(ipv4_addr, 32)
+            .output_interface(idx)
+            .table_id(RouteHeader::RT_TABLE_MAIN.into())
+            .scope(RouteScope::Link)
+            .build(),
+        IpAddr::V6(ipv6_addr) => RouteMessageBuilder::<Ipv6Addr>::new()
+            .destination_prefix(ipv6_addr, 128)
+            .output_interface(idx)
+            .table_id(RouteHeader::RT_TABLE_MAIN.into())
+            .scope(RouteScope::Link)
+            .build(),
+    };
+    handle.route().add(route).execute().await?;
+    Ok(())
+}
+
+async fn create_veth_pair(handle: &Handle, name: String, peer_name: String) -> Result<(u32, u32)> {
+    handle
+        .link()
+        .add(LinkVeth::new(&name, &peer_name).up().build())
+        .execute()
+        .await?;
+
+    let pod = handle
+        .link()
+        .get()
+        .match_name(name)
+        .execute()
+        .try_next()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("failed to get pod iface"))?;
+
+    let peer = handle
+        .link()
+        .get()
+        .match_name(peer_name)
+        .execute()
+        .try_next()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("failed to get veth peer"))?;
+
+    Ok((pod.header.index, peer.header.index))
+}
+
+async fn set_iface_to_host_ns(handle: &Handle, index: u32, host_ns_fd: RawFd) -> Result<()> {
+    handle
+        .link()
+        .set(
+            LinkUnspec::new_with_index(index)
+                .setns_by_fd(host_ns_fd)
+                .build(),
+        )
+        .execute()
+        .await?;
+    Ok(())
+}
+
+async fn set_link_up(handle: &Handle, index: u32) -> Result<()> {
+    handle
+        .link()
+        .set(LinkUnspec::new_with_index(index).up().build())
+        .execute()
+        .await?;
+    Ok(())
+}
+
+async fn set_addr(handle: &Handle, idx: u32, addr: IpAddr) -> Result<()> {
+    if let Some(addr_msg) = handle
+        .address()
+        .get()
+        .set_link_index_filter(idx)
+        .execute()
+        .try_next()
+        .await?
+        && addr_matches(&addr_msg, addr)
+    {
+        return Ok(());
+    }
+    handle.address().add(idx, addr, 32).execute().await?;
+    Ok(())
+}
+
+fn addr_matches(addr_message: &AddressMessage, addr: IpAddr) -> bool {
+    addr_message.attributes.iter().any(|attr| match attr {
+        AddressAttribute::Address(ip_addr) => *ip_addr == addr,
+        _ => false,
+    })
+}
+
+async fn set_lo_up(handle: &Handle) -> Result<()> {
+    let lo = handle
+        .link()
+        .get()
+        .match_name("lo".to_string())
+        .execute()
+        .try_next()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("failed to get iface lo"))?;
+
+    handle
+        .link()
+        .set(LinkUnspec::new_with_index(lo.header.index).up().build())
+        .execute()
+        .await?;
+
+    Ok(())
+}
+// linux iface names are resetricted to 16 characters
+fn host_veth_name(container_id: &str) -> String {
+    let digest = Sha256::digest(container_id.as_bytes());
+    let hex = format!("{:x}", digest);
+
+    format!("mesh{}", &hex[..11])
 }
 
 fn unpin_path(path: impl AsRef<Path>) -> Result<()> {

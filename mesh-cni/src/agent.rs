@@ -51,7 +51,12 @@ pub async fn start(
     };
 
     info!("starting cni service");
-    let cni_state = http::grpc::cni::CniState::new(policy_context, args.netns_dir, ipam);
+    let cni_state = http::grpc::cni::CniState::new(
+        policy_context,
+        args.netns_dir,
+        ipam,
+        args.cni_settings.mode.clone(),
+    );
     let cni_server = CniServer::new(cni_state);
 
     info!("loading ip maps");

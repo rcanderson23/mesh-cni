@@ -1,7 +1,7 @@
 use std::net::Ipv4Addr;
 
 use ahash::HashSet;
-use anyhow::{self, bail};
+use anyhow::{self, Ok, bail};
 use cidr::Ipv4Cidr;
 
 use crate::Result;
@@ -13,19 +13,29 @@ pub struct IpamV4 {
 }
 
 impl IpamV4 {
-    pub fn try_new(cidr: Ipv4Cidr, allocated: HashSet<Ipv4Addr>) -> Result<Self> {
+    pub fn try_new(cidr: Ipv4Cidr, mut allocated: HashSet<Ipv4Addr>) -> Result<Self> {
         if cidr.network_length() > 30 {
             bail!(
                 "invalid network length {} provided, must be less than or equal to 30 ",
                 cidr.network_length()
             )
         }
+        let first = u32::from(cidr.first_address()) + 1;
+        let first = Ipv4Addr::from(first);
+        allocated.insert(first);
         Ok(Self {
             cidr,
             allocated,
             last_allocated: None,
         })
     }
+
+    pub fn first_address(&self) -> Result<Ipv4Addr> {
+        let first_usable = u32::from(self.cidr.first_address()) + 1;
+
+        Ok(Ipv4Addr::from_bits(first_usable))
+    }
+
     pub fn allocate_ip(&mut self) -> Result<Ipv4Addr> {
         // first and last IPs are network and broadcast so ignore those
         let first_usable = u32::from(self.cidr.first_address()) + 1;
@@ -54,6 +64,10 @@ impl IpamV4 {
         self.allocated.remove(&ip);
 
         Ok(())
+    }
+
+    pub fn cidr(&self) -> u8 {
+        self.cidr.network_length()
     }
 }
 

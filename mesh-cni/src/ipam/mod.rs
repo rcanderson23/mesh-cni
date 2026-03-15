@@ -15,6 +15,10 @@ pub struct Ipam {
 }
 
 impl http::grpc::cni::Ipam for Arc<Mutex<Ipam>> {
+    fn first_v4(&self) -> Result<Ipv4Addr> {
+        let guard = self.lock().unwrap();
+        guard.v4.first_address()
+    }
     fn allocate_v4_ip(&self) -> Result<Ipv4Addr> {
         let mut guard = self.lock().unwrap();
         guard.v4.allocate_ip()
@@ -23,5 +27,10 @@ impl http::grpc::cni::Ipam for Arc<Mutex<Ipam>> {
     fn release_v4_ip(&self, ip: Ipv4Addr) -> Result<()> {
         let mut guard = self.lock().unwrap();
         guard.v4.release_ip(ip)
+    }
+
+    fn network_length_v4(&self) -> u8 {
+        let guard = self.lock().unwrap();
+        guard.v4.cidr()
     }
 }

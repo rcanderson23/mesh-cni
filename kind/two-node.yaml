@@ -12,11 +12,11 @@ nodes:
       - effect: NoSchedule
         key: mesh-cni.dev/startup
         value: "true"
-- role: worker
-  kubeadmConfigPatches:
-  - |
-    kind: KubeletConfiguration
-    registerWithTaints:
-      - effect: NoSchedule
-        key: mesh-cni.dev/startup
-        value: "true"
+# - role: worker
+#   kubeadmConfigPatches:
+#   - |
+#     kind: KubeletConfiguration
+#     registerWithTaints:
+#       - effect: NoSchedule
+#         key: mesh-cni.dev/startup
+#         value: "true"

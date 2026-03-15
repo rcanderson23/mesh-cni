@@ -13,8 +13,7 @@ message AddPodReply {
   repeated grpc.cni.v1.Interface interfaces = 1;
   repeated grpc.cni.v1.IP ips = 2;
   repeated grpc.cni.v1.Route routes = 3;
-  grpc.cni.v1.DNS dns = 4; 
-
+  grpc.cni.v1.DNS dns = 4;
 }
 
 message AddPodRequest {
