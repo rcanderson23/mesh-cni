@@ -1,4 +1,5 @@
 use std::{
+    net::Ipv4Addr,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -26,18 +27,34 @@ use crate::{
     bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC},
 };
 
-pub struct CniState<P: ReconcilePolicy + Send + Sync + 'static> {
+pub struct CniState<P, I>
+where
+    P: ReconcilePolicy + Send + Sync + 'static,
+    I: Ipam + Send + Sync + 'static,
+{
     policy_reconciler: P,
     netns_dir: PathBuf,
+    #[allow(dead_code)]
+    ipam: Option<I>,
+}
+
+pub trait Ipam {
+    fn allocate_v4_ip(&self) -> Result<Ipv4Addr>;
+    fn release_v4_ip(&self, ip: Ipv4Addr) -> Result<()>;
 }
 
 const MESH_LINK_PREFIX: &str = "mesh_cni_link_";
 
-impl<P: ReconcilePolicy + Send + Sync + 'static> CniState<P> {
-    pub fn new(policy_reconciler: P, netns_dir: PathBuf) -> Self {
+impl<P, I> CniState<P, I>
+where
+    P: ReconcilePolicy + Send + Sync + 'static,
+    I: Ipam + Send + Sync + 'static,
+{
+    pub fn new(policy_reconciler: P, netns_dir: PathBuf, ipam: Option<I>) -> Self {
         Self {
             policy_reconciler,
             netns_dir,
+            ipam,
         }
     }
 }
@@ -53,7 +70,11 @@ impl<P: ReconcilePolicy + Send + Sync + 'static> CniState<P> {
 // a new Identity CR but will be retried by the CNI/kubelet and should be fast
 // on subsequent calls
 #[tonic::async_trait]
-impl<P: ReconcilePolicy + Send + Sync + 'static> CniApi for CniState<P> {
+impl<P, I> CniApi for CniState<P, I>
+where
+    P: ReconcilePolicy + Send + Sync + 'static,
+    I: Ipam + Send + Sync + 'static,
+{
     async fn add_pod(
         &self,
         request: Request<AddPodRequest>,

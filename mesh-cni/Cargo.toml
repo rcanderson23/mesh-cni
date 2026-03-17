@@ -24,6 +24,7 @@ async-stream = { workspace = true }
 axum = { version = "0.8.4", features = ["tokio"]}
 aya = { workspace = true }
 aya-log = { workspace = true }
+cidr = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 chrono = { workspace = true }
 futures = { workspace = true }

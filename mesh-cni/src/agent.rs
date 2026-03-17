@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use anyhow::bail;
 use mesh_cni_api::cni::v1::cni_server::CniServer;
 use tokio_util::sync::CancellationToken;
@@ -13,7 +15,7 @@ use crate::{
         service::{ServiceEndpoint, ServiceEndpointState},
     },
     config::{AgentArgs, CniMode},
-    http, kubernetes,
+    http, ipam, kubernetes,
 };
 
 pub async fn start(
@@ -41,8 +43,15 @@ pub async fn start(
         bpf::policy::run(kube_client.clone(), policy_state.clone(), cancel.clone()).await?;
     let policy_server = http::grpc::policy::server(policy_state.clone());
 
+    let ipam = match args.cni_settings.mode {
+        CniMode::Chained => None,
+        CniMode::Vxlan => Some(Arc::new(Mutex::new(
+            ipam::get_ipam_from_node(kube_client.clone(), &args.node_name).await?,
+        ))),
+    };
+
     info!("starting cni service");
-    let cni_state = http::grpc::cni::CniState::new(policy_context, args.netns_dir);
+    let cni_state = http::grpc::cni::CniState::new(policy_context, args.netns_dir, ipam);
     let cni_server = CniServer::new(cni_state);
 
     info!("loading ip maps");
