@@ -30,6 +30,7 @@ COPY mesh-cni-meshendpoint-gen-controller mesh-cni-meshendpoint-gen-controller
 COPY mesh-cni-service-bpf-controller mesh-cni-service-bpf-controller
 COPY mesh-cni-cluster-controller mesh-cni-cluster-controller
 COPY mesh-cni-meshidentityslice-gen-controller mesh-cni-meshidentityslice-gen-controller
+COPY mesh-cni-node-route-controller mesh-cni-node-route-controller
 
 RUN cargo build --release
 

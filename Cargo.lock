@@ -1724,6 +1724,7 @@ dependencies = [
  "mesh-cni-identity-gen-controller",
  "mesh-cni-k8s-utils",
  "mesh-cni-meshendpoint-gen-controller",
+ "mesh-cni-node-route-controller",
  "mesh-cni-plugin",
  "mesh-cni-policy-controller",
  "mesh-cni-service-bpf-controller",
@@ -1941,6 +1942,24 @@ dependencies = [
  "mesh-cni-k8s-utils",
  "serde_json",
  "sha2",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "mesh-cni-node-route-controller"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "cidr",
+ "futures",
+ "ipnetwork",
+ "k8s-openapi",
+ "kube",
+ "mesh-cni-k8s-utils",
+ "rtnetlink",
  "thiserror 2.0.17",
  "tokio",
  "tokio-util",

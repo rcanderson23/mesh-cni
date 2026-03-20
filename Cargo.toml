@@ -17,6 +17,7 @@ members = [
     "mesh-cni-meshidentityslice-gen-controller",
     "mesh-cni-crds", 
     "mesh-cni-service-bpf-controller",
+    "mesh-cni-node-route-controller",
 ]
 default-members = [
     "mesh-cni-api",
@@ -34,6 +35,7 @@ default-members = [
     "mesh-cni-meshidentityslice-gen-controller",
     "mesh-cni-crds",
     "mesh-cni-service-bpf-controller",
+    "mesh-cni-node-route-controller",
 ]
 
 [workspace.package]

@@ -17,6 +17,7 @@ mesh-cni-policy-controller = { path = "../mesh-cni-policy-controller" }
 mesh-cni-meshendpoint-gen-controller = { path = "../mesh-cni-meshendpoint-gen-controller" }
 mesh-cni-service-bpf-controller = { path = "../mesh-cni-service-bpf-controller" }
 mesh-cni-crds = { path = "../mesh-cni-crds" }
+mesh-cni-node-route-controller = { path = "../mesh-cni-node-route-controller" }
 
 ahash = { workspace = true }
 anyhow = { workspace = true }

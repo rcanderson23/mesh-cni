@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::bail;
 use mesh_cni_api::cni::v1::cni_server::CniServer;
+use mesh_cni_node_route_controller::start_node_route_controller;
 use tokio_util::sync::CancellationToken;
 use tonic::service::RoutesBuilder;
 use tracing::{error, info};
@@ -43,11 +44,21 @@ pub async fn start(
         bpf::policy::run(kube_client.clone(), policy_state.clone(), cancel.clone()).await?;
     let policy_server = http::grpc::policy::server(policy_state.clone());
 
+    let mut node_route_handle = None;
     let ipam = match args.cni_settings.mode {
         CniMode::Chained => None,
-        CniMode::Vxlan => Some(Arc::new(Mutex::new(
-            ipam::get_ipam_from_node(kube_client.clone(), &args.node_name).await?,
-        ))),
+        CniMode::Vxlan => {
+            let ipam = Arc::new(Mutex::new(
+                ipam::get_ipam_from_node(kube_client.clone(), &args.node_name).await?,
+            ));
+
+            node_route_handle = Some(tokio::spawn(start_node_route_controller(
+                kube_client.clone(),
+                args.node_name.clone(),
+                cancel.child_token(),
+            )));
+            Some(ipam)
+        }
     };
 
     info!("starting cni service");
@@ -126,32 +137,77 @@ pub async fn start(
     ready.cancel();
 
     // TODO: add graceful shutdown
-    tokio::select! {
-        _ = cancel.cancelled() => {},
-        h = grpc_handle => {
-            match h {
-                Ok(Ok(_)) => info!("grpc task exited gracefully"),
-                Ok(Err(e)) => {
-                    error!(%e, "grpc exited with error");
-                    return Err(e);
-                },
-                Err(e) => {
-                    error!(%e);
-                    bail!("failed to join tasks");
-                },
+    if let Some(node_route_handle) = node_route_handle {
+        tokio::select! {
+            _ = cancel.cancelled() => {},
+            h = grpc_handle => {
+                match h {
+                    Ok(Ok(_)) => info!("grpc task exited gracefully"),
+                    Ok(Err(e)) => {
+                        error!(%e, "grpc exited with error");
+                        return Err(e);
+                    },
+                    Err(e) => {
+                        error!(%e);
+                        bail!("failed to join tasks");
+                    },
+                }
+            },
+            h = cleanup_handle => {
+                match h {
+                    Ok(Ok(_)) => info!("cleanup exited gracefully"),
+                    Ok(Err(e)) => {
+                        error!(%e, "cleanup exited with error");
+                        return Err(e);
+                    },
+                    Err(e) => {
+                        error!(%e);
+                        bail!("failed to join tasks");
+                    },
+                }
+            },
+            h = node_route_handle => {
+                match h {
+                    Ok(Ok(_)) => info!("node route controller exited gracefully"),
+                    Ok(Err(e)) => {
+                        error!(%e, "node route controller exited with error");
+                        return Err(anyhow::Error::from(e));
+                    },
+                    Err(e) => {
+                        error!(%e, "failed to join node route controller task");
+                        bail!("failed to join tasks");
+                    },
+                }
             }
-        },
-        h = cleanup_handle => {
-            match h {
-                Ok(Ok(_)) => info!("cleanup exited gracefully"),
-                Ok(Err(e)) => {
-                    error!(%e, "cleanup exited with error");
-                    return Err(e);
-                },
-                Err(e) => {
-                    error!(%e);
-                    bail!("failed to join tasks");
-                },
+        }
+    } else {
+        tokio::select! {
+            _ = cancel.cancelled() => {},
+            h = grpc_handle => {
+                match h {
+                    Ok(Ok(_)) => info!("grpc task exited gracefully"),
+                    Ok(Err(e)) => {
+                        error!(%e, "grpc exited with error");
+                        return Err(e);
+                    },
+                    Err(e) => {
+                        error!(%e);
+                        bail!("failed to join tasks");
+                    },
+                }
+            },
+            h = cleanup_handle => {
+                match h {
+                    Ok(Ok(_)) => info!("cleanup exited gracefully"),
+                    Ok(Err(e)) => {
+                        error!(%e, "cleanup exited with error");
+                        return Err(e);
+                    },
+                    Err(e) => {
+                        error!(%e);
+                        bail!("failed to join tasks");
+                    },
+                }
             }
         }
     }
