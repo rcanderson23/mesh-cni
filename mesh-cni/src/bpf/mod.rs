@@ -3,6 +3,7 @@ pub mod ip;
 pub mod loader;
 pub mod policy;
 pub mod service;
+pub mod vxlan;
 
 use std::{borrow::BorrowMut, hash::Hash};
 
@@ -24,6 +25,10 @@ pub(crate) const BPF_PROGRAM_NODEPORT_EGRESS_TC: BpfNamePath =
     BpfNamePath::Program("mesh_cni_nodeport_egress");
 pub const BPF_PROGRAM_CGROUP_CONNECT_V4: BpfNamePath =
     BpfNamePath::Program("mesh_cni_cgroup_connect4");
+pub const BPF_PROGRAM_VXLAN_VETH_EGRESS_TC: BpfNamePath =
+    BpfNamePath::Program("mesh_cni_vxlan_veth_egress");
+pub const BPF_PROGRAM_VXLAN_NODE_INGRESS_TC: BpfNamePath =
+    BpfNamePath::Program("mesh_cni_vxlan_node_ingress");
 pub const BPF_LINK_CGROUP_CONNECT_V4_PATH: &str = "/sys/fs/bpf/mesh/links/mesh_cni_cgroup_connect4";
 
 pub type IdentityMapV4 = LpmTrie<MapData, u32, IdentityId>;
@@ -45,6 +50,8 @@ pub const BPF_MAP_POLICY_INDEX: BpfNamePath = BpfNamePath::Map("policy_index");
 pub const BPF_MAP_POLICY_RULESET: BpfNamePath = BpfNamePath::Map("policy_ruleset");
 pub const BPF_MAP_POLICY_CIDR_V4: BpfNamePath = BpfNamePath::Map("policy_cidr_v4");
 pub const BPF_MAP_POLICY_CIDR_V6: BpfNamePath = BpfNamePath::Map("policy_cidr_v6");
+pub const BPF_MAP_IFACE_INDEXES_V4: BpfNamePath = BpfNamePath::Map("iface_indexes_v4");
+pub const BPF_MAP_VXLAN_REMOTE_CIDRS_V4: BpfNamePath = BpfNamePath::Map("vxlan_remote_cidrs_v4");
 
 pub const BPF_MESH_FS_DIR: &str = "/sys/fs/bpf/mesh";
 pub const BPF_MESH_MAPS_DIR: &str = "/sys/fs/bpf/mesh/maps";
@@ -72,12 +79,20 @@ pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 8] = [
     BPF_MAP_NODEPORT_CONNTRACK_V4,
 ];
 
+pub(crate) const VXLAN_MAPS_LIST: [BpfNamePath; 2] =
+    [BPF_MAP_IFACE_INDEXES_V4, BPF_MAP_VXLAN_REMOTE_CIDRS_V4];
+
 pub(crate) const PROG_LIST: [BpfNamePath; 5] = [
     BPF_PROGRAM_CGROUP_CONNECT_V4,
     BPF_PROGRAM_INGRESS_TC,
     BPF_PROGRAM_EGRESS_TC,
     BPF_PROGRAM_NODEPORT_INGRESS_TC,
     BPF_PROGRAM_NODEPORT_EGRESS_TC,
+];
+
+pub(crate) const VXLAN_PROG_LIST: [BpfNamePath; 2] = [
+    BPF_PROGRAM_VXLAN_VETH_EGRESS_TC,
+    BPF_PROGRAM_VXLAN_NODE_INGRESS_TC,
 ];
 
 pub enum BpfNamePath {

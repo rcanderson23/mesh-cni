@@ -1,5 +1,5 @@
 [package]
-name = "mesh-cni-node-route-controller"
+name = "mesh-cni-vxlan-controller"
 version = "0.1.0"
 license.workspace = true
 edition.workspace = true
@@ -10,14 +10,17 @@ futures = { workspace = true }
 ipnetwork = { workspace = true }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }
+mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common" }
 mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-rtnetlink = { workspace = true }
 cidr = { workspace = true }
 
+[dev-dependencies]
+k8s-openapi = { workspace = true, features = ["v1_34"] }
+
 [lib]
-name = "mesh_cni_node_route_controller"
+name = "mesh_cni_vxlan_controller"
 path = "src/lib.rs"

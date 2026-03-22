@@ -34,7 +34,10 @@ use tracing::{error, info, warn};
 
 use crate::{
     Result,
-    bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC},
+    bpf::{
+        BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC,
+        BPF_PROGRAM_VXLAN_VETH_EGRESS_TC,
+    },
     config::CniMode,
 };
 
@@ -126,8 +129,9 @@ where
     ) -> std::result::Result<Response<DeletePodReply>, Status> {
         let request = request.into_inner();
         info!("received delete request {:?}", request);
+        let host_veth = host_veth_name(&request.container_id);
 
-        for iface in [&request.iface, "lo"] {
+        for iface in [&request.iface, host_veth.as_str(), "lo"] {
             unpin_iface_paths(&request.container_id, iface)
                 .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
         }
@@ -254,6 +258,13 @@ async fn add_vxlan<I: Ipam>(
     set_link_up(&handle, host_veth.header.index).await?;
 
     add_host_route(&handle, host_veth.header.index, IpAddr::V4(addr)).await?;
+
+    attach_and_pin_links(
+        &host_veth_name,
+        &request.container_id,
+        BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.path(),
+        TcAttachType::Ingress, // need to be ingress attach coming from the pod netns
+    )?;
 
     Ok(AddPodReply {
         interfaces: vec![
@@ -511,6 +522,8 @@ fn attach_and_pin_links(
 
     let mut prog = SchedClassifier::from_pin(path)?;
 
+    let _ = tc::qdisc_add_clsact(iface);
+
     let link_id = prog.attach(iface, attach_type)?;
 
     let link = prog.take_link(link_id)?;
@@ -535,8 +548,6 @@ fn attach_for_iface(
     ingress_attach_type: TcAttachType,
     egress_attach_type: TcAttachType,
 ) -> Result<()> {
-    let _ = tc::qdisc_add_clsact(iface);
-
     attach_and_pin_links(
         iface,
         container_id,

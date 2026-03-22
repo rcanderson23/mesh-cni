@@ -1,10 +1,11 @@
-use crate::Result;
 use anyhow::Context;
 use ipnetwork::IpNetwork;
 use rustables::{
     Batch, Chain, ChainPolicy, ChainType, Hook, HookClass, ProtocolFamily, Rule, Table,
     list_chains_for_table, list_rules_for_chain, list_tables,
 };
+
+use crate::Result;
 
 const TABLE_NAME: &str = "mesh_cni_nat";
 const CHAIN_NAME: &str = "postrouting";

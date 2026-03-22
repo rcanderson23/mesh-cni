@@ -4,6 +4,7 @@ pub mod egress;
 pub mod ingress;
 pub(crate) mod policy;
 pub mod service;
+pub mod vxlan;
 
 use aya_ebpf::{
     macros::map,
@@ -20,6 +21,7 @@ use mesh_cni_ebpf_common::{
         EndpointKey, EndpointValueV4, EndpointValueV6, NodePortKey, NodePortRevNatV4Key,
         NodePortRevNatV4Value, ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
+    vxlan::RemoteNodeV4,
 };
 
 #[map(name = "identity_v4")]
@@ -72,6 +74,12 @@ static NODEPORT_REV_NAT_V4: LruHashMap<NodePortRevNatV4Key, NodePortRevNatV4Valu
 #[map(name = "nodeport_conntrack_v4")]
 static NODEPORT_CONNTRACK_V4: LruHashMap<NodePortConntrackV4Key, NodePortConntrackV4Value> =
     LruHashMap::with_max_entries(65535, 0);
+
+#[map(name = "vxlan_remote_cidrs_v4")]
+static VXLAN_REMOTE_CIDRS_V4: LpmTrie<u32, RemoteNodeV4> = LpmTrie::with_max_entries(65535, 0);
+
+#[map(name = "iface_indexes_v4")]
+static IFACE_INDEXES_V4: HashMap<u32, u32> = HashMap::with_max_entries(10, 0);
 
 #[inline]
 fn id_v4(ip: LpmKey<u32>) -> Option<IdentityId> {

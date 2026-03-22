@@ -11,6 +11,7 @@ use mesh_cni_ebpf::{
     service::{
         try_mesh_cni_cgroup_connect4, try_mesh_cni_nodeport_egress, try_mesh_cni_nodeport_ingress,
     },
+    vxlan::{try_mesh_cni_vxlan_node_ingress, try_mesh_cni_vxlan_veth_egress},
 };
 
 #[cgroup_sock_addr(connect4)]
@@ -48,6 +49,22 @@ pub fn mesh_cni_nodeport_ingress(ctx: TcContext) -> i32 {
 #[classifier]
 pub fn mesh_cni_nodeport_egress(ctx: TcContext) -> i32 {
     match try_mesh_cni_nodeport_egress(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[classifier]
+pub fn mesh_cni_vxlan_veth_egress(ctx: TcContext) -> i32 {
+    match try_mesh_cni_vxlan_veth_egress(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[classifier]
+pub fn mesh_cni_vxlan_node_ingress(ctx: TcContext) -> i32 {
+    match try_mesh_cni_vxlan_node_ingress(ctx) {
         Ok(ret) => ret,
         Err(ret) => ret,
     }

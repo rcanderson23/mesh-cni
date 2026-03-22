@@ -1,12 +1,14 @@
 use std::time::Duration;
 
 use aya::maps::{HashMap, Map, MapData};
-use mesh_cni_ebpf_common::conntrack::{
-    CT_TIMEOUT_TCP_ESTABLISHED_NS, CT_TIMEOUT_TCP_FIN_NS, CT_TIMEOUT_TCP_RST_NS,
-    CT_TIMEOUT_TCP_SYN_NS, CT_TIMEOUT_UDP_NS, ConntrackKeyV4, ConntrackValue,
-    NodePortConntrackV4Key, NodePortConntrackV4Value, TcpState,
+use mesh_cni_ebpf_common::{
+    conntrack::{
+        CT_TIMEOUT_TCP_ESTABLISHED_NS, CT_TIMEOUT_TCP_FIN_NS, CT_TIMEOUT_TCP_RST_NS,
+        CT_TIMEOUT_TCP_SYN_NS, CT_TIMEOUT_UDP_NS, ConntrackKeyV4, ConntrackValue,
+        NodePortConntrackV4Key, NodePortConntrackV4Value, TcpState,
+    },
+    service::{NodePortRevNatV4Key, NodePortRevNatV4Value},
 };
-use mesh_cni_ebpf_common::service::{NodePortRevNatV4Key, NodePortRevNatV4Value};
 use nix::time::{ClockId, clock_gettime};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
