@@ -4,6 +4,7 @@ FROM rust:1.92-trixie AS builder
 RUN apt-get update && \
   apt-get -y install ca-certificates \
   protobuf-compiler \
+  libclang-dev \
   llvm && \
   update-ca-certificates
 
@@ -40,6 +41,10 @@ FROM debian:trixie-slim
 
 WORKDIR /app
 ENV PATH="$PATH:/app"
+
+# FIXME: 
+#
+RUN apt-get update; apt-get install nftables -y 
 
 COPY --from=builder /app/target/release/mesh-cni /app/target/release/mesh-cni-plugin /app/target/release/mesh /app/
 COPY --from=aws-iam /aws-iam-authenticator /app/

@@ -8,8 +8,8 @@ license.workspace = true
 [dependencies]
 mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
 mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common", features = ["user"] }
-mesh-cni-plugin = { path = "../mesh-cni-plugin"}
-mesh-cni-api = { path = "../mesh-cni-api"}
+mesh-cni-plugin = { path = "../mesh-cni-plugin" }
+mesh-cni-api = { path = "../mesh-cni-api" }
 mesh-cni-cluster-controller = { path = "../mesh-cni-cluster-controller" }
 mesh-cni-identity-gen-controller = { path = "../mesh-cni-identity-gen-controller" }
 mesh-cni-identity-controller = { path = "../mesh-cni-identity-controller" }
@@ -22,14 +22,14 @@ mesh-cni-node-route-controller = { path = "../mesh-cni-node-route-controller" }
 ahash = { workspace = true }
 anyhow = { workspace = true }
 async-stream = { workspace = true }
-axum = { version = "0.8.4", features = ["tokio"]}
+axum = { version = "0.8.4", features = ["tokio"] }
 aya = { workspace = true }
 aya-log = { workspace = true }
 cidr = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 chrono = { workspace = true }
 futures = { workspace = true }
-schemars = { workspace = true, features = ["preserve_order"]}
+schemars = { workspace = true, features = ["preserve_order"] }
 
 http = { workspace = true }
 ipnetwork = { workspace = true }
@@ -37,12 +37,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 libc = { workspace = true }
 k8s-openapi = { workspace = true, features = ["v1_34"] }
-kube = { workspace = true}
+kube = { workspace = true }
 netns-rs = { workspace = true }
 network-types = { workspace = true }
 nix = { workspace = true, features = ["time"] }
 prometheus-client = { workspace = true }
 regex = { workspace = true }
+rustables = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
@@ -50,11 +51,11 @@ serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 rtnetlink = { workspace = true }
 tokio = { workspace = true, features = [
-    "macros",
-    "rt",
-    "rt-multi-thread",
-    "net",
-    "signal",
+  "macros",
+  "rt",
+  "rt-multi-thread",
+  "net",
+  "signal",
 ] }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }

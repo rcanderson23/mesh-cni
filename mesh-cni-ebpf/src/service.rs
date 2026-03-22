@@ -385,8 +385,8 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
         NodePortConntrackV4Key::new(client_ip, node_ip, client_port, node_port, proto_u8);
     if let Some(value) = unsafe { NODEPORT_CONNTRACK_V4.get(conntrack_key).copied() } {
         if is_nodeport_conntrack_expired(value, now, proto_u8) {
-            let _ = NODEPORT_CONNTRACK_V4.remove(&conntrack_key);
-            let _ = NODEPORT_REV_NAT_V4.remove(&rev_nat_key);
+            let _ = NODEPORT_CONNTRACK_V4.remove(conntrack_key);
+            let _ = NODEPORT_REV_NAT_V4.remove(rev_nat_key);
             return Ok(TC_ACT_SHOT);
         } else {
             let next_state = value

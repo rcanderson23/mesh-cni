@@ -37,6 +37,8 @@ pub async fn start_node_route_controller(
         mesh_vxlan_ifindex,
     });
 
+    info!("ensuring nftables masquading");
+
     reconcile_all_node_routes(&context).await?;
 
     let config = Config::default().concurrency(5);
