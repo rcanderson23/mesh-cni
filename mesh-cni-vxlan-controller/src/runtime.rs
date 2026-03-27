@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use k8s_openapi::api::core::v1::Node;
 use kube::{
     Api, Client,
@@ -11,39 +11,35 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    Result,
+    Result, VxlanRemoteCidrsDataplane,
     context::Context,
-    controller::{error_policy, reconcile, reconcile_all_node_routes},
+    controller::{error_policy, reconcile, reconcile_all_vxlan_remote_cidrs},
 };
 
-const MESH_VXLAN_IFACE: &str = "mesh_vxlan0";
-
-pub async fn start_node_route_controller(
+pub async fn start_vxlan_controller<D>(
     kube_client: Client,
     node_name: String,
+    vxlan_remote_cidrs: D,
     cancel: CancellationToken,
-) -> Result<()> {
+) -> Result<()>
+where
+    D: VxlanRemoteCidrsDataplane,
+{
     let node_api: Api<Node> = Api::all(kube_client);
     let (node_store, node_subscriber) =
         create_store_and_touched_subscriber(node_api, Some(Duration::from_secs(30))).await?;
 
-    let (conn, handle, _) = rtnetlink::new_connection()?;
-    tokio::spawn(conn);
-    let mesh_vxlan_ifindex = link_index(&handle, MESH_VXLAN_IFACE).await?;
     let context = Arc::new(Context {
         node_name,
         node_store: node_store.clone(),
-        handle,
-        mesh_vxlan_ifindex,
+        vxlan_remote_cidrs,
     });
 
-    info!("ensuring nftables masquading");
-
-    reconcile_all_node_routes(&context).await?;
+    reconcile_all_vxlan_remote_cidrs(&context)?;
 
     let config = Config::default().concurrency(5);
 
-    info!("Starting node route controller");
+    info!("Starting vxlan controller");
     Controller::for_shared_stream(node_subscriber, node_store)
         .with_config(config)
         .graceful_shutdown_on(shutdown(cancel))
@@ -57,18 +53,4 @@ pub async fn start_node_route_controller(
 
 async fn shutdown(cancel: CancellationToken) {
     cancel.cancelled().await;
-}
-
-// TODO: move generic-ish netlink related funcs to shared crate
-async fn link_index(handle: &rtnetlink::Handle, name: &str) -> Result<u32> {
-    let link = handle
-        .link()
-        .get()
-        .match_name(name.to_string())
-        .execute()
-        .try_next()
-        .await?
-        .ok_or_else(|| crate::Error::MissingPrecondition(format!("missing interface {name}")))?;
-
-    Ok(link.header.index)
 }

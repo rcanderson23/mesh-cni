@@ -16,15 +16,17 @@ use crate::{
         BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_FS_DIR, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR,
         BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_EGRESS_TC,
         BPF_PROGRAM_INGRESS_TC, BPF_PROGRAM_NODEPORT_EGRESS_TC, BPF_PROGRAM_NODEPORT_INGRESS_TC,
-        BpfNamePath, POLICY_MAPS_LIST, PROG_LIST, SERVICE_MAPS_LIST,
+        BPF_PROGRAM_VXLAN_NODE_INGRESS_TC, BPF_PROGRAM_VXLAN_VETH_EGRESS_TC, BpfNamePath,
+        POLICY_MAPS_LIST, PROG_LIST, SERVICE_MAPS_LIST, VXLAN_MAPS_LIST, VXLAN_PROG_LIST,
     },
+    config::CniMode,
 };
 
 const CGROUP_SYS_DIR: &str = "/sys/fs/cgroup";
 
-pub fn init_bpf() -> Result<()> {
-    if pins_exist()? {
-        start_ebpf_logger()?;
+pub fn init_bpf(mode: &CniMode) -> Result<()> {
+    if pins_exist(mode)? {
+        start_ebpf_logger(mode)?;
 
         return Ok(());
     }
@@ -53,7 +55,17 @@ pub fn init_bpf() -> Result<()> {
     pin_maps(&mut ebpf, &SERVICE_MAPS_LIST)?;
     pin_maps(&mut ebpf, &POLICY_MAPS_LIST)?;
 
-    start_ebpf_logger()?;
+    if matches!(mode, CniMode::Vxlan) {
+        pin_maps(&mut ebpf, &VXLAN_MAPS_LIST)?;
+
+        info!("ensuring vxlan veth egress program loaded and pinned");
+        ensure_tc_program(&mut ebpf, BPF_PROGRAM_VXLAN_VETH_EGRESS_TC)?;
+
+        info!("ensuring vxlan node ingress program loaded and pinned");
+        ensure_tc_program(&mut ebpf, BPF_PROGRAM_VXLAN_NODE_INGRESS_TC)?;
+    }
+
+    start_ebpf_logger(mode)?;
 
     Ok(())
 }
@@ -84,7 +96,7 @@ fn ensure_pin_dirs() -> Result<()> {
     Ok(())
 }
 
-fn pins_exist() -> Result<bool> {
+fn pins_exist(mode: &CniMode) -> Result<bool> {
     for map in SERVICE_MAPS_LIST.iter().chain(POLICY_MAPS_LIST.iter()) {
         if !fs::exists(map.path())? {
             return Ok(false);
@@ -93,6 +105,18 @@ fn pins_exist() -> Result<bool> {
     for prog in PROG_LIST {
         if !fs::exists(prog.path())? {
             return Ok(false);
+        }
+    }
+    if matches!(mode, CniMode::Vxlan) {
+        for map in VXLAN_MAPS_LIST {
+            if !fs::exists(map.path())? {
+                return Ok(false);
+            }
+        }
+        for prog in VXLAN_PROG_LIST {
+            if !fs::exists(prog.path())? {
+                return Ok(false);
+            }
         }
     }
 
@@ -136,7 +160,7 @@ fn ensure_tc_program(ebpf: &mut Ebpf, prog_path_name: BpfNamePath) -> Result<()>
     Ok(())
 }
 
-fn start_ebpf_logger() -> Result<()> {
+fn start_ebpf_logger(mode: &CniMode) -> Result<()> {
     let cgroup_prog = CgroupSockAddr::from_pin(
         BPF_PROGRAM_CGROUP_CONNECT_V4.path(),
         aya::programs::CgroupSockAddrAttachType::Connect4,
@@ -159,6 +183,17 @@ fn start_ebpf_logger() -> Result<()> {
     let nodeport_egress = SchedClassifier::from_pin(BPF_PROGRAM_NODEPORT_EGRESS_TC.path())?;
     let info = nodeport_egress.info()?;
     start_ebpf_logger_from_prog_id(info.id())?;
+
+    if matches!(mode, CniMode::Vxlan) {
+        let vxlan_veth_egress = SchedClassifier::from_pin(BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.path())?;
+        let info = vxlan_veth_egress.info()?;
+        start_ebpf_logger_from_prog_id(info.id())?;
+
+        let vxlan_node_ingress =
+            SchedClassifier::from_pin(BPF_PROGRAM_VXLAN_NODE_INGRESS_TC.path())?;
+        let info = vxlan_node_ingress.info()?;
+        start_ebpf_logger_from_prog_id(info.id())?;
+    }
 
     Ok(())
 }

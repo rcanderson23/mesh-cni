@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::bail;
 use mesh_cni_api::cni::v1::cni_server::CniServer;
-use mesh_cni_node_route_controller::start_node_route_controller;
+use mesh_cni_vxlan_controller::start_vxlan_controller;
 use tokio_util::sync::CancellationToken;
 use tonic::service::RoutesBuilder;
 use tracing::{error, info};
@@ -16,7 +16,7 @@ use crate::{
         service::{ServiceEndpoint, ServiceEndpointState},
     },
     config::{AgentArgs, CniMode},
-    http, ipam, kubernetes,
+    http, ipam, kubernetes, system,
 };
 
 pub async fn start(
@@ -30,7 +30,11 @@ pub async fn start(
     let kube_client = kube::Client::try_from(config)?;
 
     info!("initializing bpf");
-    bpf::loader::init_bpf()?;
+    bpf::loader::init_bpf(&args.cni_settings.mode)?;
+
+    if args.cni_settings.mode == CniMode::Vxlan {
+        system::ensure_vxlan(&args.vxlan_settings).await?;
+    }
 
     info!("starting policy service");
     let policy_state = PolicyBpfState::try_new()?;
@@ -44,17 +48,21 @@ pub async fn start(
         bpf::policy::run(kube_client.clone(), policy_state.clone(), cancel.clone()).await?;
     let policy_server = http::grpc::policy::server(policy_state.clone());
 
-    let mut node_route_handle = None;
+    let mut vxlan_controller_handle = None;
     let ipam = match args.cni_settings.mode {
         CniMode::Chained => None,
         CniMode::Vxlan => {
             let ipam = Arc::new(Mutex::new(
                 ipam::get_ipam_from_node(kube_client.clone(), &args.node_name).await?,
             ));
+            let vxlan_remote_cidrs_map = bpf::vxlan::load_remote_cidrs_map()?;
+            let vxlan_remote_cidrs_state =
+                bpf::vxlan::VxlanRemoteCidrsState::try_new(vxlan_remote_cidrs_map)?;
 
-            node_route_handle = Some(tokio::spawn(start_node_route_controller(
+            vxlan_controller_handle = Some(tokio::spawn(start_vxlan_controller(
                 kube_client.clone(),
                 args.node_name.clone(),
+                vxlan_remote_cidrs_state,
                 cancel.child_token(),
             )));
             Some(ipam)
@@ -137,7 +145,7 @@ pub async fn start(
     ready.cancel();
 
     // TODO: add graceful shutdown
-    if let Some(node_route_handle) = node_route_handle {
+    if let Some(vxlan_controller_handle) = vxlan_controller_handle {
         tokio::select! {
             _ = cancel.cancelled() => {},
             h = grpc_handle => {
@@ -166,15 +174,15 @@ pub async fn start(
                     },
                 }
             },
-            h = node_route_handle => {
+            h = vxlan_controller_handle => {
                 match h {
-                    Ok(Ok(_)) => info!("node route controller exited gracefully"),
+                    Ok(Ok(_)) => info!("vxlan controller exited gracefully"),
                     Ok(Err(e)) => {
-                        error!(%e, "node route controller exited with error");
+                        error!(%e, "vxlan controller exited with error");
                         return Err(anyhow::Error::from(e));
                     },
                     Err(e) => {
-                        error!(%e, "failed to join node route controller task");
+                        error!(%e, "failed to join vxlan controller task");
                         bail!("failed to join tasks");
                     },
                 }
