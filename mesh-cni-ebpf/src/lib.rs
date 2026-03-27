@@ -1,7 +1,9 @@
 #![no_std]
 
 pub mod egress;
+pub mod fragment;
 pub mod ingress;
+pub mod l4;
 pub(crate) mod policy;
 pub mod service;
 pub mod vxlan;
@@ -13,6 +15,7 @@ use aya_ebpf::{
 use mesh_cni_ebpf_common::{
     IdentityId,
     conntrack::{ConntrackKeyV4, ConntrackValue, NodePortConntrackV4Key, NodePortConntrackV4Value},
+    fragment::{FragmentKeyV4, FragmentValue},
     policy::{
         CidrPolicyMapDataV4, CidrPolicyMapDataV6, PolicyIndexKey, PolicyRuleKey, PolicyValue,
         RulesetId,
@@ -80,6 +83,10 @@ static VXLAN_REMOTE_CIDRS_V4: LpmTrie<u32, RemoteNodeV4> = LpmTrie::with_max_ent
 
 #[map(name = "iface_indexes_v4")]
 static IFACE_INDEXES_V4: HashMap<u32, u32> = HashMap::with_max_entries(10, 0);
+
+#[map(name = "fragment_v4")]
+static FRAGMENT_V4: LruHashMap<FragmentKeyV4, FragmentValue> =
+    LruHashMap::with_max_entries(65535, 0);
 
 #[inline]
 fn id_v4(ip: LpmKey<u32>) -> Option<IdentityId> {
