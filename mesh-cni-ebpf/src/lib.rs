@@ -20,11 +20,11 @@ use mesh_cni_ebpf_common::{
         CidrPolicyMapDataV4, CidrPolicyMapDataV6, PolicyIndexKey, PolicyRuleKey, PolicyValue,
         RulesetId,
     },
+    route::RouteV4,
     service::{
         EndpointKey, EndpointValueV4, EndpointValueV6, NodePortKey, NodePortRevNatV4Key,
         NodePortRevNatV4Value, ServiceKeyV4, ServiceKeyV6, ServiceValue,
     },
-    vxlan::RemoteNodeV4,
 };
 
 #[map(name = "identity_v4")]
@@ -78,15 +78,12 @@ static NODEPORT_REV_NAT_V4: LruHashMap<NodePortRevNatV4Key, NodePortRevNatV4Valu
 static NODEPORT_CONNTRACK_V4: LruHashMap<NodePortConntrackV4Key, NodePortConntrackV4Value> =
     LruHashMap::with_max_entries(65535, 0);
 
-#[map(name = "vxlan_remote_cidrs_v4")]
-static VXLAN_REMOTE_CIDRS_V4: LpmTrie<u32, RemoteNodeV4> = LpmTrie::with_max_entries(65535, 0);
-
-#[map(name = "iface_indexes_v4")]
-static IFACE_INDEXES_V4: HashMap<u32, u32> = HashMap::with_max_entries(10, 0);
-
 #[map(name = "fragment_v4")]
 static FRAGMENT_V4: LruHashMap<FragmentKeyV4, FragmentValue> =
     LruHashMap::with_max_entries(65535, 0);
+
+#[map(name = "router_v4")]
+static ROUTER_V4: LpmTrie<u32, RouteV4> = LpmTrie::with_max_entries(65535, 0);
 
 #[inline]
 fn id_v4(ip: LpmKey<u32>) -> Option<IdentityId> {

@@ -6,14 +6,11 @@ use cidr::Ipv4Cidr;
 use k8s_openapi::api::core::v1::{Node, Pod};
 use kube::{Api, Client, api::ListParams};
 
-use crate::{
-    Result,
-    ipam::{Ipam, v4::IpamV4},
-};
+use crate::{Result, ipam::v4::IpamV4};
 
 // TODO: I believe it is possible to have multiple Pod CIDRs assigned to a node. For simplicity, we
 // will start with the first Ipv4 pod network and use that and iterate/improve later.
-pub async fn get_ipam_from_node(kube_client: Client, node_name: &str) -> Result<Ipam> {
+pub async fn get_ipamv4_from_node(kube_client: Client, node_name: &str) -> Result<IpamV4> {
     let cidr = first_v4_pod_network(kube_client.clone(), node_name).await?;
     let pods: Api<Pod> = Api::all(kube_client);
 
@@ -32,8 +29,7 @@ pub async fn get_ipam_from_node(kube_client: Client, node_name: &str) -> Result<
             })
         });
 
-    let v4 = IpamV4::try_new(cidr, allocated)?;
-    Ok(Ipam { v4 })
+    IpamV4::try_new(cidr, allocated)
 }
 
 async fn first_v4_pod_network(kube_client: Client, node_name: &str) -> Result<Ipv4Cidr> {

@@ -5,16 +5,16 @@ mod runtime;
 
 pub use error::{Error, Result};
 use ipnetwork::IpNetwork;
-use mesh_cni_ebpf_common::vxlan::RemoteNodeV4;
+use mesh_cni_ebpf_common::route::RouteV4;
 pub use runtime::start_vxlan_controller;
 
 pub trait VxlanRemoteCidrsWriter {
-    fn upsert_vxlan_remote_cidr(&self, key: IpNetwork, value: RemoteNodeV4) -> Result<()>;
+    fn upsert_vxlan_remote_cidr(&self, key: IpNetwork, value: RouteV4) -> Result<()>;
     fn remove_vxlan_remote_cidr(&self, key: &IpNetwork) -> Result<()>;
 }
 
 pub trait VxlanRemoteCidrsReader {
-    fn vxlan_remote_cidrs_state(&self) -> Result<ahash::HashMap<IpNetwork, RemoteNodeV4>>;
+    fn vxlan_remote_cidrs_state(&self) -> Result<ahash::HashMap<IpNetwork, RouteV4>>;
 }
 
 pub trait VxlanRemoteCidrsDataplane:

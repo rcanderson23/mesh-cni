@@ -16,14 +16,16 @@ use crate::{
     controller::{error_policy, reconcile, reconcile_all_vxlan_remote_cidrs},
 };
 
-pub async fn start_vxlan_controller<D>(
+pub async fn start_vxlan_controller<R>(
     kube_client: Client,
     node_name: String,
-    vxlan_remote_cidrs: D,
+    routes: R,
+    vxlan_ifindex: u32,
+
     cancel: CancellationToken,
 ) -> Result<()>
 where
-    D: VxlanRemoteCidrsDataplane,
+    R: VxlanRemoteCidrsDataplane,
 {
     let node_api: Api<Node> = Api::all(kube_client);
     let (node_store, node_subscriber) =
@@ -32,7 +34,8 @@ where
     let context = Arc::new(Context {
         node_name,
         node_store: node_store.clone(),
-        vxlan_remote_cidrs,
+        routes,
+        vxlan_ifindex,
     });
 
     reconcile_all_vxlan_remote_cidrs(&context)?;

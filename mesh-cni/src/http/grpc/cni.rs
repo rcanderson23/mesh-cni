@@ -11,18 +11,21 @@ use aya::programs::{
     links::{FdLink, LinkError, PinnedLink},
     tc,
 };
+use ipnetwork::{IpNetwork, Ipv4Network};
 use kube::{ResourceExt, runtime::reflector::ObjectRef};
 use mesh_cni_api::cni::v1::{
     AddPodReply, AddPodRequest, DeletePodReply, DeletePodRequest, Interface, Ip,
     cni_server::Cni as CniApi,
 };
 use mesh_cni_crds::v1alpha1::identity::Identity;
+use mesh_cni_ebpf_common::route::RouteV4;
 use mesh_cni_k8s_utils::sanitize_pod_labels;
 use mesh_cni_policy_controller::{Context, PolicyDataplane, reconcile_identity};
 use rtnetlink::{
     Handle, LinkUnspec, LinkVeth, RouteMessageBuilder,
     packet_route::{
         address::{AddressAttribute, AddressMessage},
+        link::LinkAttribute,
         route::{RouteHeader, RouteScope},
     },
 };
@@ -41,16 +44,17 @@ use crate::{
     config::CniMode,
 };
 
-pub struct CniState<P, I>
+pub struct CniState<P, I, R>
 where
     P: ReconcilePolicy + Send + Sync + 'static,
     I: Ipam + Send + Sync + 'static,
+    R: Routes + Send + Sync + 'static,
 {
     policy_reconciler: P,
     netns_dir: PathBuf,
-    #[allow(dead_code)]
-    ipam: Option<I>,
+    ipam: I,
     mode: CniMode,
+    routes: R,
 }
 
 pub trait Ipam {
@@ -64,19 +68,35 @@ pub trait Ipam {
     fn network_length_v4(&self) -> u8;
 }
 
+// TODO: modify this trait to be IP agnostic
+pub trait Routes {
+    /// Add route to BPF map for pod to pod traffic
+    fn add_route_v4(&self, key: IpNetwork, value: RouteV4) -> Result<()>;
+    /// Remove route from BPF map for pod to pod traffic
+    fn delete_route_v4(&self, key: &IpNetwork) -> Result<()>;
+}
+
 const MESH_LINK_PREFIX: &str = "mesh_cni_link_";
 
-impl<P, I> CniState<P, I>
+impl<P, I, R> CniState<P, I, R>
 where
     P: ReconcilePolicy + Send + Sync + 'static,
     I: Ipam + Send + Sync + 'static,
+    R: Routes + Send + Sync + 'static,
 {
-    pub fn new(policy_reconciler: P, netns_dir: PathBuf, ipam: Option<I>, mode: CniMode) -> Self {
+    pub fn new(
+        policy_reconciler: P,
+        netns_dir: PathBuf,
+        ipam: I,
+        mode: CniMode,
+        routes: R,
+    ) -> Self {
         Self {
             policy_reconciler,
             netns_dir,
             ipam,
             mode,
+            routes,
         }
     }
 }
@@ -90,10 +110,11 @@ where
 // a new Identity CR but will be retried by the CNI/kubelet and should be fast
 // on subsequent calls
 #[tonic::async_trait]
-impl<P, I> CniApi for CniState<P, I>
+impl<P, I, R> CniApi for CniState<P, I, R>
 where
     P: ReconcilePolicy + Clone + Send + Sync + 'static,
     I: Ipam + Clone + Send + Sync + 'static,
+    R: Routes + Clone + Send + Sync + 'static,
 {
     async fn add_pod(
         &self,
@@ -107,6 +128,7 @@ where
         let netns_dir = self.netns_dir.clone();
         let mode = self.mode.clone();
         let ipam = self.ipam.clone();
+        let routes = self.routes.clone();
 
         // To simplify logic in the add_pod call and switching network namespaces, we will spawn a
         // new thread and runtime
@@ -114,7 +136,7 @@ where
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()?;
-            rt.block_on(add_pod(reconciler, req, netns_dir, mode, ipam))
+            rt.block_on(add_pod(reconciler, req, netns_dir, mode, ipam, routes))
         })
         .await
         .map_err(|e| Status::internal(e.to_string()))?
@@ -135,22 +157,82 @@ where
             unpin_iface_paths(&request.container_id, iface)
                 .map_err(|e| tonic::Status::new(Code::Internal, e.to_string()))?;
         }
-        if let Some(netns) = request.net_namespace.as_deref() {
-            let _netns_path = netns_path(self.netns_dir.clone(), netns).map_err(|e| {
-                tonic::Status::new(Code::Internal, format!("failed to build netns path: {}", e))
-            })?;
-        }
 
-        Ok(Response::new(DeletePodReply {}))
+        let req = request.clone();
+        let netns_dir = self.netns_dir.clone();
+        let mode = self.mode.clone();
+        let ipam = self.ipam.clone();
+        let routes = self.routes.clone();
+
+        // To simplify logic in the delete_pod call and switching network namespaces, we will spawn a
+        // new thread and runtime
+        let reply = tokio::task::spawn_blocking(move || -> Result<DeletePodReply> {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            rt.block_on(delete_pod(req, netns_dir, mode, ipam, routes))
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(reply))
     }
 }
 
-async fn add_pod<P: ReconcilePolicy, I: Ipam>(
+async fn delete_pod<I: Ipam, R: Routes>(
+    request: DeletePodRequest,
+    netns_dir: PathBuf,
+    mode: CniMode,
+    ipam: I,
+    routes: R,
+) -> Result<DeletePodReply> {
+    let Some(netns) = &request.net_namespace else {
+        warn!(iface = %request.iface, "skipping delete_pod for interface without sandbox");
+        return Ok(DeletePodReply::default());
+    };
+    let netns_path = netns_path(netns_dir, netns)?;
+    if !netns_path.exists() {
+        warn!(
+            iface = %request.iface,
+            netns = %netns_path.display(),
+            "skipping delete_pod cleanup because sandbox no longer exists",
+        );
+        return Ok(DeletePodReply::default());
+    }
+    let pod_ns = netns_rs::get_from_path(netns_path)?;
+    let host_netns = netns_rs::get_from_current_thread()?;
+    let _nsguard = NetnsRestore(host_netns);
+    pod_ns.enter()?;
+    let (conn, handle, _) = rtnetlink::new_connection()?;
+    tokio::task::spawn(conn);
+    let (_, addrs) = get_iface_ips_ifindex(&handle, &request.iface).await?;
+
+    // TODO: support ipv6
+    // TODO: Ipam and routes is susceptiple to exhaustion if deletes happen where the network namespace is
+    // destroyed prior to releasing.
+    for addr in addrs {
+        match addr {
+            IpAddr::V4(ipv4_addr) => {
+                routes.delete_route_v4(&IpNetwork::V4(Ipv4Network::new(ipv4_addr, 32)?))?;
+                if mode == CniMode::Vxlan {
+                    ipam.release_v4_ip(ipv4_addr)?;
+                }
+            }
+            IpAddr::V6(_) => continue,
+        }
+    }
+
+    Ok(DeletePodReply::default())
+}
+
+async fn add_pod<P: ReconcilePolicy, I: Ipam, R: Routes>(
     reconciler: P,
     request: AddPodRequest,
     netns_dir: PathBuf,
     mode: CniMode,
-    ipam: Option<I>,
+    ipam: I,
+    routes: R,
 ) -> Result<AddPodReply> {
     let Some(netns) = &request.net_namespace else {
         warn!(iface = %request.iface, "skipping add_pod for interface without sandbox");
@@ -180,13 +262,8 @@ async fn add_pod<P: ReconcilePolicy, I: Ipam>(
     }
 
     let reply: AddPodReply = match mode {
-        CniMode::Chained => add_chained(&request, netns, netns_dir).await?,
-        CniMode::Vxlan => {
-            let Some(ipam) = ipam else {
-                bail!("ipam not initialized when in vxlan mode");
-            };
-            add_vxlan(&request, netns, netns_dir, ipam).await?
-        }
+        CniMode::Chained => add_chained(&request, netns, netns_dir, routes).await?,
+        CniMode::Vxlan => add_vxlan(&request, netns, netns_dir, ipam).await?,
     };
     Ok(reply)
 }
@@ -205,6 +282,8 @@ async fn add_vxlan<I: Ipam>(
     ipam: I,
 ) -> Result<AddPodReply> {
     let host_netns = netns_rs::get_from_current_thread()?;
+    let host_fd = host_netns.file().as_raw_fd();
+    let nsguard = NetnsRestore(host_netns);
     let pod_netns_path = netns_path(netns_dir, netns)?;
     let pod_ns = netns_rs::get_from_path(pod_netns_path)?;
     pod_ns.enter()?;
@@ -238,9 +317,9 @@ async fn add_vxlan<I: Ipam>(
 
     add_default_route(&handle, iface_idx, IpAddr::V4(first)).await?;
 
-    set_iface_to_host_ns(&handle, veth_idx, host_netns.file().as_raw_fd()).await?;
+    set_iface_to_host_ns(&handle, veth_idx, host_fd).await?;
 
-    host_netns.enter()?;
+    drop(nsguard);
 
     let (conn, handle, _) = rtnetlink::new_connection()?;
     tokio::task::spawn(conn);
@@ -288,24 +367,43 @@ async fn add_vxlan<I: Ipam>(
     })
 }
 
-async fn add_chained(
+async fn add_chained<R: Routes>(
     request: &AddPodRequest,
     netns: &str,
     netns_dir: PathBuf,
+    routes: R,
 ) -> Result<AddPodReply> {
     let reply = AddPodReply::default();
     let host_netns = netns_rs::get_from_current_thread()?;
+    let _nsguard = NetnsRestore(host_netns);
     let pod_netns_path = netns_path(netns_dir, netns)?;
     let pod_ns = netns_rs::get_from_path(pod_netns_path)?;
     pod_ns.enter()?;
 
     attach_pod_bpf(&request.iface, &request.container_id)?;
-    host_netns.enter()?;
+    let (conn, handle, _) = rtnetlink::new_connection()?;
+    tokio::task::spawn(conn);
+    let (_, addrs) = get_iface_ips_ifindex(&handle, &request.iface).await?;
+    let link_ifindex = get_link_ifindex(&handle, &request.iface).await?;
+    // TODO: support ipv6
+    for addr in addrs {
+        match addr {
+            IpAddr::V4(ipv4_addr) => {
+                routes.add_route_v4(
+                    IpNetwork::V4(Ipv4Network::new(ipv4_addr, 32)?),
+                    RouteV4::new_local(link_ifindex),
+                )?;
+            }
+            IpAddr::V6(_) => continue,
+        }
+    }
+
     Ok(reply)
 }
 
 fn attach_pod_bpf(pod_iface: &str, container_id: &str) -> Result<()> {
     let mut attached = Vec::new();
+
     for iface in [pod_iface, "lo"] {
         if let Err(e) = attach_for_iface(
             iface,
@@ -324,6 +422,59 @@ fn attach_pod_bpf(pod_iface: &str, container_id: &str) -> Result<()> {
         attached.push(iface);
     }
     Ok(())
+}
+
+async fn get_iface_ips_ifindex(handle: &Handle, iface: &str) -> Result<(u32, Vec<IpAddr>)> {
+    let Some(link) = handle
+        .link()
+        .get()
+        .match_name(iface.to_string())
+        .execute()
+        .try_next()
+        .await?
+    else {
+        bail!("missing iface {iface}");
+    };
+
+    let ifindex = link.header.index;
+
+    let mut addrs = handle
+        .address()
+        .get()
+        .set_link_index_filter(ifindex)
+        .execute();
+
+    let mut out = Vec::new();
+    while let Some(msg) = addrs.try_next().await? {
+        for attr in msg.attributes {
+            if let AddressAttribute::Address(ip) = attr {
+                out.push(ip);
+            }
+        }
+    }
+    Ok((ifindex, out))
+}
+
+async fn get_link_ifindex(handle: &Handle, iface: &str) -> Result<u32> {
+    let Some(link) = handle
+        .link()
+        .get()
+        .match_name(iface.to_string())
+        .execute()
+        .try_next()
+        .await?
+    else {
+        bail!("missing iface {iface}");
+    };
+
+    let mut ifindex = 0;
+    for attr in link.attributes {
+        if let LinkAttribute::Link(l) = attr {
+            ifindex = l;
+        }
+    }
+
+    Ok(ifindex)
 }
 
 async fn add_link_scope_route(handle: &Handle, idx: u32, addr: IpAddr) -> Result<()> {
@@ -655,3 +806,11 @@ impl std::fmt::Display for PolicyReconcileError {
 }
 
 impl std::error::Error for PolicyReconcileError {}
+
+struct NetnsRestore(netns_rs::NetNs);
+
+impl Drop for NetnsRestore {
+    fn drop(&mut self) {
+        let _ = self.0.enter();
+    }
+}

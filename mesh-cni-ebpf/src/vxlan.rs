@@ -8,7 +8,7 @@ use aya_ebpf::{
     programs::TcContext,
 };
 use aya_log_ebpf::{error, warn};
-use mesh_cni_ebpf_common::vxlan::VXLAN_IFINDEX_SLOT;
+use mesh_cni_ebpf_common::route::RouteType;
 use network_types::{
     eth::{EthHdr, EtherType},
     ip::{IpProto, Ipv4Hdr},
@@ -16,7 +16,7 @@ use network_types::{
     vxlan::VxlanHdr,
 };
 
-use crate::{IFACE_INDEXES_V4, VXLAN_REMOTE_CIDRS_V4};
+use crate::ROUTER_V4;
 
 const VXLAN_I_FLAG: u8 = 0x08;
 const VXLAN_PORT: u16 = 4789;
@@ -35,17 +35,18 @@ pub fn try_mesh_cni_vxlan_veth_egress(ctx: TcContext) -> Result<i32, i32> {
     let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
-    let Some(remote) = VXLAN_REMOTE_CIDRS_V4
-        .get(LpmKey::new(32, dst_ip.to_be()))
-        .copied()
-    else {
+    let Some(remote) = ROUTER_V4.get(LpmKey::new(32, dst_ip.to_be())).copied() else {
         return Ok(TC_ACT_PIPE);
     };
+
+    if remote.route_type != RouteType::RemotePod as u8 {
+        return Ok(TC_ACT_PIPE);
+    }
 
     let mut key = bpf_tunnel_key {
         tunnel_id: remote.vni,
         __bindgen_anon_1: aya_ebpf::bindings::bpf_tunnel_key__bindgen_ty_1 {
-            remote_ipv4: remote.ip,
+            remote_ipv4: remote.remote_ip,
         },
         tunnel_tos: 0,
         tunnel_ttl: 64,
@@ -65,19 +66,13 @@ pub fn try_mesh_cni_vxlan_veth_egress(ctx: TcContext) -> Result<i32, i32> {
             error!(&ctx, "failed to set tunnel, got {}", rc);
             Err(TC_ACT_SHOT)
         }
-        _ => {
-            let Some(idx) = (unsafe { IFACE_INDEXES_V4.get(VXLAN_IFINDEX_SLOT).copied() }) else {
-                error!(&ctx, "failed to find iface in index map");
-                return Err(TC_ACT_SHOT);
-            };
-            match unsafe { bpf_redirect(idx, 0) } {
-                rc if rc < 0 => {
-                    error!(&ctx, "failed to redirect packet, got {}", rc);
-                    Err(TC_ACT_SHOT)
-                }
-                rc => Ok(rc as i32),
+        _ => match unsafe { bpf_redirect(remote.ifindex, 0) } {
+            rc if rc < 0 => {
+                error!(&ctx, "failed to redirect packet, got {}", rc);
+                Err(TC_ACT_SHOT)
             }
-        }
+            rc => Ok(rc as i32),
+        },
     }
 }
 

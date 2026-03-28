@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ahash::HashMap;
 use aya::maps::{LpmTrie, Map, MapData, lpm_trie::Key as LpmKey};
 use ipnetwork::IpNetwork;
-use mesh_cni_ebpf_common::vxlan::RemoteNodeV4;
+use mesh_cni_ebpf_common::route::RouteV4;
 use mesh_cni_vxlan_controller::{
     Error as ControllerError, Result as ControllerResult, VxlanRemoteCidrsReader,
     VxlanRemoteCidrsWriter,
@@ -11,34 +11,34 @@ use mesh_cni_vxlan_controller::{
 
 use crate::{
     Result,
-    bpf::{BPF_MAP_VXLAN_REMOTE_CIDRS_V4, BpfMap, is_map_not_found_error},
+    bpf::{BPF_MAP_ROUTER_V4, BpfMap, is_map_not_found_error},
 };
 
 struct Shared<M>
 where
-    M: BpfMap<Key = LpmKey<u32>, Value = RemoteNodeV4, KeyOutput = IpNetwork>,
+    M: BpfMap<Key = LpmKey<u32>, Value = RouteV4, KeyOutput = IpNetwork>,
 {
-    shared: Mutex<VxlanStateInner<M>>,
+    shared: Mutex<RoutesStateInner<M>>,
 }
 
-struct VxlanStateInner<M>
+struct RoutesStateInner<M>
 where
-    M: BpfMap<Key = LpmKey<u32>, Value = RemoteNodeV4, KeyOutput = IpNetwork>,
+    M: BpfMap<Key = LpmKey<u32>, Value = RouteV4, KeyOutput = IpNetwork>,
 {
-    cache: HashMap<IpNetwork, RemoteNodeV4>,
+    cache: HashMap<IpNetwork, RouteV4>,
     bpf_map: M,
 }
 
-pub struct VxlanRemoteCidrsState<M>
+pub struct RoutesState<M>
 where
-    M: BpfMap<Key = LpmKey<u32>, Value = RemoteNodeV4, KeyOutput = IpNetwork>,
+    M: BpfMap<Key = LpmKey<u32>, Value = RouteV4, KeyOutput = IpNetwork>,
 {
     state: Arc<Shared<M>>,
 }
 
-impl<M> Clone for VxlanRemoteCidrsState<M>
+impl<M> Clone for RoutesState<M>
 where
-    M: BpfMap<Key = LpmKey<u32>, Value = RemoteNodeV4, KeyOutput = IpNetwork>,
+    M: BpfMap<Key = LpmKey<u32>, Value = RouteV4, KeyOutput = IpNetwork>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -47,13 +47,13 @@ where
     }
 }
 
-impl<M> VxlanRemoteCidrsState<M>
+impl<M> RoutesState<M>
 where
-    M: BpfMap<Key = LpmKey<u32>, Value = RemoteNodeV4, KeyOutput = IpNetwork>,
+    M: BpfMap<Key = LpmKey<u32>, Value = RouteV4, KeyOutput = IpNetwork>,
 {
     pub fn try_new(bpf_map: M) -> Result<Self> {
         let cache = bpf_map.get_state()?;
-        let state = VxlanStateInner { cache, bpf_map };
+        let state = RoutesStateInner { cache, bpf_map };
         let shared = Shared {
             shared: Mutex::new(state),
         };
@@ -62,7 +62,7 @@ where
         })
     }
 
-    fn upsert(&self, network: IpNetwork, value: RemoteNodeV4) -> Result<()> {
+    fn upsert(&self, network: IpNetwork, value: RouteV4) -> Result<()> {
         let IpNetwork::V4(network) = network else {
             anyhow::bail!("ipv6 vxlan remote cidrs are not implemented");
         };
@@ -100,23 +100,16 @@ where
         }
     }
 
-    fn current_state(&self) -> HashMap<IpNetwork, RemoteNodeV4> {
+    fn current_state(&self) -> HashMap<IpNetwork, RouteV4> {
         self.state.shared.lock().unwrap().cache.clone()
     }
 }
 
-impl<M> VxlanRemoteCidrsWriter for VxlanRemoteCidrsState<M>
+impl<M> VxlanRemoteCidrsWriter for RoutesState<M>
 where
-    M: BpfMap<Key = LpmKey<u32>, Value = RemoteNodeV4, KeyOutput = IpNetwork>
-        + Send
-        + Sync
-        + 'static,
+    M: BpfMap<Key = LpmKey<u32>, Value = RouteV4, KeyOutput = IpNetwork> + Send + Sync + 'static,
 {
-    fn upsert_vxlan_remote_cidr(
-        &self,
-        key: IpNetwork,
-        value: RemoteNodeV4,
-    ) -> ControllerResult<()> {
+    fn upsert_vxlan_remote_cidr(&self, key: IpNetwork, value: RouteV4) -> ControllerResult<()> {
         self.upsert(key, value)
             .map_err(|e| ControllerError::OpError(e.to_string()))
     }
@@ -127,22 +120,32 @@ where
     }
 }
 
-impl<M> VxlanRemoteCidrsReader for VxlanRemoteCidrsState<M>
+impl<M> VxlanRemoteCidrsReader for RoutesState<M>
 where
-    M: BpfMap<Key = LpmKey<u32>, Value = RemoteNodeV4, KeyOutput = IpNetwork>
-        + Send
-        + Sync
-        + 'static,
+    M: BpfMap<Key = LpmKey<u32>, Value = RouteV4, KeyOutput = IpNetwork> + Send + Sync + 'static,
 {
-    fn vxlan_remote_cidrs_state(&self) -> ControllerResult<HashMap<IpNetwork, RemoteNodeV4>> {
+    fn vxlan_remote_cidrs_state(&self) -> ControllerResult<HashMap<IpNetwork, RouteV4>> {
         Ok(self.current_state())
     }
 }
 
-pub type VxlanRemoteCidrsMap = LpmTrie<MapData, u32, RemoteNodeV4>;
+impl<M> crate::http::grpc::cni::Routes for RoutesState<M>
+where
+    M: BpfMap<Key = LpmKey<u32>, Value = RouteV4, KeyOutput = IpNetwork> + Send + Sync + 'static,
+{
+    fn add_route_v4(&self, key: IpNetwork, value: RouteV4) -> Result<()> {
+        self.upsert(key, value)
+    }
 
-pub fn load_remote_cidrs_map() -> Result<VxlanRemoteCidrsMap> {
-    let map = MapData::from_pin(BPF_MAP_VXLAN_REMOTE_CIDRS_V4.path())?;
+    fn delete_route_v4(&self, key: &IpNetwork) -> Result<()> {
+        self.delete(key)
+    }
+}
+
+pub type RoutesMap = LpmTrie<MapData, u32, RouteV4>;
+
+pub fn load_routes_map() -> Result<RoutesMap> {
+    let map = MapData::from_pin(BPF_MAP_ROUTER_V4.path())?;
     let map = Map::LpmTrie(map);
     Ok(map.try_into()?)
 }

@@ -19,12 +19,12 @@ pub async fn ensure_proxy_settings(settings: &ProxySettings) -> Result<()> {
     Ok(())
 }
 
-pub async fn ensure_vxlan(vxlan_settings: &VxlanSettings) -> Result<()> {
-    vxlan::ensure_vxlan_iface(vxlan_settings).await?;
+pub async fn ensure_vxlan(vxlan_settings: &VxlanSettings) -> Result<u32> {
+    let vxlan_ifindex = vxlan::ensure_vxlan_iface(vxlan_settings).await?;
     let iface = find_first_iface_match(&vxlan_settings.iface_snat).await?;
     info!("ensuring nftables masquading");
     nat::ensure_pod_snat(ipnetwork::IpNetwork::V4(vxlan_settings.pod_cidr), &iface)?;
-    Ok(())
+    Ok(vxlan_ifindex)
 }
 
 async fn find_first_iface_match(iface_regex: &str) -> Result<String> {

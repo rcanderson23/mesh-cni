@@ -3,8 +3,8 @@
 pub mod conntrack;
 pub mod fragment;
 pub mod policy;
+pub mod route;
 pub mod service;
-pub mod vxlan;
 
 use core::{
     fmt::Display,

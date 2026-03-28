@@ -2,8 +2,8 @@ pub mod conntrack;
 pub mod ip;
 pub mod loader;
 pub mod policy;
+pub mod routes;
 pub mod service;
-pub mod vxlan;
 
 use std::{borrow::BorrowMut, hash::Hash};
 
@@ -50,8 +50,9 @@ pub const BPF_MAP_POLICY_INDEX: BpfNamePath = BpfNamePath::Map("policy_index");
 pub const BPF_MAP_POLICY_RULESET: BpfNamePath = BpfNamePath::Map("policy_ruleset");
 pub const BPF_MAP_POLICY_CIDR_V4: BpfNamePath = BpfNamePath::Map("policy_cidr_v4");
 pub const BPF_MAP_POLICY_CIDR_V6: BpfNamePath = BpfNamePath::Map("policy_cidr_v6");
-pub const BPF_MAP_IFACE_INDEXES_V4: BpfNamePath = BpfNamePath::Map("iface_indexes_v4");
-pub const BPF_MAP_VXLAN_REMOTE_CIDRS_V4: BpfNamePath = BpfNamePath::Map("vxlan_remote_cidrs_v4");
+// Commenting for now as this map may be useful in the near future
+// pub const BPF_MAP_IFACE_INDEXES_V4: BpfNamePath = BpfNamePath::Map("iface_indexes_v4");
+pub const BPF_MAP_ROUTER_V4: BpfNamePath = BpfNamePath::Map("router_v4");
 
 pub const BPF_MESH_FS_DIR: &str = "/sys/fs/bpf/mesh";
 pub const BPF_MESH_MAPS_DIR: &str = "/sys/fs/bpf/mesh/maps";
@@ -68,7 +69,7 @@ pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 7] = [
     BPF_MAP_POLICY_CIDR_V6,
 ];
 
-pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 8] = [
+pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 9] = [
     BPF_MAP_SERVICES_V4,
     BPF_MAP_SERVICES_V6,
     BPF_MAP_ENDPOINTS_V4,
@@ -77,10 +78,8 @@ pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 8] = [
     BPF_MAP_NODEPORT_SERVICES_V4,
     BPF_MAP_NODEPORT_REV_NAT_V4,
     BPF_MAP_NODEPORT_CONNTRACK_V4,
+    BPF_MAP_ROUTER_V4,
 ];
-
-pub(crate) const VXLAN_MAPS_LIST: [BpfNamePath; 2] =
-    [BPF_MAP_IFACE_INDEXES_V4, BPF_MAP_VXLAN_REMOTE_CIDRS_V4];
 
 pub(crate) const PROG_LIST: [BpfNamePath; 5] = [
     BPF_PROGRAM_CGROUP_CONNECT_V4,
