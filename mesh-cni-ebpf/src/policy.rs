@@ -15,7 +15,7 @@ use mesh_cni_ebpf_common::{
 
 use crate::{CONNTRACK_V4, POLICY_CIDR_V4, POLICY_INDEX, POLICY_RULESET};
 
-#[inline]
+#[inline(always)]
 pub(crate) fn conntrack_hit(
     ctx: &TcContext,
     ct_key: ConntrackKeyV4,
@@ -53,7 +53,7 @@ pub(crate) fn conntrack_hit(
     false
 }
 
-#[inline]
+#[inline(always)]
 fn next_conntrack_value(
     current: ConntrackValue,
     now: u64,
@@ -61,13 +61,17 @@ fn next_conntrack_value(
     tcp_flags: Option<TcpFlags>,
     is_reply: bool,
 ) -> ConntrackValue {
-    let next_state = current
-        .tcp_state()
-        .advance(TcpState::from_packet(proto, tcp_flags, is_reply));
+    let next_state = if tcp_flags.is_none() && proto == KubeProtocol::Tcp {
+        current.tcp_state()
+    } else {
+        current
+            .tcp_state()
+            .advance(TcpState::from_packet(proto, tcp_flags, is_reply))
+    };
     ConntrackValue::new(now, next_state)
 }
 
-#[inline]
+#[inline(always)]
 fn is_conntrack_expired(value: ConntrackValue, now: u64, proto: KubeProtocol) -> bool {
     let timeout = match proto {
         KubeProtocol::Tcp => match value.tcp_state() {

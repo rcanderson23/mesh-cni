@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod conntrack;
+pub mod fragment;
 pub mod policy;
 pub mod service;
 pub mod vxlan;
@@ -10,6 +11,8 @@ use core::{
     hash::Hash,
     net::{IpAddr, Ipv6Addr},
 };
+
+use network_types::ip::IpProto;
 
 pub type IdentityId = u32;
 pub type Id = u16;
@@ -105,6 +108,21 @@ impl TryFrom<u32> for KubeProtocol {
             }
         };
         Ok(proto)
+    }
+}
+
+impl TryFrom<u8> for KubeProtocol {
+    type Error = &'static str;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        KubeProtocol::try_from(value as u32)
+    }
+}
+
+impl TryFrom<IpProto> for KubeProtocol {
+    type Error = &'static str;
+
+    fn try_from(value: IpProto) -> Result<Self, Self::Error> {
+        KubeProtocol::try_from(value as u8)
     }
 }
 

@@ -53,23 +53,23 @@ impl TcpState {
         let Some(flags) = tcp_flags else {
             return Some(Self::None);
         };
-        if flags.rst {
+        if flags.rst() {
             return Some(Self::Rst);
         }
-        if flags.fin {
+        if flags.fin() {
             return Some(if is_reply {
                 Self::FinResponder
             } else {
                 Self::FinInitiator
             });
         }
-        if flags.syn && flags.ack {
+        if flags.syn() && flags.ack() {
             return Some(Self::Syn);
         }
-        if flags.syn && !flags.ack {
+        if flags.syn() && !flags.ack() {
             return Some(Self::Syn);
         }
-        if flags.ack && !flags.syn {
+        if flags.ack() && !flags.syn() {
             return Some(Self::Established);
         }
         Some(Self::None)
@@ -111,12 +111,48 @@ impl TcpState {
     }
 }
 
+#[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TcpFlags {
-    pub syn: bool,
-    pub ack: bool,
-    pub fin: bool,
-    pub rst: bool,
+pub struct TcpFlags(pub u8);
+
+impl TcpFlags {
+    pub const SYN: u8 = 1 << 0;
+    pub const ACK: u8 = 1 << 1;
+    pub const FIN: u8 = 1 << 2;
+    pub const RST: u8 = 1 << 3;
+
+    pub const fn new(syn: bool, ack: bool, fin: bool, rst: bool) -> Self {
+        let mut bits = 0;
+        if syn {
+            bits |= Self::SYN;
+        }
+        if ack {
+            bits |= Self::ACK;
+        }
+        if fin {
+            bits |= Self::FIN;
+        }
+        if rst {
+            bits |= Self::RST;
+        }
+        Self(bits)
+    }
+
+    pub const fn syn(self) -> bool {
+        (self.0 & Self::SYN) != 0
+    }
+
+    pub const fn ack(self) -> bool {
+        (self.0 & Self::ACK) != 0
+    }
+
+    pub const fn fin(self) -> bool {
+        (self.0 & Self::FIN) != 0
+    }
+
+    pub const fn rst(self) -> bool {
+        (self.0 & Self::RST) != 0
+    }
 }
 
 #[repr(C)]
@@ -248,12 +284,7 @@ mod tests {
 
     #[test]
     fn classifies_fin_by_direction() {
-        let flags = Some(TcpFlags {
-            syn: false,
-            ack: true,
-            fin: true,
-            rst: false,
-        });
+        let flags = Some(TcpFlags::new(false, true, true, false));
 
         assert_eq!(
             TcpState::from_packet(KubeProtocol::Tcp, flags, false),
@@ -287,12 +318,7 @@ mod tests {
 
     #[test]
     fn classifies_syn_ack_as_syn() {
-        let flags = Some(TcpFlags {
-            syn: true,
-            ack: true,
-            fin: false,
-            rst: false,
-        });
+        let flags = Some(TcpFlags::new(true, true, false, false));
 
         assert_eq!(
             TcpState::from_packet(KubeProtocol::Tcp, flags, true),

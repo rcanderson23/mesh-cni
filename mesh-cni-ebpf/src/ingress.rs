@@ -9,19 +9,20 @@ use aya_ebpf::{
 use aya_log_ebpf::{error, warn};
 use mesh_cni_ebpf_common::{
     KubeProtocol,
-    conntrack::{ConntrackValue, TcpFlags},
+    conntrack::ConntrackValue,
+    fragment::{FragmentKeyV4, FragmentValue},
     policy::{Action, PolicyDirection, WORLD_ID},
 };
 use network_types::{
     eth::{EthHdr, EtherType},
     ip::Ipv4Hdr,
-    sctp::SctpHdr,
-    tcp::TcpHdr,
-    udp::UdpHdr,
 };
 
 use crate::{
-    CONNTRACK_V4, id_v4,
+    CONNTRACK_V4, FRAGMENT_V4,
+    fragment::is_first_frag_v4,
+    id_v4,
+    l4::l4_header_check,
     policy::{check_cidr_policy_v4, check_identity_policy, conntrack_hit, conntrack_keys},
 };
 
@@ -61,49 +62,21 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         return Ok(TC_ACT_SHOT);
     };
 
-    let (proto, src_port, dst_port, should_insert, tcp_flags) = match ipv4hdr.proto {
-        network_types::ip::IpProto::Tcp => {
-            let tcphdr: TcpHdr = ctx
-                .load(EthHdr::LEN + Ipv4Hdr::LEN)
-                .map_err(|_| TC_ACT_PIPE)?;
-            let syn = tcphdr.syn() == 1;
-            let ack = tcphdr.ack() == 1;
-            let fin = tcphdr.fin() == 1;
-            let rst = tcphdr.rst() == 1;
-            (
-                KubeProtocol::Tcp,
-                u16::from_be_bytes(tcphdr.source),
-                u16::from_be_bytes(tcphdr.dest),
-                syn && !ack,
-                Some(TcpFlags { syn, ack, fin, rst }),
-            )
-        }
-        network_types::ip::IpProto::Udp => {
-            let udphdr: UdpHdr = ctx
-                .load(EthHdr::LEN + Ipv4Hdr::LEN)
-                .map_err(|_| TC_ACT_PIPE)?;
-            (
-                KubeProtocol::Udp,
-                u16::from_be_bytes(udphdr.src),
-                u16::from_be_bytes(udphdr.dst),
-                true,
-                None,
-            )
-        }
-        network_types::ip::IpProto::Sctp => {
-            let sctphdr: SctpHdr = ctx
-                .load(EthHdr::LEN + Ipv4Hdr::LEN)
-                .map_err(|_| TC_ACT_PIPE)?;
-            (
-                KubeProtocol::Sctp,
-                u16::from_be_bytes(sctphdr.src),
-                u16::from_be_bytes(sctphdr.dst),
-                true,
-                None,
-            )
-        }
-        _ => return Ok(TC_ACT_PIPE),
+    let Ok(proto) = KubeProtocol::try_from(ipv4hdr.proto) else {
+        return Ok(TC_ACT_PIPE);
     };
+
+    let l4_check = l4_header_check(&ctx, &ipv4hdr)?;
+    let src_port = l4_check.src_port;
+    let dst_port = l4_check.dst_port;
+    let tcp_flags = l4_check.tcp_flags();
+
+    if is_first_frag_v4(&ipv4hdr) {
+        let key = FragmentKeyV4::new(src_ip, dst_ip, ipv4hdr.id(), proto as u8);
+        let now = unsafe { bpf_ktime_get_ns() };
+        let value = FragmentValue::new(src_port, dst_port, now);
+        FRAGMENT_V4.insert(key, value, 0).map_err(|_| TC_ACT_SHOT)?;
+    }
 
     let (ct_key, ct_rev) = conntrack_keys(src_ip, dst_ip, src_port, dst_port, proto, dst_id);
 
@@ -128,7 +101,7 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         return Ok(TC_ACT_SHOT);
     }
 
-    if should_insert
+    if l4_check.should_insert()
         && src_ip != dst_ip
         && let Err(e) = CONNTRACK_V4.insert(
             ct_key,

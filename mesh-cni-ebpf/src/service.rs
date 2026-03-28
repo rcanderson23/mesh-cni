@@ -151,7 +151,7 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
                 u16::from_be_bytes(tcphdr.dest),
                 u16::from_be_bytes(tcphdr.source),
                 KubeProtocol::Tcp,
-                Some(TcpFlags { syn, ack, fin, rst }),
+                Some(TcpFlags::new(syn, ack, fin, rst)),
             )
         }
         IpProto::Udp => {
@@ -332,7 +332,7 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
                 u16::from_be_bytes(tcphdr.source),
                 u16::from_be_bytes(tcphdr.dest),
                 KubeProtocol::Tcp,
-                Some(TcpFlags { syn, ack, fin, rst }),
+                Some(TcpFlags::new(syn, ack, fin, rst)),
             )
         }
         IpProto::Udp => {
@@ -453,14 +453,7 @@ fn is_nodeport_conntrack_expired(value: NodePortConntrackV4Value, now: u64, prot
 
 #[inline]
 fn is_initial_tcp_syn(tcp_flags: Option<TcpFlags>) -> bool {
-    matches!(
-        tcp_flags,
-        Some(TcpFlags {
-            syn: true,
-            ack: false,
-            ..
-        })
-    )
+    matches!(tcp_flags, Some(flags) if flags.syn() && !flags.ack())
 }
 
 trait ProtocolExt {
