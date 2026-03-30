@@ -3,7 +3,7 @@ use std::{collections::HashMap, net::Ipv4Addr, str::FromStr, sync::Arc, time::Du
 use ipnetwork::IpNetwork;
 use k8s_openapi::api::core::v1::Node;
 use kube::{Resource, ResourceExt, runtime::controller::Action};
-use mesh_cni_ebpf_common::vxlan::RemoteNodeV4;
+use mesh_cni_ebpf_common::route::RouteV4;
 use tracing::{error, info, warn};
 
 use crate::{Error, Result, VxlanRemoteCidrsDataplane, context::Context};
@@ -27,8 +27,9 @@ pub(crate) fn reconcile_all_vxlan_remote_cidrs<D>(ctx: &Context<D>) -> Result<()
 where
     D: VxlanRemoteCidrsDataplane,
 {
-    let desired_remote_cidrs = desired_remote_cidrs(&ctx.node_store.state(), &ctx.node_name)?;
-    let current_remote_cidrs = ctx.vxlan_remote_cidrs.vxlan_remote_cidrs_state()?;
+    let desired_remote_cidrs =
+        desired_remote_cidrs(&ctx.node_store.state(), &ctx.node_name, ctx.vxlan_ifindex)?;
+    let current_remote_cidrs = ctx.routes.vxlan_remote_cidrs_state()?;
 
     info!(
         desired_remote_cidr_count = desired_remote_cidrs.len(),
@@ -36,18 +37,21 @@ where
         "reconciling vxlan remote cidr map"
     );
 
-    for (cidr, current_remote) in &current_remote_cidrs {
+    for (cidr, current_route) in &current_remote_cidrs {
         if !desired_remote_cidrs.contains_key(cidr) {
-            info!(%cidr, remote_ip = %Ipv4Addr::from(current_remote.ip), "removing stale vxlan remote cidr");
-            ctx.vxlan_remote_cidrs.remove_vxlan_remote_cidr(cidr)?;
+            info!(%cidr, remote_ip = %Ipv4Addr::from(current_route.remote_ip), "removing stale vxlan remote cidr");
+            ctx.routes.remove_vxlan_remote_cidr(cidr)?;
         }
     }
 
-    for (cidr, desired_remote) in &desired_remote_cidrs {
-        if current_remote_cidrs.get(cidr) != Some(desired_remote) {
-            info!(%cidr, remote_ip = %Ipv4Addr::from(desired_remote.ip), "updating vxlan remote cidr");
-            ctx.vxlan_remote_cidrs
-                .upsert_vxlan_remote_cidr(*cidr, *desired_remote)?;
+    for (cidr, desired_route) in &desired_remote_cidrs {
+        if current_remote_cidrs.get(cidr) != Some(desired_route) {
+            let remote_ip = Ipv4Addr::from(desired_route.remote_ip);
+            info!(%cidr, %remote_ip, "updating vxlan remote cidr");
+            ctx.routes.upsert_vxlan_remote_cidr(
+                *cidr,
+                RouteV4::new_remote(ctx.vxlan_ifindex, remote_ip, 1),
+            )?;
         }
     }
 
@@ -57,7 +61,8 @@ where
 fn desired_remote_cidrs(
     nodes: &[Arc<Node>],
     local_node_name: &str,
-) -> Result<HashMap<IpNetwork, RemoteNodeV4>> {
+    vxlan_ifindex: u32,
+) -> Result<HashMap<IpNetwork, RouteV4>> {
     let mut cidrs = HashMap::default();
 
     for node in nodes {
@@ -73,17 +78,13 @@ fn desired_remote_cidrs(
             continue;
         };
 
-        let remote = RemoteNodeV4 {
-            ip: u32::from(node_ip),
-            vni: 1,
-        };
-
+        let route = RouteV4::new_remote(vxlan_ifindex, node_ip, 1);
         for pod_cidr in node_pod_cidrs(node)? {
             let IpNetwork::V4(_) = pod_cidr else {
                 warn!(node = %node.name_any(), cidr = %pod_cidr, "skipping non-ipv4 pod cidr");
                 continue;
             };
-            cidrs.insert(pod_cidr, remote);
+            cidrs.insert(pod_cidr, route);
         }
     }
 
@@ -203,15 +204,12 @@ mod tests {
             ),
         ];
 
-        let desired = desired_remote_cidrs(&nodes, "control-plane").unwrap();
+        let desired = desired_remote_cidrs(&nodes, "control-plane", 1).unwrap();
 
         assert_eq!(desired.len(), 1);
         assert_eq!(
             desired.get(&IpNetwork::from_str("10.244.1.0/24").unwrap()),
-            Some(&RemoteNodeV4 {
-                ip: u32::from(Ipv4Addr::new(172, 18, 0, 6)),
-                vni: 1,
-            })
+            Some(&RouteV4::new_remote(1, Ipv4Addr::new(172, 18, 0, 6), 1))
         );
     }
 
@@ -227,7 +225,7 @@ mod tests {
             node("worker", Some(vec!["10.244.1.0/24"]), None, None),
         ];
 
-        let desired = desired_remote_cidrs(&nodes, "control-plane").unwrap();
+        let desired = desired_remote_cidrs(&nodes, "control-plane", 1).unwrap();
 
         assert!(desired.is_empty());
     }

@@ -16,7 +16,9 @@ use crate::{
         service::{ServiceEndpoint, ServiceEndpointState},
     },
     config::{AgentArgs, CniMode},
-    http, ipam, kubernetes, system,
+    http,
+    ipam::{self},
+    kubernetes, system,
 };
 
 pub async fn start(
@@ -32,10 +34,6 @@ pub async fn start(
     info!("initializing bpf");
     bpf::loader::init_bpf(&args.cni_settings.mode)?;
 
-    if args.cni_settings.mode == CniMode::Vxlan {
-        system::ensure_vxlan(&args.vxlan_settings).await?;
-    }
-
     info!("starting policy service");
     let policy_state = PolicyBpfState::try_new()?;
     let policy_state = PolicyState::new(
@@ -48,35 +46,45 @@ pub async fn start(
         bpf::policy::run(kube_client.clone(), policy_state.clone(), cancel.clone()).await?;
     let policy_server = http::grpc::policy::server(policy_state.clone());
 
+    let routes_map = bpf::routes::load_routes_map()?;
+    let routes_state = bpf::routes::RoutesState::try_new(routes_map)?;
     let mut vxlan_controller_handle = None;
-    let ipam = match args.cni_settings.mode {
-        CniMode::Chained => None,
+
+    info!("starting cni service");
+    let cni_server = match args.cni_settings.mode {
+        CniMode::Chained => {
+            let cni_state = http::grpc::cni::CniState::new(
+                policy_context,
+                args.netns_dir,
+                Arc::new(Mutex::new(ipam::Ipam::Noop(ipam::NoopIpam))),
+                args.cni_settings.mode.clone(),
+                routes_state,
+            );
+            CniServer::new(cni_state)
+        }
         CniMode::Vxlan => {
-            let ipam = Arc::new(Mutex::new(
-                ipam::get_ipam_from_node(kube_client.clone(), &args.node_name).await?,
-            ));
-            let vxlan_remote_cidrs_map = bpf::vxlan::load_remote_cidrs_map()?;
-            let vxlan_remote_cidrs_state =
-                bpf::vxlan::VxlanRemoteCidrsState::try_new(vxlan_remote_cidrs_map)?;
+            let vxlan_ifindex = system::ensure_vxlan(&args.vxlan_settings).await?;
+            let ipam = ipam::get_ipamv4_from_node(kube_client.clone(), &args.node_name).await?;
+            let ipam = Arc::new(Mutex::new(ipam::Ipam::V4(ipam)));
 
             vxlan_controller_handle = Some(tokio::spawn(start_vxlan_controller(
                 kube_client.clone(),
                 args.node_name.clone(),
-                vxlan_remote_cidrs_state,
+                routes_state.clone(),
+                vxlan_ifindex,
                 cancel.child_token(),
             )));
-            Some(ipam)
+            let cni_state = http::grpc::cni::CniState::new(
+                policy_context,
+                args.netns_dir,
+                ipam,
+                args.cni_settings.mode.clone(),
+                routes_state,
+            );
+
+            CniServer::new(cni_state)
         }
     };
-
-    info!("starting cni service");
-    let cni_state = http::grpc::cni::CniState::new(
-        policy_context,
-        args.netns_dir,
-        ipam,
-        args.cni_settings.mode.clone(),
-    );
-    let cni_server = CniServer::new(cni_state);
 
     info!("loading ip maps");
     let (ipv4_map, ipv6_map) = bpf::ip::load_maps()?;

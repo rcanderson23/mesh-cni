@@ -17,7 +17,7 @@ use crate::{
         BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_EGRESS_TC,
         BPF_PROGRAM_INGRESS_TC, BPF_PROGRAM_NODEPORT_EGRESS_TC, BPF_PROGRAM_NODEPORT_INGRESS_TC,
         BPF_PROGRAM_VXLAN_NODE_INGRESS_TC, BPF_PROGRAM_VXLAN_VETH_EGRESS_TC, BpfNamePath,
-        POLICY_MAPS_LIST, PROG_LIST, SERVICE_MAPS_LIST, VXLAN_MAPS_LIST, VXLAN_PROG_LIST,
+        POLICY_MAPS_LIST, PROG_LIST, SERVICE_MAPS_LIST, VXLAN_PROG_LIST,
     },
     config::CniMode,
 };
@@ -56,8 +56,6 @@ pub fn init_bpf(mode: &CniMode) -> Result<()> {
     pin_maps(&mut ebpf, &POLICY_MAPS_LIST)?;
 
     if matches!(mode, CniMode::Vxlan) {
-        pin_maps(&mut ebpf, &VXLAN_MAPS_LIST)?;
-
         info!("ensuring vxlan veth egress program loaded and pinned");
         ensure_tc_program(&mut ebpf, BPF_PROGRAM_VXLAN_VETH_EGRESS_TC)?;
 
@@ -108,11 +106,6 @@ fn pins_exist(mode: &CniMode) -> Result<bool> {
         }
     }
     if matches!(mode, CniMode::Vxlan) {
-        for map in VXLAN_MAPS_LIST {
-            if !fs::exists(map.path())? {
-                return Ok(false);
-            }
-        }
         for prog in VXLAN_PROG_LIST {
             if !fs::exists(prog.path())? {
                 return Ok(false);
