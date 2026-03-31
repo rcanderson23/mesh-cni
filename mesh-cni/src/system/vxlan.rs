@@ -1,7 +1,7 @@
 use anyhow::bail;
 use aya::programs::{SchedClassifier, TcAttachType, links::FdLink, tc};
 use regex::Regex;
-use rtnetlink::LinkVxlan;
+use rtnetlink::{Handle, LinkVxlan};
 use tokio_stream::StreamExt;
 
 use crate::{
@@ -17,9 +17,7 @@ const VXLAN_NODE_INGRESS_LINK_PREFIX: &str = "mesh_cni_vxlan_node_";
 const INGRESS_LINK_SUFFIX: &str = "_ingress";
 
 /// Enusres the vxlan interface is created and returns its ifindex
-pub(crate) async fn ensure_vxlan_iface(settings: &VxlanSettings) -> Result<u32> {
-    let (conn, handle, _) = rtnetlink::new_connection()?;
-    tokio::spawn(conn);
+pub(crate) async fn ensure_vxlan_iface(handle: &Handle, settings: &VxlanSettings) -> Result<u32> {
     let iface_regex = Regex::new(&settings.iface_regex)?;
     let mut links = handle.link().get().execute();
     let mut match_index = None;
@@ -27,17 +25,14 @@ pub(crate) async fn ensure_vxlan_iface(settings: &VxlanSettings) -> Result<u32> 
     let mut vxlan_index = None;
     while let Some(link) = links.try_next().await? {
         for attr in &link.attributes {
-            match attr {
-                rtnetlink::packet_route::link::LinkAttribute::IfName(name) => {
-                    if iface_regex.is_match(name) {
-                        match_index = Some(link.header.index);
-                        match_name = Some(name.clone());
-                    }
-                    if name == MESH_VXLAN_NAME {
-                        vxlan_index = Some(link.header.index);
-                    }
+            if let rtnetlink::packet_route::link::LinkAttribute::IfName(name) = attr {
+                if iface_regex.is_match(name) {
+                    match_index = Some(link.header.index);
+                    match_name = Some(name.clone());
                 }
-                _ => continue,
+                if name == MESH_VXLAN_NAME {
+                    vxlan_index = Some(link.header.index);
+                }
             }
         }
     }
@@ -56,7 +51,7 @@ pub(crate) async fn ensure_vxlan_iface(settings: &VxlanSettings) -> Result<u32> 
             .build();
 
         handle.link().add(msg).execute().await?;
-        let vxlan_index = link_index_by_name(&handle, MESH_VXLAN_NAME).await?;
+        let vxlan_index = link_index_by_name(handle, MESH_VXLAN_NAME).await?;
         if let Some(iface_name) = match_name.as_deref() {
             ensure_vxlan_node_ingress_attached(iface_name)?;
         }
