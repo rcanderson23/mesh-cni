@@ -9,17 +9,24 @@ use crate::Result;
 
 const TABLE_NAME: &str = "mesh_cni_nat";
 const CHAIN_NAME: &str = "postrouting";
-const RULE_TAG: &[u8] = b"mesh-cni-pod-snat";
+const RULE_TAG_PREFIX: &str = "mesh-cni-pod-snat";
 const SRCNAT_PRIORITY: i32 = 100;
 
-pub(crate) fn ensure_pod_snat(pod_cidr: IpNetwork, iface: &str) -> anyhow::Result<()> {
+pub(crate) fn ensure_pod_snat(pod_cidrs: &[IpNetwork], iface: &str) -> anyhow::Result<()> {
     let family = ProtocolFamily::Inet;
     let mut batch = Batch::new();
     let (table, table_added) = ensure_table(TABLE_NAME, family, &mut batch)?;
     let (chain, chain_added) = ensure_chain(CHAIN_NAME, &table, &mut batch)?;
-    let (_, rule_added) = ensure_rule(&chain, RULE_TAG, pod_cidr, iface, &mut batch)?;
 
-    if table_added || chain_added || rule_added {
+    let mut any_rule_added = false;
+    for cidr in pod_cidrs {
+        let (_, rule_added) = ensure_rule(&chain, *cidr, iface, &mut batch)?;
+        if rule_added {
+            any_rule_added = true;
+        }
+    }
+
+    if table_added || chain_added || any_rule_added {
         batch
             .send()
             .context("failed to apply nftables pod SNAT batch")?;
@@ -58,14 +65,14 @@ fn ensure_chain(name: &str, table: &Table, batch: &mut Batch) -> Result<(Chain, 
 
 fn ensure_rule(
     chain: &Chain,
-    rule_tag: &[u8],
     pod_cidr: IpNetwork,
     iface: &str,
     batch: &mut Batch,
 ) -> Result<(Rule, bool)> {
+    let rule_tag = rule_tag(pod_cidr);
     if let Some(rule) = list_rules_for_chain(chain)?
         .into_iter()
-        .find(|r| r.get_userdata().map(|v| v.as_slice()) == Some(rule_tag))
+        .find(|r| r.get_userdata().map(|v| v.as_slice()) == Some(rule_tag.as_slice()))
     {
         return Ok((rule, false));
     }
@@ -74,6 +81,10 @@ fn ensure_rule(
         .snetwork(pod_cidr)?
         .oiface(iface)?
         .masquerade()
-        .with_userdata(rule_tag.to_vec());
+        .with_userdata(rule_tag);
     Ok((rule.add_to_batch(batch), true))
+}
+
+fn rule_tag(cidr: IpNetwork) -> Vec<u8> {
+    format!("{RULE_TAG_PREFIX}:{cidr}").into_bytes()
 }

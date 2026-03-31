@@ -1,12 +1,10 @@
 mod nat;
+mod netlink;
 mod ports;
 mod router;
+mod sysctl;
 mod vxlan;
 
-use anyhow::bail;
-use regex::Regex;
-use rtnetlink::Handle;
-use tokio_stream::StreamExt;
 use tracing::info;
 
 use crate::{
@@ -15,34 +13,32 @@ use crate::{
     system::ports::ensure_node_ports_settings,
 };
 
+const VXLAN_MTU_SUB: u32 = 50;
+
 /// Ensures settings that are normally the responsibility of kube-proxy
 pub async fn ensure_proxy_settings(settings: &ProxySettings) -> Result<()> {
     ensure_node_ports_settings(&settings.node_port_settings)?;
     Ok(())
 }
 
+// FIXME: the iface selection is buggy in multi-nic environments. Make a more deterministic choice
 pub async fn ensure_vxlan(vxlan_settings: &VxlanSettings) -> Result<u32> {
     let (conn, handle, _) = rtnetlink::new_connection()?;
     tokio::spawn(conn);
-    router::ensure_mesh_router_iface(&handle).await?;
+    info!("getting MTU from host interface");
+    let vxlan_iface = netlink::find_first_iface_match(&handle, &vxlan_settings.iface_regex).await?;
+    let mtu = netlink::get_mtu_from_iface(&handle, &vxlan_iface).await?;
+    router::ensure_mesh_router_iface(
+        &handle,
+        &vxlan_settings.pod_cidrs,
+        mtu.saturating_sub(VXLAN_MTU_SUB),
+    )
+    .await?;
     let vxlan_ifindex = vxlan::ensure_vxlan_iface(&handle, vxlan_settings).await?;
-    let iface = find_first_iface_match(&handle, &vxlan_settings.iface_snat).await?;
     info!("ensuring nftables masquading");
-    nat::ensure_pod_snat(ipnetwork::IpNetwork::V4(vxlan_settings.pod_cidr), &iface)?;
+    let iface = netlink::find_first_iface_match(&handle, &vxlan_settings.iface_snat).await?;
+    nat::ensure_pod_snat(&vxlan_settings.pod_cidrs, &iface)?;
+    sysctl::disable_rp_filter("all")?;
+    sysctl::disable_rp_filter(&vxlan_iface)?;
     Ok(vxlan_ifindex)
-}
-
-async fn find_first_iface_match(handle: &Handle, iface_regex: &str) -> Result<String> {
-    let iface_regex = Regex::new(iface_regex)?;
-    let mut links = handle.link().get().execute();
-    while let Some(link) = links.try_next().await? {
-        for attr in &link.attributes {
-            if let rtnetlink::packet_route::link::LinkAttribute::IfName(name) = attr
-                && iface_regex.is_match(name)
-            {
-                return Ok(name.clone());
-            }
-        }
-    }
-    bail!("failed to find interface matching regex {iface_regex}")
 }

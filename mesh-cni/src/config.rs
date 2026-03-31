@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use http::Uri;
-use ipnetwork::Ipv4Network;
+use ipnetwork::IpNetwork;
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -159,10 +159,14 @@ pub struct VxlanSettings {
     #[arg(long, env = "MESH_CNI_VXLAN_IFACE_REGEX", default_value = "^eth.*$")]
     pub iface_regex: String,
 
-    /// Represents the cidr that all pod IPs are expected to reside on
-    // TODO: support multiple CIDRS and type
-    #[arg(long, env = "MESH_CNI_VXLAN_POD_CIDR", default_value = "10.244.0.0/16")]
-    pub pod_cidr: Ipv4Network,
+    /// Comma separated Pod CIDRs. Accepts IPv4 and IPv6
+    #[arg(
+        long,
+        env = "MESH_CNI_VXLAN_POD_CIDR",
+        default_value = "10.244.0.0/16",
+        value_delimiter = ','
+    )]
+    pub pod_cidrs: Vec<IpNetwork>,
 
     /// Interface to configure SNAT for pod traffic. Pattern will use first match.
     #[arg(long, env = "MESH_CNI_VXLAN_IFACE_SNAT", default_value = "^eth.*$")]

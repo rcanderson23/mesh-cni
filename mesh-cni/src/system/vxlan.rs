@@ -8,6 +8,7 @@ use crate::{
     Result,
     bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_VXLAN_NODE_INGRESS_TC},
     config::VxlanSettings,
+    system::netlink::link_index_by_name,
 };
 
 pub const MESH_VXLAN_NAME: &str = "mesh_vxlan0";
@@ -63,19 +64,6 @@ pub(crate) async fn ensure_vxlan_iface(handle: &Handle, settings: &VxlanSettings
             settings.iface_regex
         );
     }
-}
-
-async fn link_index_by_name(handle: &rtnetlink::Handle, name: &str) -> Result<u32> {
-    let link = handle
-        .link()
-        .get()
-        .match_name(name.to_string())
-        .execute()
-        .try_next()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("missing interface {name}"))?;
-
-    Ok(link.header.index)
 }
 
 fn ensure_vxlan_node_ingress_attached(iface: &str) -> Result<()> {
