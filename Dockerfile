@@ -1,5 +1,5 @@
 # when changing image be aware of GLIB version matching in build and running images
-FROM rust:1.92-trixie AS builder
+FROM rust:1.94-trixie AS builder
 
 RUN apt-get update && \
   apt-get -y install ca-certificates \
