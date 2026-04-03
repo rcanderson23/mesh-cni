@@ -47,6 +47,30 @@ pub enum Error {
 
     #[error("{0}")]
     TonicTransport(#[from] tonic::transport::Error),
+
+    #[error("{0}")]
+    Conversion(String),
+
+    #[error("pin error: {0}")]
+    Pin(#[from] aya::pin::PinError),
+
+    #[error("pin error: {0}")]
+    Link(#[from] aya::programs::links::LinkError),
+
+    #[error("pin error: {0}")]
+    Netlink(#[from] mesh_cni_netlink::Error),
+
+    #[error("ipnetwork error: {0}")]
+    IpNetwork(#[from] ipnetwork::IpNetworkError),
+
+    #[error("netns error: {0}")]
+    NetNs(#[from] netns_rs::Error),
+
+    #[error("ipv6 no supported")]
+    UnsupportedAddr,
+
+    #[error("response is missing required field: {0}")]
+    MissingField(String),
 }
 
 impl Error {
@@ -134,6 +158,54 @@ impl Error {
                 cni_version,
                 code: 105,
                 msg: "Tonic Transport".into(),
+                details: self.to_string(),
+            },
+            Error::Conversion(_) => CniErrorResponse {
+                cni_version,
+                code: 106,
+                msg: "Conversion".into(),
+                details: self.to_string(),
+            },
+            Error::Pin(_) => CniErrorResponse {
+                cni_version,
+                code: 107,
+                msg: "Pin".into(),
+                details: self.to_string(),
+            },
+            Error::Link(_) => CniErrorResponse {
+                cni_version,
+                code: 108,
+                msg: "Link".into(),
+                details: self.to_string(),
+            },
+            Error::Netlink(_) => CniErrorResponse {
+                cni_version,
+                code: 109,
+                msg: "Netlink".into(),
+                details: self.to_string(),
+            },
+            Error::IpNetwork(_) => CniErrorResponse {
+                cni_version,
+                code: 110,
+                msg: "IpNetwork".into(),
+                details: self.to_string(),
+            },
+            Error::NetNs(_) => CniErrorResponse {
+                cni_version,
+                code: 111,
+                msg: "NetNs".into(),
+                details: self.to_string(),
+            },
+            Error::UnsupportedAddr => CniErrorResponse {
+                cni_version,
+                code: 112,
+                msg: "UnsupportedAddr".into(),
+                details: self.to_string(),
+            },
+            Error::MissingField(_) => CniErrorResponse {
+                cni_version,
+                code: 113,
+                msg: "MissingField".into(),
                 details: self.to_string(),
             },
         };

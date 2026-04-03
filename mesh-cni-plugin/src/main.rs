@@ -5,21 +5,22 @@ use mesh_cni_plugin::{CNI_VERSION, Result, add::add, config::Args, delete::delet
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-fn main() -> ExitCode {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> ExitCode {
     let _guard = setup_logging();
     let args = Args::parse();
     let resp = match args.command {
         mesh_cni_plugin::config::Command::Add => {
             let input = read_input();
             match input {
-                Ok(input) => add(&args, input),
+                Ok(input) => add(&args, input).await,
                 Err(e) => e.into_response(CNI_VERSION),
             }
         }
         mesh_cni_plugin::config::Command::Delete => {
             let input = read_input();
             match input {
-                Ok(input) => delete(&args, input),
+                Ok(input) => delete(&args, input).await,
                 Err(e) => e.into_response(CNI_VERSION),
             }
         }

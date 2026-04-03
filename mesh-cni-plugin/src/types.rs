@@ -28,7 +28,7 @@ pub struct Input {
     pub previous_result: Option<Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Interface {
     pub name: String,
@@ -74,7 +74,8 @@ pub struct Ip {
         deserialize_with = "crate::deserialize_from_str"
     )]
     pub address: IpNetwork,
-    pub gateway: IpAddr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<IpAddr>,
     pub interface: Option<usize>,
 }
 

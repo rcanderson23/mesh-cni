@@ -1,0 +1,10 @@
+[package]
+name = "mesh-cni-ebpf-meta"
+version = "0.1.0"
+edition.workspace = true
+
+license.workspace = true
+
+[lib]
+name = "mesh_cni_ebpf_meta"
+path = "src/lib.rs"

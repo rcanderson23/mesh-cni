@@ -55,9 +55,7 @@ pub async fn start(
         CniMode::Chained => {
             let cni_state = http::grpc::cni::CniState::new(
                 policy_context,
-                args.netns_dir,
                 Arc::new(Mutex::new(ipam::Ipam::Noop(ipam::NoopIpam))),
-                args.cni_settings.mode.clone(),
                 routes_state,
             );
             CniServer::new(cni_state)
@@ -74,13 +72,7 @@ pub async fn start(
                 vxlan_ifindex,
                 cancel.child_token(),
             )));
-            let cni_state = http::grpc::cni::CniState::new(
-                policy_context,
-                args.netns_dir,
-                ipam,
-                args.cni_settings.mode.clone(),
-                routes_state,
-            );
+            let cni_state = http::grpc::cni::CniState::new(policy_context, ipam, routes_state);
 
             CniServer::new(cni_state)
         }

@@ -39,7 +39,7 @@ impl http::grpc::cni::Ipam for Arc<Mutex<Ipam>> {
         let mut guard = self.lock().unwrap();
         match *guard {
             Ipam::V4(ref mut ipam_v4) => ipam_v4.release_ip(ip),
-            Ipam::Noop(_) => bail!("release_v4_ip not implemented for noop"),
+            Ipam::Noop(_) => Ok(()),
         }
     }
 

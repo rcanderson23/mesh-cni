@@ -6,62 +6,6 @@ fn main() -> anyhow::Result<()> {
 
     tonic_prost_build::configure()
         .type_attribute(
-            "cni.v1.IP",
-            "#[derive(serde::Serialize, serde::Deserialize)]",
-        )
-        .field_attribute("cni.v1.IP.gateway", "#[serde(default)]")
-        .message_attribute("cni.v1.IP", "#[serde(rename_all = \"camelCase\" )]")
-        .type_attribute(
-            "cni.v1.DNS",
-            "#[derive(serde::Serialize, serde::Deserialize)]",
-        )
-        .message_attribute("cni.v1.DNS", "#[serde(rename_all = \"camelCase\" )]")
-        .field_attribute(
-            "cni.v1.DNS.nameservers",
-            "#[serde(default, skip_serializing_if = \"Vec::is_empty\" )]",
-        )
-        .field_attribute(
-            "cni.v1.DNS.domain",
-            "#[serde(default, skip_serializing_if = \"Option::is_none\" )]",
-        )
-        .field_attribute(
-            "cni.v1.DNS.search",
-            "#[serde(default, skip_serializing_if = \"Vec::is_empty\" )]",
-        )
-        .field_attribute(
-            "cni.v1.DNS.options",
-            "#[serde(default, skip_serializing_if = \"Vec::is_empty\" )]",
-        )
-        .type_attribute(
-            "cni.v1.Interface",
-            "#[derive(serde::Serialize, serde::Deserialize)]",
-        )
-        .type_attribute(
-            "cni.v1.Route",
-            "#[derive(serde::Serialize, serde::Deserialize)]",
-        )
-        .message_attribute("cni.v1.Route", "#[serde(rename_all = \"camelCase\" )]")
-        .field_attribute(
-            "cni.v1.Route.gw",
-            "#[serde(default, skip_serializing_if = \"Option::is_none\" )]",
-        )
-        .field_attribute(
-            "cni.v1.Route.mtu",
-            "#[serde(default, skip_serializing_if = \"Option::is_none\" )]",
-        )
-        .field_attribute(
-            "cni.v1.Route.advmss",
-            "#[serde(default, skip_serializing_if = \"Option::is_none\" )]",
-        )
-        .field_attribute(
-            "cni.v1.Route.table",
-            "#[serde(default, skip_serializing_if = \"Option::is_none\" )]",
-        )
-        .field_attribute(
-            "cni.v1.Route.scope",
-            "#[serde(default, skip_serializing_if = \"Option::is_none\" )]",
-        )
-        .type_attribute(
             "ip.v1.IpId",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )

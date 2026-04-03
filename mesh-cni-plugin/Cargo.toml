@@ -7,11 +7,16 @@ license.workspace = true
 
 [dependencies]
 mesh-cni-api = { path = "../mesh-cni-api" }
+mesh-cni-netlink = { path = "../mesh-cni-netlink" }
+mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common" }
+mesh-cni-ebpf-meta = { path = "../mesh-cni-ebpf-meta" }
 
-aya = { workspace = true}
+aya = { workspace = true }
 anyhow = { workspace = true, default-features = true }
 clap = { workspace = true, features = ["derive"] }
 ipnetwork = { workspace = true }
+netns-rs = { workspace = true }
+sha2 = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

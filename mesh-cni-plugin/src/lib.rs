@@ -1,9 +1,12 @@
 pub mod add;
 pub mod check;
+pub mod client;
 pub mod config;
 pub mod delete;
+pub mod ebpf;
 pub mod error;
 pub mod gc;
+pub mod netns;
 pub mod response;
 pub mod types;
 pub mod version;
@@ -17,6 +20,8 @@ use crate::error::Error;
 
 pub const CNI_VERSION: Version = Version::new(0, 4, 0);
 pub const SUPPORTED_CNI_VERSION: [Version; 1] = [Version::new(0, 4, 0)];
+
+pub(crate) const MESH_LINK_PREFIX: &str = "mesh_cni_link_";
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

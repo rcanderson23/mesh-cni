@@ -14,50 +14,22 @@ use aya::{
 };
 use ipnetwork::IpNetwork;
 use mesh_cni_ebpf_common::IdentityId;
+pub use mesh_cni_ebpf_meta::{
+    BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MAP_CONNTRACK_V4, BPF_MAP_ENDPOINTS_V4,
+    BPF_MAP_ENDPOINTS_V6, BPF_MAP_IDENTITY_V4, BPF_MAP_IDENTITY_V6, BPF_MAP_NODEPORT_CONNTRACK_V4,
+    BPF_MAP_NODEPORT_LOCAL_ADDRS_V4, BPF_MAP_NODEPORT_REV_NAT_V4, BPF_MAP_NODEPORT_SERVICES_V4,
+    BPF_MAP_POLICY_CIDR_V4, BPF_MAP_POLICY_CIDR_V6, BPF_MAP_POLICY_INDEX, BPF_MAP_POLICY_RULESET,
+    BPF_MAP_ROUTER_V4, BPF_MAP_SERVICES_V4, BPF_MAP_SERVICES_V6, BPF_MESH_FS_DIR,
+    BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR, BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4,
+    BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC, BPF_PROGRAM_NODEPORT_EGRESS_TC,
+    BPF_PROGRAM_NODEPORT_INGRESS_TC, BPF_PROGRAM_VXLAN_NODE_INGRESS_TC,
+    BPF_PROGRAM_VXLAN_VETH_EGRESS_TC, BpfNamePath,
+};
 
 use crate::{Result, bpf::ip::LpmKeyNetwork};
 
-pub(crate) const BPF_PROGRAM_INGRESS_TC: BpfNamePath = BpfNamePath::Program("mesh_cni_ingress");
-pub(crate) const BPF_PROGRAM_EGRESS_TC: BpfNamePath = BpfNamePath::Program("mesh_cni_egress");
-pub(crate) const BPF_PROGRAM_NODEPORT_INGRESS_TC: BpfNamePath =
-    BpfNamePath::Program("mesh_cni_nodeport_ingress");
-pub(crate) const BPF_PROGRAM_NODEPORT_EGRESS_TC: BpfNamePath =
-    BpfNamePath::Program("mesh_cni_nodeport_egress");
-pub const BPF_PROGRAM_CGROUP_CONNECT_V4: BpfNamePath =
-    BpfNamePath::Program("mesh_cni_cgroup_connect4");
-pub const BPF_PROGRAM_VXLAN_VETH_EGRESS_TC: BpfNamePath =
-    BpfNamePath::Program("mesh_cni_vxlan_veth_egress");
-pub const BPF_PROGRAM_VXLAN_NODE_INGRESS_TC: BpfNamePath =
-    BpfNamePath::Program("mesh_cni_vxlan_node_ingress");
-pub const BPF_LINK_CGROUP_CONNECT_V4_PATH: &str = "/sys/fs/bpf/mesh/links/mesh_cni_cgroup_connect4";
-
 pub type IdentityMapV4 = LpmTrie<MapData, u32, IdentityId>;
 pub type IdentityMapV6 = LpmTrie<MapData, u128, IdentityId>;
-
-pub const BPF_MAP_IDENTITY_V4: BpfNamePath = BpfNamePath::Map("identity_v4");
-pub const BPF_MAP_IDENTITY_V6: BpfNamePath = BpfNamePath::Map("identity_v6");
-pub const BPF_MAP_CONNTRACK_V4: BpfNamePath = BpfNamePath::Map("conntrack_v4");
-pub const BPF_MAP_SERVICES_V4: BpfNamePath = BpfNamePath::Map("services_v4");
-pub const BPF_MAP_SERVICES_V6: BpfNamePath = BpfNamePath::Map("services_v6");
-pub const BPF_MAP_ENDPOINTS_V4: BpfNamePath = BpfNamePath::Map("endpoints_v4");
-pub const BPF_MAP_ENDPOINTS_V6: BpfNamePath = BpfNamePath::Map("endpoints_v6");
-pub const BPF_MAP_NODEPORT_LOCAL_ADDRS_V4: BpfNamePath =
-    BpfNamePath::Map("nodeport_local_addrs_v4");
-pub const BPF_MAP_NODEPORT_SERVICES_V4: BpfNamePath = BpfNamePath::Map("nodeport_services_v4");
-pub const BPF_MAP_NODEPORT_REV_NAT_V4: BpfNamePath = BpfNamePath::Map("nodeport_rev_nat_v4");
-pub const BPF_MAP_NODEPORT_CONNTRACK_V4: BpfNamePath = BpfNamePath::Map("nodeport_conntrack_v4");
-pub const BPF_MAP_POLICY_INDEX: BpfNamePath = BpfNamePath::Map("policy_index");
-pub const BPF_MAP_POLICY_RULESET: BpfNamePath = BpfNamePath::Map("policy_ruleset");
-pub const BPF_MAP_POLICY_CIDR_V4: BpfNamePath = BpfNamePath::Map("policy_cidr_v4");
-pub const BPF_MAP_POLICY_CIDR_V6: BpfNamePath = BpfNamePath::Map("policy_cidr_v6");
-// Commenting for now as this map may be useful in the near future
-// pub const BPF_MAP_IFACE_INDEXES_V4: BpfNamePath = BpfNamePath::Map("iface_indexes_v4");
-pub const BPF_MAP_ROUTER_V4: BpfNamePath = BpfNamePath::Map("router_v4");
-
-pub const BPF_MESH_FS_DIR: &str = "/sys/fs/bpf/mesh";
-pub const BPF_MESH_MAPS_DIR: &str = "/sys/fs/bpf/mesh/maps";
-pub const BPF_MESH_PROG_DIR: &str = "/sys/fs/bpf/mesh/programs";
-pub const BPF_MESH_LINKS_DIR: &str = "/sys/fs/bpf/mesh/links";
 
 pub(crate) const POLICY_MAPS_LIST: [BpfNamePath; 7] = [
     BPF_MAP_IDENTITY_V4,
@@ -93,27 +65,6 @@ pub(crate) const VXLAN_PROG_LIST: [BpfNamePath; 2] = [
     BPF_PROGRAM_VXLAN_VETH_EGRESS_TC,
     BPF_PROGRAM_VXLAN_NODE_INGRESS_TC,
 ];
-
-pub enum BpfNamePath {
-    Map(&'static str),
-    Program(&'static str),
-}
-
-impl BpfNamePath {
-    pub fn name(&self) -> &'static str {
-        match &self {
-            BpfNamePath::Map(n) => n,
-            BpfNamePath::Program(n) => n,
-        }
-    }
-
-    pub fn path(&self) -> String {
-        match &self {
-            BpfNamePath::Map(n) => format!("{BPF_MESH_MAPS_DIR}/{n}"),
-            BpfNamePath::Program(n) => format!("{BPF_MESH_PROG_DIR}/{n}"),
-        }
-    }
-}
 
 pub trait BpfMap {
     type Key;

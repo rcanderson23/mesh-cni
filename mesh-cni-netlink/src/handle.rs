@@ -38,6 +38,29 @@ impl Netlink {
         Ok(link.header.index)
     }
 
+    /// Returns the peer ifindex for a given interface name.
+    pub async fn get_peer_ifindex_by_name(&self, iface: &str) -> Result<u32> {
+        let link = self
+            .handle
+            .link()
+            .get()
+            .match_name(iface.to_string())
+            .execute()
+            .try_next()
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("interface {iface}")))?;
+
+        for attr in link.attributes {
+            if let LinkAttribute::Link(peer_ifindex) = attr {
+                return Ok(peer_ifindex);
+            }
+        }
+
+        Err(Error::NotFound(format!(
+            "peer ifindex for interface {iface}"
+        )))
+    }
+
     pub async fn find_first_iface_match(&self, iface_regex: &Regex) -> Result<String> {
         let mut links = self.handle.link().get().execute();
         while let Some(link) = links.try_next().await? {
@@ -218,6 +241,25 @@ impl Netlink {
         self.handle
             .link()
             .set(LinkUnspec::new_with_index(index).up().build())
+            .execute()
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete_link(&self, index: u32) -> Result<()> {
+        self.handle.link().del(index).execute().await?;
+        Ok(())
+    }
+
+    /// Renames an interface
+    pub async fn rename_link(&self, index: u32, name: &str) -> Result<()> {
+        self.handle
+            .link()
+            .set(
+                LinkUnspec::new_with_index(index)
+                    .name(name.to_string())
+                    .build(),
+            )
             .execute()
             .await?;
         Ok(())

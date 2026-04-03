@@ -1,12 +1,17 @@
-use std::collections::HashSet;
+use std::{collections::HashMap, net::IpAddr};
 
-use mesh_cni_api::cni::v1::{DeletePodReply, DeletePodRequest, cni_client::CniClient};
+use mesh_cni_api::cni::v1::DeletePodRequest;
+use mesh_cni_netlink::Netlink;
 use serde::Deserialize;
 use tracing::{error, info};
 
 use crate::{
     CNI_VERSION, Error,
+    add::host_veth_name,
+    client::new_cni_client,
     config::Args,
+    ebpf::unpin_iface_paths,
+    netns::NetnsRestore,
     response::{Response, Success},
     types::Input,
 };
@@ -28,84 +33,120 @@ use crate::{
 //    CNI_ARGS
 //    CNI_PATH
 //
-pub fn delete(args: &Args, input: Input) -> Response {
+pub async fn delete(args: &Args, input: Input) -> Response {
+    match _delete(args, input).await {
+        Ok(r) => r,
+        Err(e) => e.into_response(CNI_VERSION),
+    }
+}
+async fn _delete(args: &Args, input: Input) -> Result<Response, Error> {
     info!("delete called, received input {:?}", input);
-    let Some(prev) = input.previous_result else {
-        return Error::NoPreviousResult("no previous result found".into())
-            .into_response(CNI_VERSION);
-    };
+    let _host_netns_guard = NetnsRestore::current_thread()?;
 
-    // TODO: implemented unchained
+    // Unchained
+    if let Some(prev) = input.previous_result {
+        let prev = Success::deserialize(prev)?;
+        if prev.interfaces.is_empty() {
+            error!("previous response is missing interfaces");
+            return Err(Error::MissingInterfaces);
+        }
+        let mut ipv4_addrs = Vec::new();
+        for ip in &prev.ips {
+            if let IpAddr::V4(ipv4) = ip.address.ip() {
+                ipv4_addrs.push(ipv4.octets().to_vec());
+            }
+        }
+
+        if ipv4_addrs.is_empty() {
+            for interface in &prev.interfaces {
+                let Some(netns) = &interface.sandbox else {
+                    continue;
+                };
+                if !netns.exists() {
+                    continue;
+                }
+
+                let pod_ns = netns_rs::get_from_path(netns)?;
+                pod_ns.enter()?;
+                let nl = Netlink::try_new()?;
+
+                for addr in nl.get_iface_addrs(&interface.name).await? {
+                    if let IpAddr::V4(ipv4) = addr {
+                        ipv4_addrs.push(ipv4.octets().to_vec());
+                    }
+                }
+            }
+        }
+
+        if !ipv4_addrs.is_empty() {
+            let mut client = new_cni_client().await?;
+            client
+                .delete_pod(DeletePodRequest { ipv4: ipv4_addrs })
+                .await?;
+        }
+
+        for interface in &prev.interfaces {
+            unpin_iface_paths(&args.container_id, &interface.name)?;
+        }
+        unpin_iface_paths(&args.container_id, "lo")?;
+        unpin_iface_paths(&args.container_id, &host_veth_name(&args.container_id))?;
+        return Ok(Response::Success(Success {
+            cni_version: prev.cni_version,
+            interfaces: prev.interfaces,
+            ips: prev.ips,
+            routes: prev.routes,
+            dns: prev.dns,
+            custom: prev.custom,
+        }));
+    }
 
     // Chained
-    let prev = match Success::deserialize(prev) {
-        Ok(prev) => prev,
-        Err(e) => {
-            error!(%e, "failed to deserialize previous results");
-            return Error::from(e).into_response(CNI_VERSION);
-        }
+    unpin_iface_paths(&args.container_id, &args.ifname)?;
+    unpin_iface_paths(&args.container_id, "lo")?;
+    unpin_iface_paths(&args.container_id, &host_veth_name(&args.container_id))?;
+
+    let Some(netns) = &args.net_ns else {
+        return Ok(Response::Success(Success {
+            cni_version: CNI_VERSION,
+            interfaces: Vec::default(),
+            ips: Vec::default(),
+            routes: Vec::default(),
+            dns: None,
+            custom: HashMap::default(),
+        }));
     };
-
-    if prev.interfaces.is_empty() {
-        error!("previous response is missing interfaces");
-        return Error::MissingInterfaces.into_response(CNI_VERSION);
+    if !netns.exists() {
+        return Ok(Response::Success(Success {
+            cni_version: CNI_VERSION,
+            interfaces: Vec::default(),
+            ips: Vec::default(),
+            routes: Vec::default(),
+            dns: None,
+            custom: HashMap::default(),
+        }));
     }
 
-    let mut reqs = Vec::new();
-    let mut seen_iface = HashSet::new();
+    let pod_ns = netns_rs::get_from_path(netns)?;
+    pod_ns.enter()?;
+    let nl = Netlink::try_new()?;
 
-    for interface in &prev.interfaces {
-        let netns = interface.sandbox.clone();
-        let iface_key = format!(
-            "{}:{}",
-            netns.clone().unwrap_or_else(|| "NONE".into()),
-            interface.name
-        );
-        if seen_iface.insert(iface_key) {
-            reqs.push(DeletePodRequest {
-                iface: interface.name.clone(),
-                net_namespace: netns,
-                container_id: args.container_id.clone(),
-                chained: true,
-            });
+    let mut ipv4_addrs = Vec::new();
+    for addr in nl.get_iface_addrs(&args.ifname).await? {
+        if let IpAddr::V4(ipv4) = addr {
+            ipv4_addrs.push(ipv4.octets().to_vec());
         }
     }
+    let mut client = new_cni_client().await?;
+    client
+        .delete_pod(DeletePodRequest { ipv4: ipv4_addrs })
+        .await?;
 
-    if reqs.is_empty() {
-        return Error::Parse(
-            "previous response is missing pod netns interface entries".to_string(),
-        )
-        .into_response(CNI_VERSION);
-    }
-
-    for req in reqs {
-        let resp = tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(request(req));
-        match resp {
-            Ok(r) => {
-                info!("received reply {:?}", &r);
-            }
-            Err(e) => {
-                error!(%e, "failed request to mesh socket");
-                return Error::Ebpf(e.to_string()).into_response(CNI_VERSION);
-            }
-        }
-    }
-
-    Response::Success(Success {
-        cni_version: prev.cni_version,
-        interfaces: prev.interfaces,
-        ips: prev.ips,
-        routes: prev.routes,
-        dns: prev.dns,
-        custom: prev.custom,
-    })
-}
-
-async fn request(req: DeletePodRequest) -> Result<DeletePodReply, Error> {
-    let path = "unix:///var/run/mesh/mesh.sock";
-    let mut client = CniClient::connect(path).await?;
-    let resp = client.delete_pod(req).await?;
-    Ok(resp.into_inner())
+    Ok(Response::Success(Success {
+        cni_version: CNI_VERSION,
+        interfaces: Vec::default(),
+        ips: Vec::default(),
+        routes: Vec::default(),
+        dns: None,
+        custom: HashMap::default(),
+    }))
 }

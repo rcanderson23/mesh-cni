@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::Result;
+use crate::types::{Dns, Interface, Ip, Route};
 
 #[derive(Serialize, Deserialize)]
 pub enum Response {
@@ -52,16 +53,16 @@ pub struct Success {
     pub cni_version: Version,
 
     #[serde(default)]
-    pub interfaces: Vec<mesh_cni_api::cni::v1::Interface>,
+    pub interfaces: Vec<Interface>,
 
     #[serde(default)]
-    pub ips: Vec<mesh_cni_api::cni::v1::Ip>,
+    pub ips: Vec<Ip>,
 
     #[serde(default)]
-    pub routes: Vec<mesh_cni_api::cni::v1::Route>,
+    pub routes: Vec<Route>,
 
     #[serde(default)]
-    pub dns: Option<mesh_cni_api::cni::v1::Dns>,
+    pub dns: Option<Dns>,
 
     #[serde(flatten)]
     pub custom: HashMap<String, Value>,

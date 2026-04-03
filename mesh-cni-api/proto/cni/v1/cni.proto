@@ -2,52 +2,49 @@ syntax = "proto3";
 
 package grpc.cni.v1;
 
-import "cni/v1/types.proto";
-
 service Cni {
-    rpc AddPod(AddPodRequest) returns (AddPodReply) {}
+    rpc AddVxlanPod(AddVxlanRequest) returns (AddVxlanReply) {}
+    rpc AddChainedPod(AddChainedRequest) returns (AddChainedReply) {}
     rpc DeletePod(DeletePodRequest) returns (DeletePodReply) {}
 }
 
-message AddPodReply {
-  repeated grpc.cni.v1.Interface interfaces = 1;
-  repeated grpc.cni.v1.IP ips = 2;
-  repeated grpc.cni.v1.Route routes = 3;
-  grpc.cni.v1.DNS dns = 4;
-}
 
-message AddPodRequest {
-  // Interface name to be created
-  string iface = 1;
-
-  // Path to the network namespace
-  optional string net_namespace = 2;
-
-  // Path to the cgroup of the container
-  string container_id = 3;
-
-  // Determines if the CNI is configured to be chained
-  bool chained = 4;
-
+message AddVxlanRequest {
   // Name of the pod being created
-  string pod_name = 5;
+  string pod_name = 1;
 
   // Namespace of pod being created
-  string pod_namespace = 6;
-}
-
-message DeletePodRequest {
-  // Interface name to be created
-  string iface = 1;
-
-  // Path to the network namespace
-  optional string net_namespace = 2;
-
-  // Path to the cgroup of the container
-  string container_id = 3;
+  string pod_namespace = 2;
 
   // Determines if the CNI is configured to be chained
-  bool chained = 4;
+  bool chained = 3;
+
+  // The host side interface index connected to the pod
+  uint32 host_ifindex = 4;
+
+}
+
+// TODO: support ipv6
+message AddVxlanReply {
+  // IPv4 in bytes
+  bytes ipv4 = 1;
+  // Gateway for the peer device
+  bytes ipv4_gateway = 2;
+}
+
+message AddChainedRequest {
+  // Name of the pod being created
+  string pod_name = 1;
+
+  // Namespace of pod being created
+  string pod_namespace = 2;
+}
+
+message AddChainedReply {}
+
+message DeletePodRequest {
+  // IPv4 in bytes
+  repeated bytes ipv4 = 1;
 }
 
 message DeletePodReply {}

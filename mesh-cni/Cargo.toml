@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
 mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common", features = ["user"] }
+mesh-cni-ebpf-meta = { path = "../mesh-cni-ebpf-meta" }
 mesh-cni-plugin = { path = "../mesh-cni-plugin" }
 mesh-cni-api = { path = "../mesh-cni-api" }
 mesh-cni-cluster-controller = { path = "../mesh-cni-cluster-controller" }
