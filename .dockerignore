@@ -1,0 +1,11 @@
+.git
+.gitignore
+.DS_Store
+
+target
+**/target
+
+.kube/
+.github/
+.jj/
+.cargo/

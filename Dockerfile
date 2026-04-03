@@ -1,52 +1,79 @@
-# when changing image be aware of GLIB version matching in build and running images
-FROM rust:1.94-trixie AS builder
+# syntax=docker/dockerfile:1.7
+
+ARG RUST_VERSION=1.94
+
+FROM rust:${RUST_VERSION}-trixie AS chef
+
+RUN curl -sS https://debian.griffo.io/EA0F721D231FDD3A0A17B9AC7808B4DD62C41256.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/debian.griffo.io.gpg && \
+  echo "deb https://debian.griffo.io/apt trixie main" | tee /etc/apt/sources.list.d/debian.griffo.io.list 
 
 RUN apt-get update && \
-  apt-get -y install ca-certificates \
-  protobuf-compiler \
+  apt-get -y install \
+  ca-certificates \
   libclang-dev \
-  llvm && \
+  llvm \
+  protobuf-compiler \
+  zig && \
   update-ca-certificates
 
-RUN rustup install stable && \
-  rustup toolchain install nightly --component rust-src && \
-  cargo install bpf-linker
+RUN rustup toolchain install nightly --component rust-src && \
+  cargo install --locked cargo-chef cargo-zigbuild bpf-linker
+
 WORKDIR /app
 
-COPY Cargo.toml Cargo.toml
-COPY Cargo.lock Cargo.lock
-COPY mesh-cni-plugin mesh-cni-plugin
-COPY mesh-cni-api mesh-cni-api
-COPY mesh-cni-cli mesh-cni-cli
-COPY mesh-cni mesh-cni
+FROM chef AS planner
+
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+
+ARG TARGETARCH
+
+WORKDIR /app
+
+COPY --from=planner /app/recipe.json recipe.json
+COPY mesh-cni-api/proto mesh-cni-api/proto
 COPY mesh-cni-ebpf mesh-cni-ebpf
 COPY mesh-cni-ebpf-common mesh-cni-ebpf-common
-COPY mesh-cni-identity-gen-controller mesh-cni-identity-gen-controller
-COPY mesh-cni-identity-controller mesh-cni-identity-controller
-COPY mesh-cni-policy-controller mesh-cni-policy-controller
-COPY mesh-cni-k8s-utils mesh-cni-k8s-utils
-COPY mesh-cni-crds mesh-cni-crds
-COPY mesh-cni-crds-gen mesh-cni-crds-gen
-COPY mesh-cni-meshendpoint-gen-controller mesh-cni-meshendpoint-gen-controller
-COPY mesh-cni-service-bpf-controller mesh-cni-service-bpf-controller
-COPY mesh-cni-cluster-controller mesh-cni-cluster-controller
-COPY mesh-cni-meshidentityslice-gen-controller mesh-cni-meshidentityslice-gen-controller
-COPY mesh-cni-vxlan-controller mesh-cni-vxlan-controller
 
-RUN cargo build --release
+RUN case "${TARGETARCH}" in \
+  amd64)  echo x86_64-unknown-linux-musl > /tmp/rust_target ;; \
+  arm64)  echo aarch64-unknown-linux-musl > /tmp/rust_target ;; \
+  *)      echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+  esac && \
+  rustup target add "$(cat /tmp/rust_target)"
+
+
+RUN cargo chef cook --zigbuild --release --recipe-path recipe.json --target "$(cat /tmp/rust_target)"
+
+COPY . .
+
+RUN RUST_TARGET="$(cat /tmp/rust_target)" && \
+  cargo zigbuild --release --target "${RUST_TARGET}" \
+  --bin mesh-cni \
+  --bin mesh-cni-plugin \
+  --bin mesh && \
+  mkdir -p /out && \
+  cp "target/${RUST_TARGET}/release/mesh-cni" /out/ && \
+  cp "target/${RUST_TARGET}/release/mesh-cni-plugin" /out/ && \
+  cp "target/${RUST_TARGET}/release/mesh" /out/
 
 FROM public.ecr.aws/eks-distro/kubernetes-sigs/aws-iam-authenticator:v0.7.4-eks-1-34-latest AS aws-iam
 
-FROM debian:trixie-slim
+FROM debian:trixie-slim AS runtime
 
 WORKDIR /app
 ENV PATH="$PATH:/app"
 
-# FIXME: 
-#
-RUN apt-get update; apt-get install nftables -y 
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  ca-certificates \
+  nftables && \
+  rm -rf /var/lib/apt/lists/* && \
+  update-ca-certificates
 
-COPY --from=builder /app/target/release/mesh-cni /app/target/release/mesh-cni-plugin /app/target/release/mesh /app/
+COPY --from=builder /out/mesh-cni /out/mesh-cni-plugin /out/mesh /app/
 COPY --from=aws-iam /aws-iam-authenticator /app/
 
-ENTRYPOINT [ "/app/mesh-cni" ]
+ENTRYPOINT ["/app/mesh-cni"]
