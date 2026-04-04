@@ -1744,6 +1744,7 @@ dependencies = [
  "mesh-cni-identity-gen-controller",
  "mesh-cni-k8s-utils",
  "mesh-cni-meshendpoint-gen-controller",
+ "mesh-cni-netlink",
  "mesh-cni-plugin",
  "mesh-cni-policy-controller",
  "mesh-cni-service-bpf-controller",
@@ -1967,6 +1968,19 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "mesh-cni-netlink"
+version = "0.1.0"
+dependencies = [
+ "ipnetwork",
+ "libc",
+ "regex",
+ "rtnetlink",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

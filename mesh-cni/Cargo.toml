@@ -18,6 +18,7 @@ mesh-cni-meshendpoint-gen-controller = { path = "../mesh-cni-meshendpoint-gen-co
 mesh-cni-service-bpf-controller = { path = "../mesh-cni-service-bpf-controller" }
 mesh-cni-crds = { path = "../mesh-cni-crds" }
 mesh-cni-vxlan-controller = { path = "../mesh-cni-vxlan-controller" }
+mesh-cni-netlink = { path = "../mesh-cni-netlink"}
 
 ahash = { workspace = true }
 anyhow = { workspace = true }

@@ -1,0 +1,19 @@
+[package]
+name = "mesh-cni-netlink"
+version = "0.1.0"
+edition.workspace = true
+
+license.workspace = true
+
+[dependencies]
+ipnetwork = { workspace = true }
+libc = { workspace = true }
+regex = { workspace = true }
+rtnetlink = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+
+[lib]
+name = "mesh_cni_netlink"
+path = "src/lib.rs"
