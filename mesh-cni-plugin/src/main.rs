@@ -44,7 +44,7 @@ fn setup_logging() -> WorkerGuard {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "mesh_cni=info".into()),
+                .unwrap_or_else(|_| "mesh_cni_plugin=info".into()),
         )
         .with(tracing_subscriber::fmt::layer().with_writer(nonblocking))
         .init();
