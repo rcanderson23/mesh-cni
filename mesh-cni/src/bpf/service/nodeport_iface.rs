@@ -15,9 +15,8 @@ use aya::{
         tc,
     },
 };
+use mesh_cni_netlink::Netlink;
 use regex::Regex;
-use rtnetlink::{Handle, packet_route::address::AddressAttribute};
-use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -52,19 +51,18 @@ pub async fn start_nodeport_iface_reconciler(
         "starting nodeport interface reconciler"
     );
 
-    let (conn, handle, _) = rtnetlink::new_connection()?;
-    tokio::spawn(conn);
+    let nl = Netlink::try_new()?;
 
-    reconcile(&iface_regex, &handle).await?;
+    reconcile(&iface_regex, &nl).await?;
 
     let mut interval = tokio::time::interval(RECONCILE_INTERVAL);
-    let handle = handle.clone();
+    let nl = nl.clone();
 
     tokio::spawn(async move {
         interval.tick().await;
         // TODO: investigate if this can event driven using rtnetlink
         loop {
-            if let Err(err) = reconcile(&iface_regex, &handle).await {
+            if let Err(err) = reconcile(&iface_regex, &nl).await {
                 warn!(%err, "nodeport interface reconciliation failed");
             }
             tokio::select! {
@@ -80,9 +78,9 @@ pub async fn start_nodeport_iface_reconciler(
     Ok(())
 }
 
-async fn reconcile(iface_regex: &Regex, handle: &Handle) -> Result<()> {
+async fn reconcile(iface_regex: &Regex, nl: &Netlink) -> Result<()> {
     let desired_ifaces = get_matching_ifaces(iface_regex)?;
-    reconcile_local_addrs_v4(&desired_ifaces, handle).await?;
+    reconcile_local_addrs_v4(&desired_ifaces, nl).await?;
     let current_links = get_pinned_iface_links()?;
 
     for iface in &desired_ifaces {
@@ -117,11 +115,8 @@ async fn reconcile(iface_regex: &Regex, handle: &Handle) -> Result<()> {
     Ok(())
 }
 
-async fn reconcile_local_addrs_v4(
-    desired_ifaces: &BTreeSet<String>,
-    handle: &Handle,
-) -> Result<()> {
-    let desired_addrs = local_addrs_v4_for_ifaces(desired_ifaces, handle).await?;
+async fn reconcile_local_addrs_v4(desired_ifaces: &BTreeSet<String>, nl: &Netlink) -> Result<()> {
+    let desired_addrs = local_addrs_v4_for_ifaces(desired_ifaces, nl).await?;
     let mut local_addrs_map = load_nodeport_local_addrs_map()?;
     let current_addrs = local_addrs_v4_from_map(&local_addrs_map)?;
 
@@ -153,31 +148,20 @@ fn local_addrs_v4_from_map(map: &AyaHashMap<MapData, u32, u8>) -> Result<BTreeSe
 
 async fn local_addrs_v4_for_ifaces(
     desired_ifaces: &BTreeSet<String>,
-    handle: &Handle,
+    nl: &Netlink,
 ) -> Result<BTreeSet<u32>> {
     let mut addrs = BTreeSet::new();
     for iface in desired_ifaces {
-        let mut links = handle
-            .clone()
-            .link()
-            .get()
-            .match_name(iface.clone())
-            .execute();
-        let Some(link) = links.try_next().await? else {
+        let Ok(ifindex) = nl.get_link_index_by_name(iface).await else {
             warn!(%iface, "failed to find interface while reconciling nodeport local addrs");
             continue;
         };
-        let mut addresses = handle
-            .clone()
-            .address()
-            .get()
-            .set_link_index_filter(link.header.index)
-            .execute();
-        while let Some(msg) = addresses.try_next().await? {
-            for attr in msg.attributes {
-                if let AddressAttribute::Local(IpAddr::V4(ip)) = attr {
-                    addrs.insert(u32::from(ip));
-                }
+
+        let iface_addrs = nl.get_addrs_from_iface(ifindex).await?;
+        for addr in iface_addrs {
+            // TODO: support ipv6
+            if let IpAddr::V4(ipv4) = addr {
+                addrs.insert(u32::from(ipv4));
             }
         }
     }

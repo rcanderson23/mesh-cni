@@ -17,7 +17,7 @@ const INGRESS_LINK_SUFFIX: &str = "_ingress";
 pub(crate) async fn ensure_vxlan_iface(nl: &Netlink, settings: &VxlanSettings) -> Result<u32> {
     let iface_regex = Regex::new(&settings.iface_regex)?;
     let dev_name = nl.find_first_iface_match(&iface_regex).await?;
-    let dev = nl.link_index_by_name(&dev_name).await?;
+    let dev = nl.get_link_index_by_name(&dev_name).await?;
     let ifindex = nl
         .ensure_vxlan_iface(MESH_VXLAN_NAME, MESH_VXLAN_VNI, MESH_VXLAN_PORT, dev)
         .await?;

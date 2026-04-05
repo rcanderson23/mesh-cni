@@ -1757,7 +1757,6 @@ dependencies = [
  "opentelemetry_sdk",
  "prometheus-client",
  "regex",
- "rtnetlink",
  "rustables",
  "schemars",
  "serde",

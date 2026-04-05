@@ -1,15 +1,18 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::num::NonZero;
+use std::os::fd::RawFd;
 
 use ipnetwork::IpNetwork;
 use regex::Regex;
-use rtnetlink::packet_route::route::RouteMetric;
+use rtnetlink::packet_route::address::{AddressAttribute, AddressMessage};
+use rtnetlink::packet_route::route::{RouteHeader, RouteMetric, RouteScope};
 use rtnetlink::{Handle, packet_route::link::LinkAttribute};
-use rtnetlink::{LinkDummy, LinkVxlan, RouteMessageBuilder};
+use rtnetlink::{LinkDummy, LinkUnspec, LinkVeth, LinkVxlan, RouteMessageBuilder};
 use tokio_stream::StreamExt;
 
 use crate::{Error, Result};
 
+#[derive(Clone, Debug)]
 pub struct Netlink {
     handle: Handle,
 }
@@ -21,7 +24,7 @@ impl Netlink {
         Ok(Self { handle })
     }
 
-    pub async fn link_index_by_name(&self, iface: &str) -> Result<u32> {
+    pub async fn get_link_index_by_name(&self, iface: &str) -> Result<u32> {
         let link = self
             .handle
             .link()
@@ -100,7 +103,7 @@ impl Netlink {
             .execute()
             .await?;
 
-        self.link_index_by_name(iface).await
+        self.get_link_index_by_name(iface).await
     }
 
     /// Ensures routes to a given ifindex with a specified MTU
@@ -164,6 +167,182 @@ impl Netlink {
 
         self.handle.link().add(msg).execute().await?;
 
-        self.link_index_by_name(name).await
+        self.get_link_index_by_name(name).await
     }
+
+    pub async fn get_iface_addrs(&self, iface: &str) -> Result<Vec<IpAddr>> {
+        let link = self
+            .handle
+            .link()
+            .get()
+            .match_name(iface.to_string())
+            .execute()
+            .try_next()
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("interface {iface}")))?;
+
+        let mut addrs = self
+            .handle
+            .address()
+            .get()
+            .set_link_index_filter(link.header.index)
+            .execute();
+
+        let mut ips = Vec::new();
+        while let Some(msg) = addrs.try_next().await? {
+            for attr in msg.attributes {
+                if let AddressAttribute::Address(ip) = attr {
+                    ips.push(ip);
+                }
+            }
+        }
+        Ok(ips)
+    }
+
+    /// Create veth pair returning the ifindex for the primary and peer
+    pub async fn create_veth_pair(&self, name: &str, peer_name: &str) -> Result<(u32, u32)> {
+        self.handle
+            .link()
+            .add(LinkVeth::new(name, peer_name).up().build())
+            .execute()
+            .await?;
+
+        let iface = self.get_link_index_by_name(name).await?;
+
+        let peer = self.get_link_index_by_name(peer_name).await?;
+
+        Ok((iface, peer))
+    }
+
+    pub async fn set_link_up(&self, index: u32) -> Result<()> {
+        self.handle
+            .link()
+            .set(LinkUnspec::new_with_index(index).up().build())
+            .execute()
+            .await?;
+        Ok(())
+    }
+
+    /// Sets an IpAddr for a given ifindex
+    pub async fn set_addr(&self, ifindex: u32, addr: IpAddr) -> Result<()> {
+        if let Some(addr_msg) = self
+            .handle
+            .address()
+            .get()
+            .set_link_index_filter(ifindex)
+            .execute()
+            .try_next()
+            .await?
+            && addr_matches(&addr_msg, addr)
+        {
+            return Ok(());
+        }
+        self.handle
+            .address()
+            .add(ifindex, addr, 32)
+            .execute()
+            .await?;
+        Ok(())
+    }
+
+    /// Adds linked scoped route for a given network
+    pub async fn add_link_scope_route(
+        &self,
+        idx: u32,
+        addr: IpAddr,
+        prefix_length: u8,
+    ) -> Result<()> {
+        let route = match addr {
+            IpAddr::V4(ipv4_addr) => RouteMessageBuilder::<Ipv4Addr>::new()
+                .destination_prefix(ipv4_addr, prefix_length)
+                .output_interface(idx)
+                .scope(RouteScope::Link)
+                .build(),
+            IpAddr::V6(ipv6_addr) => RouteMessageBuilder::<Ipv6Addr>::new()
+                .destination_prefix(ipv6_addr, prefix_length)
+                .output_interface(idx)
+                .scope(RouteScope::Link)
+                .build(),
+        };
+        self.handle.route().add(route).execute().await?;
+        Ok(())
+    }
+
+    /// Adds default route for given ifindex
+    pub async fn add_default_route(&self, ifindex: u32, addr: IpAddr) -> Result<()> {
+        let route = match addr {
+            IpAddr::V4(ipv4_addr) => RouteMessageBuilder::<Ipv4Addr>::new()
+                .output_interface(ifindex)
+                .gateway(ipv4_addr)
+                .build(),
+            IpAddr::V6(ipv6_addr) => RouteMessageBuilder::<Ipv6Addr>::new()
+                .output_interface(ifindex)
+                .gateway(ipv6_addr)
+                .build(),
+        };
+        self.handle.route().add(route).execute().await?;
+        Ok(())
+    }
+
+    /// Adds a route to the main route table
+    pub async fn add_host_route(&self, idx: u32, addr: IpAddr) -> Result<()> {
+        let route = match addr {
+            IpAddr::V4(ipv4_addr) => RouteMessageBuilder::<Ipv4Addr>::new()
+                .destination_prefix(ipv4_addr, 32)
+                .output_interface(idx)
+                .table_id(RouteHeader::RT_TABLE_MAIN.into())
+                .scope(RouteScope::Link)
+                .build(),
+            IpAddr::V6(ipv6_addr) => RouteMessageBuilder::<Ipv6Addr>::new()
+                .destination_prefix(ipv6_addr, 128)
+                .output_interface(idx)
+                .table_id(RouteHeader::RT_TABLE_MAIN.into())
+                .scope(RouteScope::Link)
+                .build(),
+        };
+        self.handle.route().add(route).execute().await?;
+        Ok(())
+    }
+
+    /// Sets a given ifindex to a specified network namespace
+    pub async fn set_iface_to_netns(&self, index: u32, host_ns_fd: RawFd) -> Result<()> {
+        self.handle
+            .link()
+            .set(
+                LinkUnspec::new_with_index(index)
+                    .setns_by_fd(host_ns_fd)
+                    .build(),
+            )
+            .execute()
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_addrs_from_iface(&self, ifindex: u32) -> Result<Vec<IpAddr>> {
+        let mut addrs = Vec::new();
+
+        let mut iface_addrs = self
+            .handle
+            .address()
+            .get()
+            .set_link_index_filter(ifindex)
+            .execute();
+
+        while let Some(addr) = iface_addrs.try_next().await? {
+            for attr in addr.attributes {
+                if let AddressAttribute::Local(ip) = attr {
+                    addrs.push(ip);
+                }
+            }
+        }
+
+        Ok(addrs)
+    }
+}
+
+fn addr_matches(addr_message: &AddressMessage, addr: IpAddr) -> bool {
+    addr_message.attributes.iter().any(|attr| match attr {
+        AddressAttribute::Address(ip_addr) => *ip_addr == addr,
+        _ => false,
+    })
 }

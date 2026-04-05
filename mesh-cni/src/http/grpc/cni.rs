@@ -1,11 +1,11 @@
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    os::fd::{AsRawFd, RawFd},
+    net::{IpAddr, Ipv4Addr},
+    os::fd::AsRawFd,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use aya::programs::{
     SchedClassifier, TcAttachType,
     links::{FdLink, LinkError, PinnedLink},
@@ -20,18 +20,10 @@ use mesh_cni_api::cni::v1::{
 use mesh_cni_crds::v1alpha1::identity::Identity;
 use mesh_cni_ebpf_common::route::RouteV4;
 use mesh_cni_k8s_utils::sanitize_pod_labels;
+use mesh_cni_netlink::Netlink;
 use mesh_cni_policy_controller::{Context, PolicyDataplane, reconcile_identity};
-use rtnetlink::{
-    Handle, LinkUnspec, LinkVeth, RouteMessageBuilder,
-    packet_route::{
-        address::{AddressAttribute, AddressMessage},
-        link::LinkAttribute,
-        route::{RouteHeader, RouteScope},
-    },
-};
 use sha2::{Digest, Sha256};
 use tokio::time::{Duration, sleep};
-use tokio_stream::StreamExt;
 use tonic::{Code, Request, Response, Status};
 use tracing::{error, info, warn};
 
@@ -204,9 +196,8 @@ async fn delete_pod<I: Ipam, R: Routes>(
     let host_netns = netns_rs::get_from_current_thread()?;
     let _nsguard = NetnsRestore(host_netns);
     pod_ns.enter()?;
-    let (conn, handle, _) = rtnetlink::new_connection()?;
-    tokio::task::spawn(conn);
-    let (_, addrs) = get_iface_ips_ifindex(&handle, &request.iface).await?;
+    let nl = Netlink::try_new()?;
+    let addrs = nl.get_iface_addrs(&request.iface).await?;
 
     // TODO: support ipv6
     // TODO: Ipam and routes is susceptiple to exhaustion if deletes happen where the network namespace is
@@ -288,55 +279,41 @@ async fn add_vxlan<I: Ipam>(
     let pod_ns = netns_rs::get_from_path(pod_netns_path)?;
     pod_ns.enter()?;
 
-    let (conn, handle, _) = rtnetlink::new_connection()?;
-    tokio::task::spawn(conn);
     let addr = ipam.allocate_v4_ip()?;
     let addr_prefix = ipam.network_length_v4();
     let first = ipam.first_v4()?;
 
-    info!("setting lo up");
-    set_lo_up(&handle).await?;
-
     let host_veth_name = host_veth_name(&request.container_id);
 
-    info!("creating veth pair");
-    let (iface_idx, veth_idx) =
-        create_veth_pair(&handle, request.iface.clone(), host_veth_name.clone()).await?;
+    let nl = Netlink::try_new()?;
+    let (ifindex, veth_idx) = nl.create_veth_pair(&request.iface, &host_veth_name).await?;
 
     attach_pod_bpf(&request.iface, &request.container_id)?;
 
-    info!(%iface_idx, "bringing pod interface up");
-    set_link_up(&handle, iface_idx).await?;
+    nl.set_link_up(ifindex).await?;
 
-    info!(%veth_idx, "bringing peer interface up before move");
-    set_link_up(&handle, veth_idx).await?;
+    nl.set_link_up(veth_idx).await?;
 
-    set_addr(&handle, iface_idx, IpAddr::V4(addr)).await?;
+    nl.set_addr(ifindex, IpAddr::V4(addr)).await?;
 
-    add_link_scope_route(&handle, iface_idx, IpAddr::V4(first)).await?;
+    nl.add_link_scope_route(ifindex, IpAddr::V4(first), 32)
+        .await?;
 
-    add_default_route(&handle, iface_idx, IpAddr::V4(first)).await?;
+    nl.add_default_route(ifindex, IpAddr::V4(first)).await?;
 
-    set_iface_to_host_ns(&handle, veth_idx, host_fd).await?;
+    nl.set_iface_to_netns(veth_idx, host_fd).await?;
 
     drop(nsguard);
 
-    let (conn, handle, _) = rtnetlink::new_connection()?;
-    tokio::task::spawn(conn);
-    let host_veth = handle
-        .link()
-        .get()
-        .match_name(host_veth_name.clone())
-        .execute()
-        .try_next()
-        .await?
-        .ok_or_else(|| anyhow!("failed to get host veth {host_veth_name}"))?;
+    let nl = Netlink::try_new()?;
+    let host_veth_ifindex = nl.get_link_index_by_name(&host_veth_name).await?;
 
-    set_addr(&handle, host_veth.header.index, IpAddr::V4(first)).await?;
+    nl.set_addr(host_veth_ifindex, IpAddr::V4(first)).await?;
 
-    set_link_up(&handle, host_veth.header.index).await?;
+    nl.set_link_up(host_veth_ifindex).await?;
 
-    add_host_route(&handle, host_veth.header.index, IpAddr::V4(addr)).await?;
+    nl.add_host_route(host_veth_ifindex, IpAddr::V4(addr))
+        .await?;
 
     attach_and_pin_links(
         &host_veth_name,
@@ -381,10 +358,9 @@ async fn add_chained<R: Routes>(
     pod_ns.enter()?;
 
     attach_pod_bpf(&request.iface, &request.container_id)?;
-    let (conn, handle, _) = rtnetlink::new_connection()?;
-    tokio::task::spawn(conn);
-    let (_, addrs) = get_iface_ips_ifindex(&handle, &request.iface).await?;
-    let link_ifindex = get_link_ifindex(&handle, &request.iface).await?;
+    let nl = Netlink::try_new()?;
+    let addrs = nl.get_iface_addrs(&request.iface).await?;
+    let link_ifindex = nl.get_link_index_by_name(&request.iface).await?;
     // TODO: support ipv6
     for addr in addrs {
         match addr {
@@ -424,201 +400,6 @@ fn attach_pod_bpf(pod_iface: &str, container_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn get_iface_ips_ifindex(handle: &Handle, iface: &str) -> Result<(u32, Vec<IpAddr>)> {
-    let Some(link) = handle
-        .link()
-        .get()
-        .match_name(iface.to_string())
-        .execute()
-        .try_next()
-        .await?
-    else {
-        bail!("missing iface {iface}");
-    };
-
-    let ifindex = link.header.index;
-
-    let mut addrs = handle
-        .address()
-        .get()
-        .set_link_index_filter(ifindex)
-        .execute();
-
-    let mut out = Vec::new();
-    while let Some(msg) = addrs.try_next().await? {
-        for attr in msg.attributes {
-            if let AddressAttribute::Address(ip) = attr {
-                out.push(ip);
-            }
-        }
-    }
-    Ok((ifindex, out))
-}
-
-async fn get_link_ifindex(handle: &Handle, iface: &str) -> Result<u32> {
-    let Some(link) = handle
-        .link()
-        .get()
-        .match_name(iface.to_string())
-        .execute()
-        .try_next()
-        .await?
-    else {
-        bail!("missing iface {iface}");
-    };
-
-    let mut ifindex = 0;
-    for attr in link.attributes {
-        if let LinkAttribute::Link(l) = attr {
-            ifindex = l;
-        }
-    }
-
-    Ok(ifindex)
-}
-
-async fn add_link_scope_route(handle: &Handle, idx: u32, addr: IpAddr) -> Result<()> {
-    let route = match addr {
-        IpAddr::V4(ipv4_addr) => RouteMessageBuilder::<Ipv4Addr>::new()
-            .destination_prefix(ipv4_addr, 32)
-            .output_interface(idx)
-            .scope(RouteScope::Link)
-            .build(),
-        IpAddr::V6(ipv6_addr) => RouteMessageBuilder::<Ipv6Addr>::new()
-            .destination_prefix(ipv6_addr, 128)
-            .output_interface(idx)
-            .scope(RouteScope::Link)
-            .build(),
-    };
-    handle.route().add(route).execute().await?;
-    Ok(())
-}
-
-async fn add_default_route(handle: &Handle, idx: u32, addr: IpAddr) -> Result<()> {
-    let route = match addr {
-        IpAddr::V4(ipv4_addr) => RouteMessageBuilder::<Ipv4Addr>::new()
-            .output_interface(idx)
-            .gateway(ipv4_addr)
-            .build(),
-        IpAddr::V6(ipv6_addr) => RouteMessageBuilder::<Ipv6Addr>::new()
-            .output_interface(idx)
-            .gateway(ipv6_addr)
-            .build(),
-    };
-    handle.route().add(route).execute().await?;
-    Ok(())
-}
-
-async fn add_host_route(handle: &Handle, idx: u32, addr: IpAddr) -> Result<()> {
-    let route = match addr {
-        IpAddr::V4(ipv4_addr) => RouteMessageBuilder::<Ipv4Addr>::new()
-            .destination_prefix(ipv4_addr, 32)
-            .output_interface(idx)
-            .table_id(RouteHeader::RT_TABLE_MAIN.into())
-            .scope(RouteScope::Link)
-            .build(),
-        IpAddr::V6(ipv6_addr) => RouteMessageBuilder::<Ipv6Addr>::new()
-            .destination_prefix(ipv6_addr, 128)
-            .output_interface(idx)
-            .table_id(RouteHeader::RT_TABLE_MAIN.into())
-            .scope(RouteScope::Link)
-            .build(),
-    };
-    handle.route().add(route).execute().await?;
-    Ok(())
-}
-
-async fn create_veth_pair(handle: &Handle, name: String, peer_name: String) -> Result<(u32, u32)> {
-    handle
-        .link()
-        .add(LinkVeth::new(&name, &peer_name).up().build())
-        .execute()
-        .await?;
-
-    let pod = handle
-        .link()
-        .get()
-        .match_name(name)
-        .execute()
-        .try_next()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("failed to get pod iface"))?;
-
-    let peer = handle
-        .link()
-        .get()
-        .match_name(peer_name)
-        .execute()
-        .try_next()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("failed to get veth peer"))?;
-
-    Ok((pod.header.index, peer.header.index))
-}
-
-async fn set_iface_to_host_ns(handle: &Handle, index: u32, host_ns_fd: RawFd) -> Result<()> {
-    handle
-        .link()
-        .set(
-            LinkUnspec::new_with_index(index)
-                .setns_by_fd(host_ns_fd)
-                .build(),
-        )
-        .execute()
-        .await?;
-    Ok(())
-}
-
-async fn set_link_up(handle: &Handle, index: u32) -> Result<()> {
-    handle
-        .link()
-        .set(LinkUnspec::new_with_index(index).up().build())
-        .execute()
-        .await?;
-    Ok(())
-}
-
-async fn set_addr(handle: &Handle, idx: u32, addr: IpAddr) -> Result<()> {
-    if let Some(addr_msg) = handle
-        .address()
-        .get()
-        .set_link_index_filter(idx)
-        .execute()
-        .try_next()
-        .await?
-        && addr_matches(&addr_msg, addr)
-    {
-        return Ok(());
-    }
-    handle.address().add(idx, addr, 32).execute().await?;
-    Ok(())
-}
-
-fn addr_matches(addr_message: &AddressMessage, addr: IpAddr) -> bool {
-    addr_message.attributes.iter().any(|attr| match attr {
-        AddressAttribute::Address(ip_addr) => *ip_addr == addr,
-        _ => false,
-    })
-}
-
-async fn set_lo_up(handle: &Handle) -> Result<()> {
-    let lo = handle
-        .link()
-        .get()
-        .match_name("lo".to_string())
-        .execute()
-        .try_next()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("failed to get iface lo"))?;
-
-    handle
-        .link()
-        .set(LinkUnspec::new_with_index(lo.header.index).up().build())
-        .execute()
-        .await?;
-
-    Ok(())
-}
 // linux iface names are resetricted to 16 characters
 fn host_veth_name(container_id: &str) -> String {
     let digest = Sha256::digest(container_id.as_bytes());
