@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub const BPF_MESH_FS_DIR: &str = "/sys/fs/bpf/mesh";
 pub const BPF_MESH_MAPS_DIR: &str = "/sys/fs/bpf/mesh/maps";
 pub const BPF_MESH_PROG_DIR: &str = "/sys/fs/bpf/mesh/programs";
@@ -18,10 +20,10 @@ impl BpfNamePath {
         }
     }
 
-    pub fn path(&self) -> String {
+    pub fn path(&self) -> PathBuf {
         match self {
-            BpfNamePath::Map(name) => format!("{BPF_MESH_MAPS_DIR}/{name}"),
-            BpfNamePath::Program(name) => format!("{BPF_MESH_PROG_DIR}/{name}"),
+            BpfNamePath::Map(name) => PathBuf::from(BPF_MESH_MAPS_DIR).join(name),
+            BpfNamePath::Program(name) => PathBuf::from(BPF_MESH_PROG_DIR).join(name),
         }
     }
 }
@@ -51,6 +53,7 @@ pub const BPF_MAP_NODEPORT_LOCAL_ADDRS_V4: BpfNamePath =
 pub const BPF_MAP_NODEPORT_SERVICES_V4: BpfNamePath = BpfNamePath::Map("nodeport_services_v4");
 pub const BPF_MAP_NODEPORT_REV_NAT_V4: BpfNamePath = BpfNamePath::Map("nodeport_rev_nat_v4");
 pub const BPF_MAP_NODEPORT_CONNTRACK_V4: BpfNamePath = BpfNamePath::Map("nodeport_conntrack_v4");
+pub const BPF_MAP_FRAGMENT_V4: BpfNamePath = BpfNamePath::Map("fragment_v4");
 pub const BPF_MAP_POLICY_INDEX: BpfNamePath = BpfNamePath::Map("policy_index");
 pub const BPF_MAP_POLICY_RULESET: BpfNamePath = BpfNamePath::Map("policy_ruleset");
 pub const BPF_MAP_POLICY_CIDR_V4: BpfNamePath = BpfNamePath::Map("policy_cidr_v4");

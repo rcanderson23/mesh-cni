@@ -1,23 +1,24 @@
 use std::{
     fs::{self, File},
-    io,
+    path::{Path, PathBuf},
 };
 
-use anyhow::{anyhow, bail};
+use anyhow::{Context, anyhow};
 use aya::{
-    Ebpf,
-    programs::{CgroupAttachMode, CgroupSockAddr, SchedClassifier, links::FdLink},
+    Ebpf, EbpfLoader,
+    programs::{
+        CgroupAttachMode, CgroupSockAddr, SchedClassifier,
+        links::{FdLink, LinkError, PinnedLink},
+    },
 };
 use tracing::{error, info, warn};
 
 use crate::{
     Result,
     bpf::{
-        BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_FS_DIR, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR,
-        BPF_MESH_PROG_DIR, BPF_PROGRAM_CGROUP_CONNECT_V4, BPF_PROGRAM_EGRESS_TC,
-        BPF_PROGRAM_INGRESS_TC, BPF_PROGRAM_NODEPORT_EGRESS_TC, BPF_PROGRAM_NODEPORT_INGRESS_TC,
-        BPF_PROGRAM_VXLAN_NODE_INGRESS_TC, BPF_PROGRAM_VXLAN_VETH_EGRESS_TC, BpfNamePath,
-        POLICY_MAPS_LIST, PROG_LIST, SERVICE_MAPS_LIST, VXLAN_PROG_LIST,
+        BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR, BPF_MESH_PROG_DIR,
+        BPF_PROGRAM_CGROUP_CONNECT_V4, BpfNamePath, POLICY_MAPS_LIST, SERVICE_MAPS_LIST,
+        TC_PROG_LIST, TC_VXLAN_PROG_LIST,
     },
     config::CniMode,
 };
@@ -25,42 +26,22 @@ use crate::{
 const CGROUP_SYS_DIR: &str = "/sys/fs/cgroup";
 
 pub fn init_bpf(mode: &CniMode) -> Result<()> {
-    if pins_exist(mode)? {
-        start_ebpf_logger(mode)?;
-
-        return Ok(());
-    }
-    reset_pins()?;
-
-    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("OUT_DIR"),
-        "/mesh-ebpf"
-    )))?;
+    ensure_pin_dirs()?;
+    let mut ebpf = load_ebpf()?;
 
     info!("ensuring cgroupsockaddr program loaded and pinned");
     attach_cgroup_connect_bpf_program(&mut ebpf)?;
 
-    info!("ensuring ingress program loaded and pinned");
-    ensure_tc_program(&mut ebpf, BPF_PROGRAM_INGRESS_TC)?;
-
-    info!("ensuring egress program loaded and pinned");
-    ensure_tc_program(&mut ebpf, BPF_PROGRAM_EGRESS_TC)?;
-
-    info!("ensuring nodeport ingress program loaded and pinned");
-    ensure_tc_program(&mut ebpf, BPF_PROGRAM_NODEPORT_INGRESS_TC)?;
-
-    info!("ensuring nodeport egress program loaded and pinned");
-    ensure_tc_program(&mut ebpf, BPF_PROGRAM_NODEPORT_EGRESS_TC)?;
-
-    pin_maps(&mut ebpf, &SERVICE_MAPS_LIST)?;
-    pin_maps(&mut ebpf, &POLICY_MAPS_LIST)?;
+    for prog in TC_PROG_LIST {
+        info!("ensuring {} program loaded and pinned", prog.name());
+        ensure_tc_program(&mut ebpf, prog)?;
+    }
 
     if matches!(mode, CniMode::Vxlan) {
-        info!("ensuring vxlan veth egress program loaded and pinned");
-        ensure_tc_program(&mut ebpf, BPF_PROGRAM_VXLAN_VETH_EGRESS_TC)?;
-
-        info!("ensuring vxlan node ingress program loaded and pinned");
-        ensure_tc_program(&mut ebpf, BPF_PROGRAM_VXLAN_NODE_INGRESS_TC)?;
+        for prog in TC_VXLAN_PROG_LIST {
+            info!("ensuring {} program loaded and pinned", prog.name());
+            ensure_tc_program(&mut ebpf, prog)?;
+        }
     }
 
     start_ebpf_logger(mode)?;
@@ -68,17 +49,17 @@ pub fn init_bpf(mode: &CniMode) -> Result<()> {
     Ok(())
 }
 
-fn pin_maps(ebpf: &mut Ebpf, map_list: &[BpfNamePath]) -> Result<()> {
-    for map in map_list {
-        if fs::exists(map.path())? {
-            bail!("pinned object {} already exists", map.path());
-        }
-        let Some(m) = ebpf.map_mut(map.name()) else {
-            bail!("map {} not found", map.name());
-        };
-        m.pin(map.path())?;
+fn load_ebpf() -> Result<Ebpf> {
+    let mut loader = EbpfLoader::new();
+    for map in SERVICE_MAPS_LIST.iter().chain(POLICY_MAPS_LIST.iter()) {
+        loader.map_pin_path(map.name(), map.path());
     }
-    Ok(())
+
+    let ebpf = loader.load(aya::include_bytes_aligned!(concat!(
+        env!("OUT_DIR"),
+        "/mesh-ebpf"
+    )))?;
+    Ok(ebpf)
 }
 
 fn ensure_pin_dirs() -> Result<()> {
@@ -94,46 +75,7 @@ fn ensure_pin_dirs() -> Result<()> {
     Ok(())
 }
 
-fn pins_exist(mode: &CniMode) -> Result<bool> {
-    for map in SERVICE_MAPS_LIST.iter().chain(POLICY_MAPS_LIST.iter()) {
-        if !fs::exists(map.path())? {
-            return Ok(false);
-        }
-    }
-    for prog in PROG_LIST {
-        if !fs::exists(prog.path())? {
-            return Ok(false);
-        }
-    }
-    if matches!(mode, CniMode::Vxlan) {
-        for prog in VXLAN_PROG_LIST {
-            if !fs::exists(prog.path())? {
-                return Ok(false);
-            }
-        }
-    }
-
-    Ok(true)
-}
-
-fn reset_pins() -> Result<()> {
-    warn!("resetting pins, this is expected on first startup");
-    if let Err(e) = fs::remove_dir_all(BPF_MESH_FS_DIR)
-        && !matches!(e.kind(), io::ErrorKind::NotFound)
-    {
-        error!("failed to remove {}", BPF_MESH_FS_DIR);
-        return Err(e.into());
-    };
-
-    ensure_pin_dirs()?;
-
-    Ok(())
-}
-
 fn ensure_tc_program(ebpf: &mut Ebpf, prog_path_name: BpfNamePath) -> Result<()> {
-    if fs::exists(prog_path_name.path())? {
-        return Ok(());
-    }
     let prog: &mut SchedClassifier = ebpf
         .program_mut(prog_path_name.name())
         .ok_or_else(|| anyhow!("failed to get program {}", prog_path_name.name()))?
@@ -145,12 +87,52 @@ fn ensure_tc_program(ebpf: &mut Ebpf, prog_path_name: BpfNamePath) -> Result<()>
         return Err(e.into());
     };
 
-    if !fs::exists(prog_path_name.path())? {
-        info!("pinning program to bpffs");
-        prog.pin(prog_path_name.path())?;
+    let pin_path = prog_path_name.path();
+    let temp_path = temp_pin_path(&pin_path)?;
+    info!(path = %pin_path.display(), "pinning latest tc program to bpffs");
+    let _ = fs::remove_file(&temp_path);
+    if let Err(e) = prog.pin(&temp_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(e.into());
+    }
+    if let Err(e) = fs::rename(&temp_path, &pin_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(e.into());
     }
 
     Ok(())
+}
+
+fn temp_pin_path(final_path: &Path) -> Result<PathBuf> {
+    let parent = final_path
+        .parent()
+        .ok_or_else(|| anyhow!("pin path {} has no parent directory", final_path.display()))?;
+    let file_name = final_path
+        .file_name()
+        .ok_or_else(|| anyhow!("pin path {} has no file name", final_path.display()))?
+        .to_string_lossy();
+
+    Ok(parent.join(format!("{file_name}_tmp")))
+}
+
+fn replace_pinned_link(path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    if !path.try_exists()? {
+        return Ok(());
+    }
+
+    match PinnedLink::from_pin(path) {
+        Ok(link) => {
+            let _link = link.unpin()?;
+            Ok(())
+        }
+        Err(LinkError::SyscallError(err))
+            if err.io_error.kind() == std::io::ErrorKind::NotFound =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 fn start_ebpf_logger(mode: &CniMode) -> Result<()> {
@@ -161,31 +143,18 @@ fn start_ebpf_logger(mode: &CniMode) -> Result<()> {
     let info = cgroup_prog.info()?;
     start_ebpf_logger_from_prog_id(info.id())?;
 
-    let ingress = SchedClassifier::from_pin(BPF_PROGRAM_INGRESS_TC.path())?;
-    let info = ingress.info()?;
-    start_ebpf_logger_from_prog_id(info.id())?;
-
-    let egress = SchedClassifier::from_pin(BPF_PROGRAM_EGRESS_TC.path())?;
-    let info = egress.info()?;
-    start_ebpf_logger_from_prog_id(info.id())?;
-
-    let nodeport_ingress = SchedClassifier::from_pin(BPF_PROGRAM_NODEPORT_INGRESS_TC.path())?;
-    let info = nodeport_ingress.info()?;
-    start_ebpf_logger_from_prog_id(info.id())?;
-
-    let nodeport_egress = SchedClassifier::from_pin(BPF_PROGRAM_NODEPORT_EGRESS_TC.path())?;
-    let info = nodeport_egress.info()?;
-    start_ebpf_logger_from_prog_id(info.id())?;
+    for prog in TC_PROG_LIST {
+        let prog = SchedClassifier::from_pin(prog.path())?;
+        let info = prog.info()?;
+        start_ebpf_logger_from_prog_id(info.id())?;
+    }
 
     if matches!(mode, CniMode::Vxlan) {
-        let vxlan_veth_egress = SchedClassifier::from_pin(BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.path())?;
-        let info = vxlan_veth_egress.info()?;
-        start_ebpf_logger_from_prog_id(info.id())?;
-
-        let vxlan_node_ingress =
-            SchedClassifier::from_pin(BPF_PROGRAM_VXLAN_NODE_INGRESS_TC.path())?;
-        let info = vxlan_node_ingress.info()?;
-        start_ebpf_logger_from_prog_id(info.id())?;
+        for prog in TC_VXLAN_PROG_LIST {
+            let prog = SchedClassifier::from_pin(prog.path())?;
+            let info = prog.info()?;
+            start_ebpf_logger_from_prog_id(info.id())?;
+        }
     }
 
     Ok(())
@@ -226,15 +195,41 @@ fn attach_cgroup_connect_bpf_program(ebpf: &mut Ebpf) -> Result<()> {
     {
         return Err(e.into());
     };
+    replace_pinned_link(BPF_LINK_CGROUP_CONNECT_V4_PATH)?;
+    attach_and_pin_cgroup_link(program)?;
+
+    let pin_path = BPF_PROGRAM_CGROUP_CONNECT_V4.path();
+    let temp_path = temp_pin_path(&pin_path)?;
+    let _ = fs::remove_file(&temp_path);
+    if let Err(e) = program.pin(&temp_path) {
+        let _ = fs::remove_file(&temp_path);
+        error!("failed to pin {}", &temp_path.display());
+        return Err(e.into());
+    }
+    if let Err(e) = fs::rename(&temp_path, &pin_path) {
+        let _ = fs::remove_file(&temp_path);
+        error!(
+            "failed to rename {} to {}",
+            &temp_path.display(),
+            &pin_path.display()
+        );
+        return Err(e.into());
+    }
+    Ok(())
+}
+
+fn attach_and_pin_cgroup_link(program: &mut CgroupSockAddr) -> Result<()> {
     let cgroup = File::open(CGROUP_SYS_DIR)?;
-    let link_id = program.attach(cgroup, CgroupAttachMode::Single)?;
-    program.pin(BPF_PROGRAM_CGROUP_CONNECT_V4.path())?;
+    let link_id = program
+        .attach(cgroup, CgroupAttachMode::Single)
+        .context("failed to attach cgroup")?;
 
     let link = program.take_link(link_id)?;
     let link: FdLink = link
         .try_into()
         .map_err(|e| anyhow!("failed to create fdlink from cgroup attachment link: {e}"))?;
-    link.pin(BPF_LINK_CGROUP_CONNECT_V4_PATH)?;
+    link.pin(BPF_LINK_CGROUP_CONNECT_V4_PATH)
+        .context("failed to pin")?;
 
     Ok(())
 }

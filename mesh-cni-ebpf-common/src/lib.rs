@@ -2,7 +2,6 @@
 
 pub mod conntrack;
 pub mod fragment;
-pub mod paths;
 pub mod policy;
 pub mod route;
 pub mod service;
