@@ -40,6 +40,8 @@ pub const BPF_PROGRAM_VXLAN_VETH_EGRESS_TC: BpfNamePath =
     BpfNamePath::Program("mesh_cni_vxlan_veth_egress");
 pub const BPF_PROGRAM_VXLAN_NODE_INGRESS_TC: BpfNamePath =
     BpfNamePath::Program("mesh_cni_vxlan_node_ingress");
+pub const BPF_PROGRAM_HOST_ROUTER_EGRESS_TC: BpfNamePath =
+    BpfNamePath::Program("mesh_cni_host_router_egress");
 
 pub const BPF_MAP_IDENTITY_V4: BpfNamePath = BpfNamePath::Map("identity_v4");
 pub const BPF_MAP_IDENTITY_V6: BpfNamePath = BpfNamePath::Map("identity_v6");

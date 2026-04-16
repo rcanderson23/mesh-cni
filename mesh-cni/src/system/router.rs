@@ -1,12 +1,10 @@
 use aya::programs::{SchedClassifier, TcAttachType, links::FdLink, tc};
 use ipnetwork::IpNetwork;
+use mesh_cni_ebpf_meta::BPF_PROGRAM_HOST_ROUTER_EGRESS_TC;
 use mesh_cni_netlink::Netlink;
 use tracing::info;
 
-use crate::{
-    Result,
-    bpf::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_VXLAN_VETH_EGRESS_TC},
-};
+use crate::{Result, bpf::BPF_MESH_LINKS_DIR};
 
 pub const MESH_ROUTER_NAME: &str = "mesh_router0";
 const ROUTER_INGRESS_LINK_PREFIX: &str = "mesh_cni_router_";
@@ -38,7 +36,7 @@ fn ensure_route_ebpf_attached(iface: &str) -> Result<()> {
 
     let _ = tc::qdisc_add_clsact(iface);
 
-    let mut prog = SchedClassifier::from_pin(BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.path())?;
+    let mut prog = SchedClassifier::from_pin(BPF_PROGRAM_HOST_ROUTER_EGRESS_TC.path())?;
     let link_id = prog.attach(iface, TcAttachType::Egress)?;
     let link = prog.take_link(link_id)?;
     let link: FdLink = link.try_into()?;
