@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::num::NonZero;
 use std::os::fd::RawFd;
@@ -61,20 +62,19 @@ impl Netlink {
         )))
     }
 
-    pub async fn find_first_iface_match(&self, iface_regex: &Regex) -> Result<String> {
+    pub async fn find_matching_ifaces(&self, iface_regex: &Regex) -> Result<Vec<String>> {
         let mut links = self.handle.link().get().execute();
+        let mut ifaces = Vec::new();
         while let Some(link) = links.try_next().await? {
             for attr in &link.attributes {
                 if let rtnetlink::packet_route::link::LinkAttribute::IfName(name) = attr
                     && iface_regex.is_match(name)
                 {
-                    return Ok(name.clone());
+                    ifaces.push(name.clone());
                 }
             }
         }
-        Err(Error::NotFound(format!(
-            "interface matching regex {iface_regex}"
-        )))
+        Ok(ifaces)
     }
 
     /// Returns the MTU of a given interface by name
@@ -204,22 +204,7 @@ impl Netlink {
             .await?
             .ok_or_else(|| Error::NotFound(format!("interface {iface}")))?;
 
-        let mut addrs = self
-            .handle
-            .address()
-            .get()
-            .set_link_index_filter(link.header.index)
-            .execute();
-
-        let mut ips = Vec::new();
-        while let Some(msg) = addrs.try_next().await? {
-            for attr in msg.attributes {
-                if let AddressAttribute::Address(ip) = attr {
-                    ips.push(ip);
-                }
-            }
-        }
-        Ok(ips)
+        self.get_addrs_from_ifindex(link.header.index).await
     }
 
     /// Create veth pair returning the ifindex for the primary and peer
@@ -360,8 +345,8 @@ impl Netlink {
         Ok(())
     }
 
-    pub async fn get_addrs_from_iface(&self, ifindex: u32) -> Result<Vec<IpAddr>> {
-        let mut addrs = Vec::new();
+    pub async fn get_addrs_from_ifindex(&self, ifindex: u32) -> Result<Vec<IpAddr>> {
+        let mut addrs = HashSet::new();
 
         let mut iface_addrs = self
             .handle
@@ -372,12 +357,37 @@ impl Netlink {
 
         while let Some(addr) = iface_addrs.try_next().await? {
             for attr in addr.attributes {
-                if let AddressAttribute::Local(ip) = attr {
-                    addrs.push(ip);
+                match attr {
+                    AddressAttribute::Address(ip_addr) => addrs.insert(ip_addr),
+                    AddressAttribute::Local(ip_addr) => addrs.insert(ip_addr),
+                    _ => continue,
+                };
+            }
+        }
+
+        let addrs = addrs.into_iter().collect();
+        Ok(addrs)
+    }
+
+    pub async fn get_local_addrs_from_ifindex(&self, ifindex: u32) -> Result<Vec<IpAddr>> {
+        let mut addrs = HashSet::new();
+
+        let mut iface_addrs = self
+            .handle
+            .address()
+            .get()
+            .set_link_index_filter(ifindex)
+            .execute();
+
+        while let Some(addr) = iface_addrs.try_next().await? {
+            for attr in addr.attributes {
+                if let AddressAttribute::Local(ip_addr) = attr {
+                    addrs.insert(ip_addr);
                 }
             }
         }
 
+        let addrs = addrs.into_iter().collect();
         Ok(addrs)
     }
 }

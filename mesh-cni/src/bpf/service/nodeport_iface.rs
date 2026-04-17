@@ -157,7 +157,7 @@ async fn local_addrs_v4_for_ifaces(
             continue;
         };
 
-        let iface_addrs = nl.get_addrs_from_iface(ifindex).await?;
+        let iface_addrs = nl.get_local_addrs_from_ifindex(ifindex).await?;
         for addr in iface_addrs {
             // TODO: support ipv6
             if let IpAddr::V4(ipv4) = addr {
