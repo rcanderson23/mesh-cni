@@ -6,9 +6,12 @@ use std::os::fd::RawFd;
 use ipnetwork::IpNetwork;
 use regex::Regex;
 use rtnetlink::packet_route::address::{AddressAttribute, AddressMessage};
+use rtnetlink::packet_route::link::NetkitMode;
 use rtnetlink::packet_route::route::{RouteHeader, RouteMetric, RouteScope};
 use rtnetlink::{Handle, packet_route::link::LinkAttribute};
-use rtnetlink::{LinkDummy, LinkUnspec, LinkVeth, LinkVxlan, RouteMessageBuilder};
+use rtnetlink::{
+    LinkDummy, LinkNetkit, LinkUnspec, LinkVxlan, RouteMessageBuilder,
+};
 use tokio_stream::StreamExt;
 
 use crate::{Error, Result};
@@ -207,11 +210,11 @@ impl Netlink {
         self.get_addrs_from_ifindex(link.header.index).await
     }
 
-    /// Create veth pair returning the ifindex for the primary and peer
-    pub async fn create_veth_pair(&self, name: &str, peer_name: &str) -> Result<(u32, u32)> {
+    /// Create netkit pair returning the ifindex for the primary and peer
+    pub async fn create_netkit_pair(&self, name: &str, peer_name: &str) -> Result<(u32, u32)> {
         self.handle
             .link()
-            .add(LinkVeth::new(name, peer_name).up().build())
+            .add(LinkNetkit::new(name, peer_name, NetkitMode::L3).up().build())
             .execute()
             .await?;
 

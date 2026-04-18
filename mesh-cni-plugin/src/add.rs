@@ -5,10 +5,8 @@ use std::{
     path::PathBuf,
 };
 
-use aya::programs::TcAttachType;
 use ipnetwork::IpNetwork;
 use mesh_cni_api::cni::v1::{AddChainedRequest, AddVxlanRequest, DeletePodRequest};
-use mesh_cni_ebpf_meta::BPF_PROGRAM_VXLAN_VETH_EGRESS_TC;
 use mesh_cni_netlink::Netlink;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -18,7 +16,7 @@ use crate::{
     CNI_VERSION, Error,
     client::new_cni_client,
     config::Args,
-    ebpf::{attach_and_pin_links, attach_pod_bpf, unpin_iface_paths},
+    ebpf::{attach_host_netkit_bpf, attach_pod_bpf, unpin_host_netkit_bpf, unpin_iface_paths},
     netns::NetnsRestore,
     response::{Response, Success},
     types::{Input, Interface, Ip},
@@ -157,24 +155,19 @@ async fn add_vxlan(
     let pod_fd = pod_ns.file().as_raw_fd();
     let host_netns_guard = NetnsRestore::current_thread()?;
 
-    let host_veth_name = host_veth_name(container_id);
+    let host_netkit_name = host_veth_name(container_id);
     let tmp_iface_name = tmp_iface_name(container_id);
 
     let nl = Netlink::try_new()?;
-    let (pod_ifindex, host_ifindex) = nl
-        .create_veth_pair(&tmp_iface_name, &host_veth_name)
+    let (host_ifindex, pod_ifindex) = nl
+        .create_netkit_pair(&host_netkit_name, &tmp_iface_name)
         .await?;
-    attach_and_pin_links(
-        &host_veth_name,
-        container_id,
-        BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.path(),
-        TcAttachType::Ingress, // need to be ingress attach coming from the pod netns
-    )?;
+    attach_host_netkit_bpf(&host_netkit_name, container_id)?;
 
     let mut client = match new_cni_client().await {
         Ok(c) => c,
         Err(e) => {
-            let _ = unpin_iface_paths(container_id, &host_veth_name);
+            let _ = unpin_host_netkit_bpf(&host_netkit_name, container_id);
             let _ = nl.delete_link(host_ifindex).await;
             return Err(e);
         }
@@ -190,11 +183,11 @@ async fn add_vxlan(
     {
         Ok(resp) => resp.into_inner(),
         Err(e) => {
-            if let Err(unpin_err) = unpin_iface_paths(container_id, &host_veth_name) {
-                error!(%unpin_err, host_veth_name, "failed to unpin host tc links during vxlan add rollback");
+            if let Err(unpin_err) = unpin_host_netkit_bpf(&host_netkit_name, container_id) {
+                error!(%unpin_err, host_netkit_name, "failed to unpin host tc links during vxlan add rollback");
             }
             if let Err(delete_err) = nl.delete_link(pod_ifindex).await {
-                error!(%delete_err, pod_ifindex, "failed to delete veth pair during vxlan add rollback");
+                error!(%delete_err, pod_ifindex, "failed to delete netkit pair during vxlan add rollback");
             }
             return Err(e.into());
         }
@@ -218,7 +211,6 @@ async fn add_vxlan(
         let nl = Netlink::try_new()?;
         let pod_ifindex = nl.get_link_index_by_name(&tmp_iface_name).await?;
         nl.rename_link(pod_ifindex, iface).await?;
-        attach_pod_bpf(iface, container_id)?;
         nl.set_link_up(pod_ifindex).await?;
 
         nl.set_addr(pod_ifindex, pod_addr).await?;
@@ -240,9 +232,8 @@ async fn add_vxlan(
                 ipv4: vec![resp.ipv4],
             })
             .await;
-        let _ = unpin_iface_paths(container_id, &host_veth_name);
+        let _ = unpin_host_netkit_bpf(&host_netkit_name, container_id);
         let _ = unpin_iface_paths(container_id, iface);
-        let _ = unpin_iface_paths(container_id, "lo");
         let _ = nl.delete_link(host_ifindex).await;
         return Err(e);
     }
@@ -256,7 +247,7 @@ async fn add_vxlan(
                 ..Default::default()
             },
             Interface {
-                name: host_veth_name.clone(),
+                name: host_netkit_name.clone(),
                 sandbox: None,
                 ..Default::default()
             },

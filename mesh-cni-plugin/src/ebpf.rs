@@ -2,32 +2,29 @@ use std::path::{Path, PathBuf};
 
 use aya::programs::links::{FdLink, LinkError, PinnedLink};
 use aya::programs::{SchedClassifier, TcAttachType, tc};
-use mesh_cni_ebpf_meta::{BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC};
+use mesh_cni_ebpf_meta::{
+    BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC,
+    BPF_PROGRAM_VXLAN_VETH_EGRESS_TC,
+};
 use tracing::error;
 
 use crate::MESH_LINK_PREFIX;
 use crate::error::Error;
 
 pub(crate) fn attach_pod_bpf(pod_iface: &str, container_id: &str) -> Result<(), Error> {
-    let mut attached = Vec::new();
-
-    for iface in [pod_iface, "lo"] {
-        if let Err(e) = attach_for_iface(
-            iface,
-            container_id,
-            TcAttachType::Ingress,
-            TcAttachType::Egress,
-        ) {
-            error!(%e, "failed to attach tc programs");
-            for attached_iface in attached {
-                if let Err(u) = unpin_iface_paths(container_id, attached_iface) {
-                    error!(%u, "failed to unpin path");
-                };
-            }
-            return Err(e);
-        }
-        attached.push(iface);
+    if let Err(e) = attach_for_iface(
+        pod_iface,
+        container_id,
+        TcAttachType::Ingress,
+        TcAttachType::Egress,
+    ) {
+        error!(%e, "failed to attach tc programs");
+        if let Err(u) = unpin_iface_paths(container_id, pod_iface) {
+            error!(%u, "failed to unpin path");
+        };
+        return Err(e);
     }
+
     Ok(())
 }
 
@@ -50,27 +47,35 @@ fn unpin_path(path: impl AsRef<Path>) -> Result<(), Error> {
     Ok(())
 }
 
-fn pin_path(container_id: &str, iface: &str, attach_type: TcAttachType) -> PathBuf {
-    let container_id = container_id.replace('/', "_");
-    let iface = iface.replace('/', "_");
-    let link_name = format!("{}_{}", container_id, iface);
+fn attach_type_name(attach_type: TcAttachType) -> &'static str {
     match attach_type {
-        TcAttachType::Ingress => PathBuf::from(BPF_MESH_LINKS_DIR)
-            .join(format!("{}{link_name}_ingress", MESH_LINK_PREFIX)),
-        TcAttachType::Egress => PathBuf::from(BPF_MESH_LINKS_DIR)
-            .join(format!("{}{link_name}_egress", MESH_LINK_PREFIX)),
-        TcAttachType::Custom(_) => PathBuf::from(BPF_MESH_LINKS_DIR)
-            .join(format!("{}{link_name}_custom", MESH_LINK_PREFIX)),
+        TcAttachType::Ingress => "ingress",
+        TcAttachType::Egress => "egress",
+        TcAttachType::Custom(_) => "custom",
     }
+}
+
+fn pin_path(
+    container_id: &str,
+    iface: &str,
+    prog_name: &str,
+    attach_type: TcAttachType,
+) -> PathBuf {
+    let attach_type = attach_type_name(attach_type);
+
+    PathBuf::from(BPF_MESH_LINKS_DIR).join(format!(
+        "{MESH_LINK_PREFIX}{container_id}_{iface}_{prog_name}_{attach_type}"
+    ))
 }
 
 pub(crate) fn attach_and_pin_links(
     iface: &str,
     container_id: &str,
     path: impl AsRef<Path>,
+    prog_name: &str,
     attach_type: TcAttachType,
 ) -> Result<(), Error> {
-    let pin_path = pin_path(container_id, iface, attach_type);
+    let pin_path = pin_path(container_id, iface, prog_name, attach_type);
     if pin_path.try_exists()? {
         return Ok(());
     }
@@ -87,12 +92,65 @@ pub(crate) fn attach_and_pin_links(
     Ok(())
 }
 
-pub(crate) fn unpin_iface_paths(container_id: &str, iface: &str) -> Result<(), Error> {
-    let ingress_path = pin_path(container_id, iface, TcAttachType::Ingress);
-    let egress_path = pin_path(container_id, iface, TcAttachType::Egress);
+fn unpin_program_paths(container_id: &str, iface: &str, prog_name: &str) -> Result<(), Error> {
+    for attach_type in [TcAttachType::Ingress, TcAttachType::Egress] {
+        unpin_path(pin_path(container_id, iface, prog_name, attach_type))?;
+    }
+    Ok(())
+}
 
-    for path in [ingress_path, egress_path] {
-        unpin_path(path)?;
+pub(crate) fn unpin_iface_paths(container_id: &str, iface: &str) -> Result<(), Error> {
+    for prog_name in [BPF_PROGRAM_INGRESS_TC.name(), BPF_PROGRAM_EGRESS_TC.name()] {
+        unpin_program_paths(container_id, iface, prog_name)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn attach_host_netkit_bpf(iface: &str, container_id: &str) -> Result<(), Error> {
+    attach_and_pin_links(
+        iface,
+        container_id,
+        BPF_PROGRAM_INGRESS_TC.path(),
+        BPF_PROGRAM_INGRESS_TC.name(),
+        TcAttachType::Egress,
+    )?;
+    if let Err(e) = attach_and_pin_links(
+        iface,
+        container_id,
+        BPF_PROGRAM_EGRESS_TC.path(),
+        BPF_PROGRAM_EGRESS_TC.name(),
+        TcAttachType::Ingress,
+    ) {
+        if let Err(u) = unpin_host_netkit_bpf(iface, container_id) {
+            error!(%u, "failed to unpin host netkit path");
+        }
+        return Err(e);
+    }
+    if let Err(e) = attach_and_pin_links(
+        iface,
+        container_id,
+        BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.path(),
+        BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.name(),
+        TcAttachType::Ingress,
+    ) {
+        if let Err(u) = unpin_host_netkit_bpf(iface, container_id) {
+            error!(%u, "failed to unpin host netkit path");
+        }
+        return Err(e);
+    }
+    Ok(())
+}
+
+pub(crate) fn unpin_host_netkit_bpf(iface: &str, container_id: &str) -> Result<(), Error> {
+    for (prog_name, attach_type) in [
+        (BPF_PROGRAM_INGRESS_TC.name(), TcAttachType::Egress),
+        (BPF_PROGRAM_EGRESS_TC.name(), TcAttachType::Ingress),
+        (
+            BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.name(),
+            TcAttachType::Ingress,
+        ),
+    ] {
+        unpin_path(pin_path(container_id, iface, prog_name, attach_type))?;
     }
     Ok(())
 }
@@ -107,6 +165,7 @@ fn attach_for_iface(
         iface,
         container_id,
         BPF_PROGRAM_INGRESS_TC.path(),
+        BPF_PROGRAM_INGRESS_TC.name(),
         ingress_attach_type,
     )?;
 
@@ -114,6 +173,7 @@ fn attach_for_iface(
         iface,
         container_id,
         BPF_PROGRAM_EGRESS_TC.path(),
+        BPF_PROGRAM_EGRESS_TC.name(),
         egress_attach_type,
     ) {
         if let Err(u) = unpin_iface_paths(container_id, iface) {

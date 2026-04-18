@@ -10,7 +10,7 @@ use crate::{
     add::host_veth_name,
     client::new_cni_client,
     config::Args,
-    ebpf::unpin_iface_paths,
+    ebpf::{unpin_host_netkit_bpf, unpin_iface_paths},
     netns::NetnsRestore,
     response::{Response, Success},
     types::Input,
@@ -88,8 +88,7 @@ async fn _delete(args: &Args, input: Input) -> Result<Response, Error> {
         for interface in &prev.interfaces {
             unpin_iface_paths(&args.container_id, &interface.name)?;
         }
-        unpin_iface_paths(&args.container_id, "lo")?;
-        unpin_iface_paths(&args.container_id, &host_veth_name(&args.container_id))?;
+        unpin_host_netkit_bpf(&host_veth_name(&args.container_id), &args.container_id)?;
         return Ok(Response::Success(Success {
             cni_version: prev.cni_version,
             interfaces: prev.interfaces,
@@ -102,8 +101,7 @@ async fn _delete(args: &Args, input: Input) -> Result<Response, Error> {
 
     // Chained
     unpin_iface_paths(&args.container_id, &args.ifname)?;
-    unpin_iface_paths(&args.container_id, "lo")?;
-    unpin_iface_paths(&args.container_id, &host_veth_name(&args.container_id))?;
+    unpin_host_netkit_bpf(&host_veth_name(&args.container_id), &args.container_id)?;
 
     let Some(netns) = &args.net_ns else {
         return Ok(Response::Success(Success {
