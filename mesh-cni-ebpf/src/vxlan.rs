@@ -3,7 +3,7 @@ use aya_ebpf::{
         BPF_F_ADJ_ROOM_DECAP_L3_IPV4, BPF_F_ADJ_ROOM_FIXED_GSO, TC_ACT_PIPE, TC_ACT_SHOT,
         bpf_adj_room_mode::BPF_ADJ_ROOM_MAC, bpf_tunnel_key,
     },
-    helpers::generated::{bpf_redirect, bpf_skb_set_tunnel_key},
+    helpers::generated::{bpf_redirect, bpf_redirect_peer, bpf_skb_set_tunnel_key},
     maps::lpm_trie::Key as LpmKey,
     programs::TcContext,
 };
@@ -112,16 +112,42 @@ pub fn try_mesh_cni_vxlan_node_ingress(ctx: TcContext) -> Result<i32, i32> {
     }
 
     let remove_len = ihl + UdpHdr::LEN + VxlanHdr::LEN + EthHdr::LEN;
-    match ctx.adjust_room(
+    ctx.adjust_room(
         -(remove_len as i32),
         BPF_ADJ_ROOM_MAC,
         (BPF_F_ADJ_ROOM_FIXED_GSO | BPF_F_ADJ_ROOM_DECAP_L3_IPV4) as u64,
-    ) {
-        Ok(()) => Ok(TC_ACT_PIPE),
-        Err(rc) => {
-            error!(&ctx, "failed to decapsulate vxlan packet, got {}", rc);
+    )
+    .map_err(|e| {
+        error!(&ctx, "failed to decapsulate vxlan packet, got {}", e);
+        TC_ACT_SHOT
+    })?;
+
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let Ok(ether_type) = ethhdr.ether_type() else {
+        return Ok(TC_ACT_PIPE);
+    };
+    if !matches!(ether_type, EtherType::Ipv4) {
+        return Ok(TC_ACT_PIPE);
+    }
+
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
+
+    let Some(remote) = ROUTER_V4.get(LpmKey::new(32, dst_ip.to_be())).copied() else {
+        return Ok(TC_ACT_PIPE);
+    };
+
+    if remote.route_type != RouteType::LocalPod as u8 {
+        error!(&ctx, "dropping packet for pod not on this node");
+        return Err(TC_ACT_SHOT);
+    }
+
+    match unsafe { bpf_redirect_peer(remote.ifindex, 0) } {
+        rc if rc < 0 => {
+            error!(&ctx, "failed to set tunnel, got {}", rc);
             Err(TC_ACT_SHOT)
         }
+        rc => Ok(rc as i32),
     }
 }
 
