@@ -1,7 +1,5 @@
 use aya_ebpf::{
-    bindings::{TC_ACT_PIPE, TC_ACT_SHOT},
-    helpers::generated::bpf_ktime_get_ns,
-    programs::TcContext,
+    bindings::tcx_action_base::TCX_DROP, helpers::generated::bpf_ktime_get_ns, programs::TcContext,
 };
 use mesh_cni_ebpf_common::{conntrack::TcpFlags, fragment::FragmentKeyV4};
 use network_types::{eth::EthHdr, ip::Ipv4Hdr, sctp::SctpHdr, tcp::TcpHdr, udp::UdpHdr};
@@ -67,20 +65,20 @@ pub(crate) fn l4_header_check(ctx: &TcContext, ipv4hdr: &Ipv4Hdr) -> Result<L4Ch
 
             // Fail close on missing fragments to properly enforce network policy
             let Some(value) = (unsafe { FRAGMENT_V4.get(key).copied() }) else {
-                return Err(TC_ACT_SHOT);
+                return Err(TCX_DROP);
             };
             let now = unsafe { bpf_ktime_get_ns() };
             let age = now.saturating_sub(value.created_ns);
             if age > FRAG_TIMEOUT {
                 let _ = FRAGMENT_V4.remove(key);
-                return Err(TC_ACT_SHOT);
+                return Err(TCX_DROP);
             }
 
             (value.src_port, value.dst_port, false, None)
         } else {
             match ipv4hdr.proto {
                 network_types::ip::IpProto::Tcp => {
-                    let tcphdr: TcpHdr = ctx.load(EthHdr::LEN + ihl).map_err(|_| TC_ACT_PIPE)?;
+                    let tcphdr: TcpHdr = ctx.load(EthHdr::LEN + ihl).map_err(|_| TCX_DROP)?;
                     let syn = tcphdr.syn() == 1;
                     let ack = tcphdr.ack() == 1;
                     let fin = tcphdr.fin() == 1;
@@ -93,7 +91,7 @@ pub(crate) fn l4_header_check(ctx: &TcContext, ipv4hdr: &Ipv4Hdr) -> Result<L4Ch
                     )
                 }
                 network_types::ip::IpProto::Udp => {
-                    let udphdr: UdpHdr = ctx.load(EthHdr::LEN + ihl).map_err(|_| TC_ACT_PIPE)?;
+                    let udphdr: UdpHdr = ctx.load(EthHdr::LEN + ihl).map_err(|_| TCX_DROP)?;
                     (
                         u16::from_be_bytes(udphdr.src),
                         u16::from_be_bytes(udphdr.dst),
@@ -102,7 +100,7 @@ pub(crate) fn l4_header_check(ctx: &TcContext, ipv4hdr: &Ipv4Hdr) -> Result<L4Ch
                     )
                 }
                 network_types::ip::IpProto::Sctp => {
-                    let sctphdr: SctpHdr = ctx.load(EthHdr::LEN + ihl).map_err(|_| TC_ACT_PIPE)?;
+                    let sctphdr: SctpHdr = ctx.load(EthHdr::LEN + ihl).map_err(|_| TCX_DROP)?;
                     (
                         u16::from_be_bytes(sctphdr.src),
                         u16::from_be_bytes(sctphdr.dst),
@@ -110,7 +108,7 @@ pub(crate) fn l4_header_check(ctx: &TcContext, ipv4hdr: &Ipv4Hdr) -> Result<L4Ch
                         None,
                     )
                 }
-                _ => return Err(TC_ACT_PIPE),
+                _ => return Err(TCX_DROP),
             }
         };
 

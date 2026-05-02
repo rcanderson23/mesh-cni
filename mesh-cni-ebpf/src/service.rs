@@ -1,7 +1,10 @@
 use core::mem::offset_of;
 
 use aya_ebpf::{
-    bindings::{BPF_F_MARK_MANGLED_0, BPF_F_PSEUDO_HDR, TC_ACT_PIPE, TC_ACT_SHOT, bpf_sock_addr},
+    bindings::{
+        BPF_F_MARK_MANGLED_0, BPF_F_PSEUDO_HDR, bpf_sock_addr,
+        tcx_action_base::{TCX_DROP, TCX_NEXT},
+    },
     helpers::generated::{bpf_get_prandom_u32, bpf_ktime_get_ns},
     programs::{SockAddrContext, TcContext},
 };
@@ -120,29 +123,27 @@ fn get_position(count: u16) -> u16 {
 // TODO: consider sctp?
 #[inline]
 pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
-    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TCX_NEXT)?;
     let Ok(ether_type) = ethhdr.ether_type() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
     if !matches!(ether_type, EtherType::Ipv4) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TCX_NEXT)?;
     let ihl = ipv4hdr.ihl();
     let orig_dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
     // pass traffic that isn't pointed at IPs assigned to attached ifaces
     // as this could meant for pods
     if unsafe { NODEPORT_LOCAL_ADDRS_V4.get(orig_dst_ip) }.is_none() {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
     let (orig_dst_port, src_port, proto, tcp_flags) = match ipv4hdr.proto {
         IpProto::Tcp => {
-            let tcphdr: TcpHdr = ctx
-                .load(EthHdr::LEN + ihl as usize)
-                .map_err(|_| TC_ACT_PIPE)?;
+            let tcphdr: TcpHdr = ctx.load(EthHdr::LEN + ihl as usize).map_err(|_| TCX_NEXT)?;
             let syn = tcphdr.syn() == 1;
             let ack = tcphdr.ack() == 1;
             let fin = tcphdr.fin() == 1;
@@ -155,9 +156,7 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
             )
         }
         IpProto::Udp => {
-            let udphdr: UdpHdr = ctx
-                .load(EthHdr::LEN + ihl as usize)
-                .map_err(|_| TC_ACT_PIPE)?;
+            let udphdr: UdpHdr = ctx.load(EthHdr::LEN + ihl as usize).map_err(|_| TCX_NEXT)?;
             (
                 u16::from_be_bytes(udphdr.dst),
                 u16::from_be_bytes(udphdr.src),
@@ -165,26 +164,26 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
                 None,
             )
         }
-        _ => return Ok(TC_ACT_PIPE),
+        _ => return Ok(TCX_NEXT),
     };
 
     let nodeport_key = NodePortKey::new(orig_dst_port, proto as u8);
     let Some(service_key) = (unsafe { NODEPORT_SERVICES_V4.get(nodeport_key).copied() }) else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
 
     let Some(service_value) = (unsafe { SERVICES_V4.get(service_key).copied() }) else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
     if service_value.count == 0 {
-        return Err(TC_ACT_SHOT);
+        return Err(TCX_DROP);
     }
     let position = get_position(service_value.count);
 
     let endpoints_value = unsafe {
         match ENDPOINTS_V4.get(EndpointKey::new(service_value.id, position)) {
             Some(value) => value,
-            None => return Ok(TC_ACT_PIPE),
+            None => return Ok(TCX_NEXT),
         }
     };
 
@@ -203,7 +202,7 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
             l4_offset + offset_of!(UdpHdr, dst),
             l4_offset + offset_of!(UdpHdr, check),
         ),
-        _ => return Ok(TC_ACT_PIPE),
+        _ => return Ok(TCX_NEXT),
     };
 
     let src_ip = u32::from_be_bytes(ipv4hdr.src_addr);
@@ -241,14 +240,14 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
         && service_value.count > 1
         && !is_initial_tcp_syn(tcp_flags)
     {
-        return Ok(TC_ACT_SHOT);
+        return Ok(TCX_DROP);
     }
     let next_state = current_state.advance(TcpState::from_packet(proto, tcp_flags, false));
     let conntrack_value =
         NodePortConntrackV4Value::new(new_dst_ip, new_dst_port, proto_u8, next_state, now);
     NODEPORT_CONNTRACK_V4
         .insert(conntrack_key, conntrack_value, 0)
-        .map_err(|_| TC_ACT_PIPE)?;
+        .map_err(|_| TCX_DROP)?;
 
     // Reverse-NAT keys must match reply traffic tuple seen on mesh_pod ingress:
     // backend_ip:backend_port -> client_ip:client_port.
@@ -266,7 +265,7 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
             .insert(rev_nat_key, rev_nat_value, 0)
             .map_err(|_| {
                 error!(&ctx, "failed to insert rev nat key");
-                TC_ACT_PIPE
+                TCX_DROP
             })?;
     }
 
@@ -276,7 +275,7 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
         new_dst_ip as u64,
         4,
     )
-    .map_err(|_| TC_ACT_PIPE)?;
+    .map_err(|_| TCX_DROP)?;
 
     ctx.l4_csum_replace(
         l4_check_offset,
@@ -284,7 +283,7 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
         new_dst_port as u64,
         l4_port_flags,
     )
-    .map_err(|_| TC_ACT_PIPE)?;
+    .map_err(|_| TCX_DROP)?;
 
     ctx.l4_csum_replace(
         l4_check_offset,
@@ -292,38 +291,36 @@ pub fn try_mesh_cni_nodeport_ingress(mut ctx: TcContext) -> Result<i32, i32> {
         new_dst_ip as u64,
         l4_ip_flags,
     )
-    .map_err(|_| TC_ACT_PIPE)?;
+    .map_err(|_| TCX_DROP)?;
 
     ctx.store(dst_ip_offset, &new_dst_ip, 0)
-        .map_err(|_| TC_ACT_PIPE)?;
+        .map_err(|_| TCX_DROP)?;
     ctx.store(dst_port_offset, &new_dst_port, 0)
-        .map_err(|_| TC_ACT_PIPE)?;
+        .map_err(|_| TCX_DROP)?;
 
-    Ok(TC_ACT_PIPE)
+    Ok(TCX_NEXT)
 }
 
 // TODO: implement ipv6
 // TODO: consider sctp?
 #[inline]
 pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
-    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TCX_NEXT)?;
     let Ok(ether_type) = ethhdr.ether_type() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
     if !matches!(ether_type, EtherType::Ipv4) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TCX_NEXT)?;
     let ihl = ipv4hdr.ihl();
     let src_ip = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
     let (src_port, dst_port, proto, tcp_flags) = match ipv4hdr.proto {
         IpProto::Tcp => {
-            let tcphdr: TcpHdr = ctx
-                .load(EthHdr::LEN + ihl as usize)
-                .map_err(|_| TC_ACT_PIPE)?;
+            let tcphdr: TcpHdr = ctx.load(EthHdr::LEN + ihl as usize).map_err(|_| TCX_NEXT)?;
             let syn = tcphdr.syn() == 1;
             let ack = tcphdr.ack() == 1;
             let fin = tcphdr.fin() == 1;
@@ -336,9 +333,7 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
             )
         }
         IpProto::Udp => {
-            let udphdr: UdpHdr = ctx
-                .load(EthHdr::LEN + ihl as usize)
-                .map_err(|_| TC_ACT_PIPE)?;
+            let udphdr: UdpHdr = ctx.load(EthHdr::LEN + ihl as usize).map_err(|_| TCX_NEXT)?;
             (
                 u16::from_be_bytes(udphdr.src),
                 u16::from_be_bytes(udphdr.dst),
@@ -346,7 +341,7 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
                 None,
             )
         }
-        _ => return Ok(TC_ACT_PIPE),
+        _ => return Ok(TCX_NEXT),
     };
 
     let ipv4_offset = EthHdr::LEN;
@@ -364,7 +359,7 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
             l4_offset + offset_of!(UdpHdr, src),
             l4_offset + offset_of!(UdpHdr, check),
         ),
-        _ => return Ok(TC_ACT_PIPE),
+        _ => return Ok(TCX_NEXT),
     };
 
     let l4_ip_flags = proto.l4_ip_flags();
@@ -374,7 +369,7 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
 
     let rev_nat_key = NodePortRevNatV4Key::new_egress(src_ip, dst_ip, src_port, dst_port, proto_u8);
     let Some(rev_nat_value) = (unsafe { NODEPORT_REV_NAT_V4.get(rev_nat_key).copied() }) else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
 
     let client_ip = dst_ip;
@@ -387,7 +382,7 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
         if is_nodeport_conntrack_expired(value, now, proto_u8) {
             let _ = NODEPORT_CONNTRACK_V4.remove(conntrack_key);
             let _ = NODEPORT_REV_NAT_V4.remove(rev_nat_key);
-            return Ok(TC_ACT_SHOT);
+            return Ok(TCX_DROP);
         } else {
             let next_state = value
                 .tcp_state()
@@ -409,7 +404,7 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
         rev_nat_value.src_ip as u64,
         4,
     )
-    .map_err(|_| TC_ACT_PIPE)?;
+    .map_err(|_| TCX_DROP)?;
 
     ctx.l4_csum_replace(
         l4_check_offset,
@@ -417,7 +412,7 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
         rev_nat_value.src_port as u64,
         l4_port_flags,
     )
-    .map_err(|_| TC_ACT_PIPE)?;
+    .map_err(|_| TCX_DROP)?;
 
     ctx.l4_csum_replace(
         l4_check_offset,
@@ -425,14 +420,14 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
         rev_nat_value.src_ip as u64,
         l4_ip_flags,
     )
-    .map_err(|_| TC_ACT_PIPE)?;
+    .map_err(|_| TCX_DROP)?;
 
     ctx.store(src_ip_offset, &rev_nat_value.src_ip, 0)
-        .map_err(|_| TC_ACT_PIPE)?;
+        .map_err(|_| TCX_DROP)?;
     ctx.store(src_port_offset, &rev_nat_value.src_port, 0)
-        .map_err(|_| TC_ACT_PIPE)?;
+        .map_err(|_| TCX_DROP)?;
 
-    Ok(TC_ACT_PIPE)
+    Ok(TCX_NEXT)
 }
 
 #[inline]

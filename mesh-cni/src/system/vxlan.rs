@@ -1,4 +1,8 @@
-use aya::programs::{SchedClassifier, TcAttachType, links::FdLink, tc};
+use aya::programs::{
+    LinkOrder, SchedClassifier,
+    links::FdLink,
+    tc::{self, SchedClassifierAttachment},
+};
 use mesh_cni_netlink::Netlink;
 
 use crate::{
@@ -32,7 +36,13 @@ fn ensure_vxlan_node_ingress_attached(iface: &str) -> Result<()> {
     let _ = tc::qdisc_add_clsact(iface);
 
     let mut prog = SchedClassifier::from_pin(BPF_PROGRAM_VXLAN_NODE_INGRESS_TC.path())?;
-    let link_id = prog.attach(iface, TcAttachType::Ingress)?;
+    let link_id = prog.attach(
+        iface,
+        SchedClassifierAttachment::Tcx {
+            attach_type: tc::TcxAttachType::Ingress,
+            link_order: LinkOrder::default(),
+        },
+    )?;
     let link = prog.take_link(link_id)?;
     let link: FdLink = link.try_into()?;
     link.pin(pin_path)?;

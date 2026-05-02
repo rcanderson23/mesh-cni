@@ -10,9 +10,9 @@ use anyhow::anyhow;
 use aya::{
     maps::{HashMap as AyaHashMap, Map, MapData},
     programs::{
-        SchedClassifier, TcAttachType,
+        LinkOrder, SchedClassifier,
         links::{FdLink, LinkError, PinnedLink},
-        tc,
+        tc::{self, TcxAttachType},
     },
 };
 use mesh_cni_netlink::Netlink;
@@ -89,14 +89,14 @@ async fn reconcile(iface_regex: &Regex, nl: &Netlink) -> Result<()> {
             iface,
             BPF_PROGRAM_NODEPORT_INGRESS_TC,
             NODEPORT_LINK_PREFIX,
-            TcAttachType::Ingress,
+            TcxAttachType::Ingress,
         )?;
         info!(%iface, "attaching egress hook to nodeport interface");
         ensure_tc_attached(
             iface,
             BPF_PROGRAM_NODEPORT_EGRESS_TC,
             NODEPORT_LINK_PREFIX,
-            TcAttachType::Egress,
+            TcxAttachType::Egress,
         )?;
     }
 
@@ -213,24 +213,27 @@ fn ensure_tc_attached(
     iface: &str,
     prog: BpfNamePath,
     prefix: &str,
-    attach_type: TcAttachType,
+    attach_type: TcxAttachType,
 ) -> Result<()> {
     let suffix = match attach_type {
-        TcAttachType::Ingress => INGRESS_LINK_SUFFIX,
-        TcAttachType::Egress => EGRESS_LINK_SUFFIX,
-        TcAttachType::Custom(_) => unreachable!(),
+        TcxAttachType::Ingress => INGRESS_LINK_SUFFIX,
+        TcxAttachType::Egress => EGRESS_LINK_SUFFIX,
     };
     let pin_path = pin_path_for_iface(iface, prefix, suffix);
     if pin_path.try_exists()? {
         return Ok(());
     }
 
-    let _ = tc::qdisc_add_clsact(iface);
-
     let mut prog = SchedClassifier::from_pin(prog.path())?;
 
     info!(%iface, "attaching tc program");
-    let link_id = prog.attach(iface, attach_type)?;
+    let link_id = prog.attach(
+        iface,
+        tc::SchedClassifierAttachment::Tcx {
+            attach_type,
+            link_order: LinkOrder::default(),
+        },
+    )?;
     let link = prog.take_link(link_id)?;
     let link: FdLink = link.try_into()?;
     link.pin(pin_path)?;

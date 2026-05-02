@@ -1,7 +1,7 @@
 use core::net::Ipv4Addr;
 
 use aya_ebpf::{
-    bindings::{TC_ACT_PIPE, TC_ACT_SHOT},
+    bindings::tcx_action_base::{TCX_DROP, TCX_NEXT},
     helpers::bpf_ktime_get_ns,
     maps::lpm_trie::Key as LpmKey,
     programs::TcContext,
@@ -29,15 +29,15 @@ use crate::{
 
 #[inline]
 pub fn try_mesh_cni_egress(ctx: TcContext) -> Result<i32, i32> {
-    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TCX_NEXT)?;
 
     let Ok(ether_type) = ethhdr.ether_type() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
 
     // TODO: handle ipv6
     if !matches!(ether_type, EtherType::Ipv4) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
     handle_ipv4(ctx)
@@ -45,13 +45,13 @@ pub fn try_mesh_cni_egress(ctx: TcContext) -> Result<i32, i32> {
 
 #[inline]
 fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TCX_NEXT)?;
 
     let src_ip = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
     let Ok(proto) = KubeProtocol::try_from(ipv4hdr.proto) else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
     let l4_check = l4_header_check(&ctx, &ipv4hdr)?;
     let src_port = l4_check.src_port;
@@ -62,7 +62,7 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         let key = FragmentKeyV4::new(src_ip, dst_ip, ipv4hdr.id(), proto as u8);
         let now = unsafe { bpf_ktime_get_ns() };
         let value = FragmentValue::new(src_port, dst_port, now);
-        FRAGMENT_V4.insert(key, value, 0).map_err(|_| TC_ACT_SHOT)?;
+        FRAGMENT_V4.insert(key, value, 0).map_err(|_| TCX_DROP)?;
     }
 
     // Let NodePort reply traffic pass policy/identity checks on this hook.
@@ -70,7 +70,7 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     let rev_nat_key =
         NodePortRevNatV4Key::new_egress(src_ip, dst_ip, src_port, dst_port, proto as u8);
     if unsafe { NODEPORT_REV_NAT_V4.get(rev_nat_key) }.is_some() {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
     // LpmTrie expects big endian order for comparisons.
@@ -82,14 +82,14 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
             Ipv4Addr::from_bits(src_ip),
             Ipv4Addr::from_bits(src_ip),
         );
-        return Ok(TC_ACT_SHOT);
+        return Ok(TCX_DROP);
     };
     let dst_id = id_v4(LpmKey::new(32, dst_ip.to_be())).unwrap_or(WORLD_ID);
     let (ct_key, ct_rev) = conntrack_keys(src_ip, dst_ip, src_port, dst_port, proto, src_id);
 
     let now = unsafe { bpf_ktime_get_ns() };
     if conntrack_hit(&ctx, ct_key, ct_rev, now, proto, tcp_flags) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
     if check_identity_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Egress)
@@ -106,7 +106,7 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
             dst_port,
             proto as u8
         );
-        return Ok(TC_ACT_SHOT);
+        return Ok(TCX_DROP);
     }
     if l4_check.should_insert()
         && src_ip != dst_ip
@@ -118,5 +118,5 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     {
         error!(&ctx, "failed to insert into conntrack: {}", e);
     }
-    Ok(TC_ACT_PIPE)
+    Ok(TCX_NEXT)
 }

@@ -1,7 +1,7 @@
 use core::net::Ipv4Addr;
 
 use aya_ebpf::{
-    bindings::{TC_ACT_PIPE, TC_ACT_SHOT},
+    bindings::tcx_action_base::{TCX_DROP, TCX_NEXT, TCX_PASS},
     helpers::bpf_ktime_get_ns,
     maps::lpm_trie::Key as LpmKey,
     programs::TcContext,
@@ -28,15 +28,15 @@ use crate::{
 
 #[inline]
 pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
-    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TCX_PASS)?;
 
     let Ok(ether_type) = ethhdr.ether_type() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_PASS);
     };
 
     // TODO: handle ipv6
     if !matches!(ether_type, EtherType::Ipv4) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_PASS);
     }
 
     handle_ipv4(ctx)
@@ -44,7 +44,7 @@ pub fn try_mesh_cni_ingress(ctx: TcContext) -> Result<i32, i32> {
 
 #[inline]
 fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TCX_PASS)?;
 
     let src_ip = u32::from_be_bytes(ipv4hdr.src_addr);
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
@@ -59,11 +59,11 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
             Ipv4Addr::from_bits(src_ip),
             Ipv4Addr::from_bits(dst_ip),
         );
-        return Ok(TC_ACT_SHOT);
+        return Ok(TCX_DROP);
     };
 
     let Ok(proto) = KubeProtocol::try_from(ipv4hdr.proto) else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_PASS);
     };
 
     let l4_check = l4_header_check(&ctx, &ipv4hdr)?;
@@ -75,14 +75,14 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
         let key = FragmentKeyV4::new(src_ip, dst_ip, ipv4hdr.id(), proto as u8);
         let now = unsafe { bpf_ktime_get_ns() };
         let value = FragmentValue::new(src_port, dst_port, now);
-        FRAGMENT_V4.insert(key, value, 0).map_err(|_| TC_ACT_SHOT)?;
+        FRAGMENT_V4.insert(key, value, 0).map_err(|_| TCX_DROP)?;
     }
 
     let (ct_key, ct_rev) = conntrack_keys(src_ip, dst_ip, src_port, dst_port, proto, dst_id);
 
     let now = unsafe { bpf_ktime_get_ns() };
     if conntrack_hit(&ctx, ct_key, ct_rev, now, proto, tcp_flags) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
     if check_identity_policy(src_id, dst_id, dst_port, proto, PolicyDirection::Ingress)
         == Action::Deny
@@ -98,7 +98,7 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
             dst_port,
             proto as u8
         );
-        return Ok(TC_ACT_SHOT);
+        return Ok(TCX_DROP);
     }
 
     if l4_check.should_insert()
@@ -111,5 +111,5 @@ fn handle_ipv4(ctx: TcContext) -> Result<i32, i32> {
     {
         error!(&ctx, "failed to insert into conntrack: {}", e);
     }
-    Ok(TC_ACT_PIPE)
+    Ok(TCX_NEXT)
 }

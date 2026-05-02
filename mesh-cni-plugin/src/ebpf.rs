@@ -1,23 +1,20 @@
 use std::path::{Path, PathBuf};
 
-use aya::programs::links::{FdLink, LinkError, PinnedLink};
-use aya::programs::{SchedClassifier, TcAttachType, tc};
+use aya::programs::{
+    LinkOrder, SchedClassifier, TcxAttachType,
+    links::{FdLink, LinkError, PinnedLink},
+    tc::{NetkitAttachType, SchedClassifierAttachment},
+};
 use mesh_cni_ebpf_meta::{
     BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC,
     BPF_PROGRAM_VXLAN_VETH_EGRESS_TC,
 };
 use tracing::error;
 
-use crate::MESH_LINK_PREFIX;
-use crate::error::Error;
+use crate::{MESH_LINK_PREFIX, error::Error};
 
 pub(crate) fn attach_pod_bpf(pod_iface: &str, container_id: &str) -> Result<(), Error> {
-    if let Err(e) = attach_for_iface(
-        pod_iface,
-        container_id,
-        TcAttachType::Ingress,
-        TcAttachType::Egress,
-    ) {
+    if let Err(e) = attach_for_iface(pod_iface, container_id) {
         error!(%e, "failed to attach tc programs");
         if let Err(u) = unpin_iface_paths(container_id, pod_iface) {
             error!(%u, "failed to unpin path");
@@ -47,11 +44,30 @@ fn unpin_path(path: impl AsRef<Path>) -> Result<(), Error> {
     Ok(())
 }
 
-fn attach_type_name(attach_type: TcAttachType) -> &'static str {
+fn attach_type_name(attach_type: &SchedClassifierAttachment) -> &'static str {
     match attach_type {
-        TcAttachType::Ingress => "ingress",
-        TcAttachType::Egress => "egress",
-        TcAttachType::Custom(_) => "custom",
+        SchedClassifierAttachment::Tc {
+            attach_type,
+            options: _,
+        } => match attach_type {
+            aya::programs::TcAttachType::Ingress => "ingress",
+            aya::programs::TcAttachType::Egress => "egress",
+            aya::programs::TcAttachType::Custom(_) => "custom",
+        },
+        SchedClassifierAttachment::Tcx {
+            attach_type,
+            link_order: _,
+        } => match attach_type {
+            aya::programs::TcxAttachType::Ingress => "ingress",
+            aya::programs::TcxAttachType::Egress => "egress",
+        },
+        SchedClassifierAttachment::Netkit {
+            attach_type,
+            link_order: _,
+        } => match attach_type {
+            NetkitAttachType::Primary => "primary",
+            NetkitAttachType::Peer => "peer",
+        },
     }
 }
 
@@ -59,7 +75,7 @@ fn pin_path(
     container_id: &str,
     iface: &str,
     prog_name: &str,
-    attach_type: TcAttachType,
+    attach_type: &SchedClassifierAttachment,
 ) -> PathBuf {
     let attach_type = attach_type_name(attach_type);
 
@@ -73,16 +89,14 @@ pub(crate) fn attach_and_pin_links(
     container_id: &str,
     path: impl AsRef<Path>,
     prog_name: &str,
-    attach_type: TcAttachType,
+    attach_type: SchedClassifierAttachment,
 ) -> Result<(), Error> {
-    let pin_path = pin_path(container_id, iface, prog_name, attach_type);
+    let pin_path = pin_path(container_id, iface, prog_name, &attach_type);
     if pin_path.try_exists()? {
         return Ok(());
     }
 
     let mut prog = SchedClassifier::from_pin(path)?;
-
-    let _ = tc::qdisc_add_clsact(iface);
 
     let link_id = prog.attach(iface, attach_type)?;
 
@@ -93,8 +107,25 @@ pub(crate) fn attach_and_pin_links(
 }
 
 fn unpin_program_paths(container_id: &str, iface: &str, prog_name: &str) -> Result<(), Error> {
-    for attach_type in [TcAttachType::Ingress, TcAttachType::Egress] {
-        unpin_path(pin_path(container_id, iface, prog_name, attach_type))?;
+    for attach_type in [
+        SchedClassifierAttachment::Netkit {
+            attach_type: NetkitAttachType::Primary,
+            link_order: LinkOrder::default(),
+        },
+        SchedClassifierAttachment::Netkit {
+            attach_type: NetkitAttachType::Peer,
+            link_order: LinkOrder::default(),
+        },
+        SchedClassifierAttachment::Tcx {
+            attach_type: TcxAttachType::Ingress,
+            link_order: LinkOrder::default(),
+        },
+        SchedClassifierAttachment::Tcx {
+            attach_type: TcxAttachType::Egress,
+            link_order: LinkOrder::default(),
+        },
+    ] {
+        unpin_path(pin_path(container_id, iface, prog_name, &attach_type))?;
     }
     Ok(())
 }
@@ -112,14 +143,20 @@ pub(crate) fn attach_host_netkit_bpf(iface: &str, container_id: &str) -> Result<
         container_id,
         BPF_PROGRAM_INGRESS_TC.path(),
         BPF_PROGRAM_INGRESS_TC.name(),
-        TcAttachType::Egress,
+        SchedClassifierAttachment::Netkit {
+            attach_type: NetkitAttachType::Primary,
+            link_order: LinkOrder::default(),
+        },
     )?;
     if let Err(e) = attach_and_pin_links(
         iface,
         container_id,
         BPF_PROGRAM_EGRESS_TC.path(),
         BPF_PROGRAM_EGRESS_TC.name(),
-        TcAttachType::Ingress,
+        SchedClassifierAttachment::Netkit {
+            attach_type: NetkitAttachType::Peer,
+            link_order: LinkOrder::default(),
+        },
     ) {
         if let Err(u) = unpin_host_netkit_bpf(iface, container_id) {
             error!(%u, "failed to unpin host netkit path");
@@ -131,36 +168,58 @@ pub(crate) fn attach_host_netkit_bpf(iface: &str, container_id: &str) -> Result<
         container_id,
         BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.path(),
         BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.name(),
-        TcAttachType::Ingress,
+        SchedClassifierAttachment::Netkit {
+            attach_type: NetkitAttachType::Peer,
+            link_order: LinkOrder::default(),
+        },
     ) {
         if let Err(u) = unpin_host_netkit_bpf(iface, container_id) {
             error!(%u, "failed to unpin host netkit path");
         }
         return Err(e);
     }
+
     Ok(())
 }
 
 pub(crate) fn unpin_host_netkit_bpf(iface: &str, container_id: &str) -> Result<(), Error> {
     for (prog_name, attach_type) in [
-        (BPF_PROGRAM_INGRESS_TC.name(), TcAttachType::Egress),
-        (BPF_PROGRAM_EGRESS_TC.name(), TcAttachType::Ingress),
+        (
+            BPF_PROGRAM_INGRESS_TC.name(),
+            SchedClassifierAttachment::Netkit {
+                attach_type: NetkitAttachType::Primary,
+                link_order: LinkOrder::default(),
+            },
+        ),
+        (
+            BPF_PROGRAM_EGRESS_TC.name(),
+            SchedClassifierAttachment::Netkit {
+                attach_type: NetkitAttachType::Peer,
+                link_order: LinkOrder::default(),
+            },
+        ),
         (
             BPF_PROGRAM_VXLAN_VETH_EGRESS_TC.name(),
-            TcAttachType::Ingress,
+            SchedClassifierAttachment::Netkit {
+                attach_type: NetkitAttachType::Peer,
+                link_order: LinkOrder::default(),
+            },
         ),
     ] {
-        unpin_path(pin_path(container_id, iface, prog_name, attach_type))?;
+        unpin_path(pin_path(container_id, iface, prog_name, &attach_type))?;
     }
     Ok(())
 }
 
-fn attach_for_iface(
-    iface: &str,
-    container_id: &str,
-    ingress_attach_type: TcAttachType,
-    egress_attach_type: TcAttachType,
-) -> Result<(), Error> {
+fn attach_for_iface(iface: &str, container_id: &str) -> Result<(), Error> {
+    let ingress_attach_type = SchedClassifierAttachment::Tcx {
+        attach_type: aya::programs::TcxAttachType::Ingress,
+        link_order: LinkOrder::default(),
+    };
+    let egress_attach_type = SchedClassifierAttachment::Tcx {
+        attach_type: aya::programs::TcxAttachType::Egress,
+        link_order: LinkOrder::default(),
+    };
     attach_and_pin_links(
         iface,
         container_id,
