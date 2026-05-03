@@ -1,4 +1,4 @@
-use aya::programs::{SchedClassifier, TcAttachType, links::FdLink, tc};
+use aya::programs::{LinkOrder, SchedClassifier, links::FdLink, tc, tc::SchedClassifierAttachment};
 use ipnetwork::IpNetwork;
 use mesh_cni_ebpf_meta::BPF_PROGRAM_HOST_ROUTER_EGRESS_TC;
 use mesh_cni_netlink::Netlink;
@@ -34,10 +34,15 @@ fn ensure_route_ebpf_attached(iface: &str) -> Result<()> {
         return Ok(());
     }
 
-    let _ = tc::qdisc_add_clsact(iface);
-
     let mut prog = SchedClassifier::from_pin(BPF_PROGRAM_HOST_ROUTER_EGRESS_TC.path())?;
-    let link_id = prog.attach(iface, TcAttachType::Egress)?;
+
+    let link_id = prog.attach(
+        iface,
+        SchedClassifierAttachment::Tcx {
+            attach_type: tc::TcxAttachType::Egress,
+            link_order: LinkOrder::default(),
+        },
+    )?;
     let link = prog.take_link(link_id)?;
     let link: FdLink = link.try_into()?;
     link.pin(pin_path)?;

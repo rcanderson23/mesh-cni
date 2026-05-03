@@ -4,8 +4,10 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::Result;
-use crate::types::{Dns, Interface, Ip, Route};
+use crate::{
+    Result,
+    types::{Dns, Interface, Ip, Route},
+};
 
 #[derive(Serialize, Deserialize)]
 pub enum Response {

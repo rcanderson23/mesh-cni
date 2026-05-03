@@ -1,7 +1,9 @@
 use aya_ebpf::{
     bindings::{
-        BPF_F_ADJ_ROOM_DECAP_L3_IPV4, BPF_F_ADJ_ROOM_FIXED_GSO, TC_ACT_PIPE, TC_ACT_SHOT,
-        bpf_adj_room_mode::BPF_ADJ_ROOM_MAC, bpf_tunnel_key,
+        BPF_F_ADJ_ROOM_DECAP_L3_IPV4, BPF_F_ADJ_ROOM_FIXED_GSO,
+        bpf_adj_room_mode::BPF_ADJ_ROOM_MAC,
+        bpf_tunnel_key,
+        tcx_action_base::{TCX_DROP, TCX_NEXT},
     },
     helpers::generated::{bpf_redirect, bpf_redirect_peer, bpf_skb_set_tunnel_key},
     maps::lpm_trie::Key as LpmKey,
@@ -24,23 +26,23 @@ const VXLAN_PORT: u16 = 4789;
 // TODO: implement ipv6
 #[inline]
 pub fn try_mesh_cni_vxlan_veth_egress(ctx: TcContext) -> Result<i32, i32> {
-    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TCX_NEXT)?;
     let Ok(ether_type) = ethhdr.ether_type() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
     if !matches!(ether_type, EtherType::Ipv4) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TCX_NEXT)?;
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
     let Some(remote) = ROUTER_V4.get(LpmKey::new(32, dst_ip.to_be())).copied() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
 
     if remote.route_type != RouteType::RemotePod as u8 {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
     let mut key = bpf_tunnel_key {
@@ -64,12 +66,12 @@ pub fn try_mesh_cni_vxlan_veth_egress(ctx: TcContext) -> Result<i32, i32> {
     } {
         rc if rc < 0 => {
             error!(&ctx, "failed to set tunnel, got {}", rc);
-            Err(TC_ACT_SHOT)
+            Err(TCX_DROP)
         }
         _ => match unsafe { bpf_redirect(remote.ifindex, 0) } {
             rc if rc < 0 => {
                 error!(&ctx, "failed to redirect packet, got {}", rc);
-                Err(TC_ACT_SHOT)
+                Err(TCX_DROP)
             }
             rc => Ok(rc as i32),
         },
@@ -79,36 +81,36 @@ pub fn try_mesh_cni_vxlan_veth_egress(ctx: TcContext) -> Result<i32, i32> {
 // TODO: implement ipv6
 #[inline]
 pub fn try_mesh_cni_vxlan_node_ingress(ctx: TcContext) -> Result<i32, i32> {
-    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TCX_NEXT)?;
     let Ok(ether_type) = ethhdr.ether_type() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
     if !matches!(ether_type, EtherType::Ipv4) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TCX_NEXT)?;
     if !matches!(ipv4hdr.proto, IpProto::Udp) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
     let ihl = ipv4hdr.ihl() as usize;
     let udp_offset = EthHdr::LEN + ihl;
-    let udphdr: UdpHdr = ctx.load(udp_offset).map_err(|_| TC_ACT_PIPE)?;
+    let udphdr: UdpHdr = ctx.load(udp_offset).map_err(|_| TCX_NEXT)?;
     let dst_port = u16::from_be_bytes(udphdr.dst);
     if dst_port != VXLAN_PORT {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
     let vxlan_offset = udp_offset + UdpHdr::LEN;
-    let vxlanhdr: VxlanHdr = ctx.load(vxlan_offset).map_err(|_| TC_ACT_PIPE)?;
+    let vxlanhdr: VxlanHdr = ctx.load(vxlan_offset).map_err(|_| TCX_NEXT)?;
     if (vxlanhdr.flags & VXLAN_I_FLAG) == 0 {
         warn!(&ctx, "dropping vxlan packet without valid I flag");
-        return Ok(TC_ACT_SHOT);
+        return Ok(TCX_DROP);
     }
 
     if vxlanhdr.vni() != 1 {
-        return Ok(TC_ACT_SHOT);
+        return Ok(TCX_DROP);
     }
 
     let remove_len = ihl + UdpHdr::LEN + VxlanHdr::LEN + EthHdr::LEN;
@@ -119,33 +121,33 @@ pub fn try_mesh_cni_vxlan_node_ingress(ctx: TcContext) -> Result<i32, i32> {
     )
     .map_err(|e| {
         error!(&ctx, "failed to decapsulate vxlan packet, got {}", e);
-        TC_ACT_SHOT
+        TCX_DROP
     })?;
 
-    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TCX_NEXT)?;
     let Ok(ether_type) = ethhdr.ether_type() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
     if !matches!(ether_type, EtherType::Ipv4) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TCX_NEXT)?;
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
     let Some(remote) = ROUTER_V4.get(LpmKey::new(32, dst_ip.to_be())).copied() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
 
     if remote.route_type != RouteType::LocalPod as u8 {
         error!(&ctx, "dropping packet for pod not on this node");
-        return Err(TC_ACT_SHOT);
+        return Err(TCX_DROP);
     }
 
     match unsafe { bpf_redirect_peer(remote.ifindex, 0) } {
         rc if rc < 0 => {
             error!(&ctx, "failed to set tunnel, got {}", rc);
-            Err(TC_ACT_SHOT)
+            Err(TCX_DROP)
         }
         rc => Ok(rc as i32),
     }
@@ -154,26 +156,26 @@ pub fn try_mesh_cni_vxlan_node_ingress(ctx: TcContext) -> Result<i32, i32> {
 // TODO: implement ipv6
 #[inline]
 pub fn try_mesh_cni_host_router_egress(ctx: TcContext) -> Result<i32, i32> {
-    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TC_ACT_PIPE)?;
+    let ethhdr: EthHdr = ctx.load(0).map_err(|_| TCX_NEXT)?;
     let Ok(ether_type) = ethhdr.ether_type() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
     if !matches!(ether_type, EtherType::Ipv4) {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     }
 
-    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TC_ACT_PIPE)?;
+    let ipv4hdr: Ipv4Hdr = ctx.load(EthHdr::LEN).map_err(|_| TCX_NEXT)?;
     let dst_ip = u32::from_be_bytes(ipv4hdr.dst_addr);
 
     let Some(remote) = ROUTER_V4.get(LpmKey::new(32, dst_ip.to_be())).copied() else {
-        return Ok(TC_ACT_PIPE);
+        return Ok(TCX_NEXT);
     };
 
     match remote.route_type {
         x if x == RouteType::LocalPod as u8 => match unsafe { bpf_redirect(remote.ifindex, 0) } {
             rc if rc < 0 => {
                 error!(&ctx, "failed to redirect local packet, got {}", rc);
-                Err(TC_ACT_SHOT)
+                Err(TCX_DROP)
             }
             rc => Ok(rc as i32),
         },
@@ -203,12 +205,12 @@ pub fn try_mesh_cni_host_router_egress(ctx: TcContext) -> Result<i32, i32> {
             } {
                 rc if rc < 0 => {
                     error!(&ctx, "failed to set tunnel, got {}", rc);
-                    Err(TC_ACT_SHOT)
+                    Err(TCX_DROP)
                 }
                 _ => match unsafe { bpf_redirect(remote.ifindex, 0) } {
                     rc if rc < 0 => {
                         error!(&ctx, "failed to redirect packet, got {}", rc);
-                        Err(TC_ACT_SHOT)
+                        Err(TCX_DROP)
                     }
                     rc => Ok(rc as i32),
                 },
@@ -216,7 +218,7 @@ pub fn try_mesh_cni_host_router_egress(ctx: TcContext) -> Result<i32, i32> {
         }
         unknown => {
             error!(&ctx, "unknown route type {}", unknown);
-            Err(TC_ACT_SHOT)
+            Err(TCX_DROP)
         }
     }
 }

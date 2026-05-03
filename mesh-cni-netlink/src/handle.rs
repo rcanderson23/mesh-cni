@@ -1,16 +1,19 @@
-use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::num::NonZero;
-use std::os::fd::RawFd;
+use std::{
+    collections::HashSet,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    num::NonZero,
+    os::fd::RawFd,
+};
 
 use ipnetwork::IpNetwork;
 use regex::Regex;
-use rtnetlink::packet_route::address::{AddressAttribute, AddressMessage};
-use rtnetlink::packet_route::link::NetkitMode;
-use rtnetlink::packet_route::route::{RouteHeader, RouteMetric, RouteScope};
-use rtnetlink::{Handle, packet_route::link::LinkAttribute};
 use rtnetlink::{
-    LinkDummy, LinkNetkit, LinkUnspec, LinkVxlan, RouteMessageBuilder,
+    Handle, LinkDummy, LinkNetkit, LinkUnspec, LinkVxlan, RouteMessageBuilder,
+    packet_route::{
+        address::{AddressAttribute, AddressMessage},
+        link::{LinkAttribute, NetkitMode},
+        route::{RouteHeader, RouteMetric, RouteScope},
+    },
 };
 use tokio_stream::StreamExt;
 
@@ -214,7 +217,11 @@ impl Netlink {
     pub async fn create_netkit_pair(&self, name: &str, peer_name: &str) -> Result<(u32, u32)> {
         self.handle
             .link()
-            .add(LinkNetkit::new(name, peer_name, NetkitMode::L3).up().build())
+            .add(
+                LinkNetkit::new(name, peer_name, NetkitMode::L3)
+                    .up()
+                    .build(),
+            )
             .execute()
             .await?;
 
