@@ -1,4 +1,5 @@
 pub mod conntrack;
+pub mod hostport;
 pub mod ip;
 pub mod loader;
 pub mod policy;
@@ -25,7 +26,10 @@ pub use mesh_cni_ebpf_meta::{
     BPF_PROGRAM_NODEPORT_EGRESS_TC, BPF_PROGRAM_NODEPORT_INGRESS_TC,
     BPF_PROGRAM_VXLAN_NODE_INGRESS_TC, BPF_PROGRAM_VXLAN_VETH_EGRESS_TC, BpfNamePath,
 };
-use mesh_cni_ebpf_meta::{BPF_MAP_IFINDEX_V4, BPF_PROGRAM_HOST_ROUTER_EGRESS_TC};
+use mesh_cni_ebpf_meta::{
+    BPF_MAP_HOSTPORT_V4, BPF_MAP_IFINDEX_V4, BPF_PROGRAM_HOST_ROUTER_EGRESS_TC,
+    BPF_PROGRAM_HOSTPORT_INGRESS_TC,
+};
 
 use crate::{Result, bpf::ip::LpmKeyNetwork};
 
@@ -55,13 +59,14 @@ pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 10] = [
     BPF_MAP_ROUTER_V4,
 ];
 
-pub(crate) const HOSTPORT_MAPS_LIST: [BpfNamePath; 1] = [BPF_MAP_IFINDEX_V4];
+pub(crate) const HOSTPORT_MAPS_LIST: [BpfNamePath; 2] = [BPF_MAP_IFINDEX_V4, BPF_MAP_HOSTPORT_V4];
 
-pub(crate) const TC_PROG_LIST: [BpfNamePath; 4] = [
+pub(crate) const TC_PROG_LIST: [BpfNamePath; 5] = [
     BPF_PROGRAM_INGRESS_TC,
     BPF_PROGRAM_EGRESS_TC,
     BPF_PROGRAM_NODEPORT_INGRESS_TC,
     BPF_PROGRAM_NODEPORT_EGRESS_TC,
+    BPF_PROGRAM_HOSTPORT_INGRESS_TC,
 ];
 
 pub(crate) const TC_VXLAN_PROG_LIST: [BpfNamePath; 3] = [

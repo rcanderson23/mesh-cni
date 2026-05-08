@@ -18,7 +18,7 @@ use crate::{
         BPF_MAP_ENDPOINTS_V4, BPF_MAP_ENDPOINTS_V6, BPF_MAP_NODEPORT_SERVICES_V4,
         BPF_MAP_SERVICES_V4, BPF_MAP_SERVICES_V6,
     },
-    config::NodePortSettings,
+    config::{CniMode, NodePortSettings},
 };
 type ServiceMapV4 = HashMap<MapData, ServiceKeyV4, ServiceValue>;
 type ServiceMapV6 = HashMap<MapData, ServiceKeyV6, ServiceValue>;
@@ -30,6 +30,7 @@ pub async fn run<SE4, SE6, NP>(
     kube_client: Client,
     service_bpf_state: ServiceEndpointState<SE4, SE6, NP>,
     node_port_settings: NodePortSettings,
+    cni_mode: CniMode,
     cancel: CancellationToken,
 ) -> Result<()>
 where
@@ -52,8 +53,12 @@ where
         start_bpf_service_controller(kube_client, service_bpf_state, cancel.child_token());
 
     tokio::spawn(service_controller);
-    nodeport_iface::start_nodeport_iface_reconciler(node_port_settings, cancel.child_token())
-        .await?;
+    nodeport_iface::start_nodeport_iface_reconciler(
+        node_port_settings,
+        cni_mode,
+        cancel.child_token(),
+    )
+    .await?;
 
     Ok(())
 }

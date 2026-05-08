@@ -26,17 +26,25 @@ where
     B: ServiceDataplane + Clone + Send + Sync + 'static,
 {
     let service_api: Api<Service> = Api::all(kube_client.clone());
-    let (service_state, service_subscriber) =
-        create_store_and_touched_subscriber(service_api, Some(Duration::from_secs(30))).await?;
+    let (service_state, service_subscriber) = create_store_and_touched_subscriber(
+        service_api,
+        kube::runtime::watcher::Config::default(),
+        Some(Duration::from_secs(30)),
+    )
+    .await?;
 
     let endpoint_slice_api: Api<EndpointSlice> = Api::all(kube_client.clone());
-    let (endpoint_slice_state, endpoint_slice_subscriber) =
-        create_store_and_touched_subscriber(endpoint_slice_api, Some(Duration::from_secs(30)))
-            .await?;
+    let (endpoint_slice_state, endpoint_slice_subscriber) = create_store_and_touched_subscriber(
+        endpoint_slice_api,
+        kube::runtime::watcher::Config::default(),
+        Some(Duration::from_secs(30)),
+    )
+    .await?;
 
     let mesh_endpoint_api = Api::all(kube_client.clone());
     let (mesh_endpoint_state, mesh_endpoint_subscriber) = create_store_and_touched_subscriber(
         mesh_endpoint_api.clone(),
+        kube::runtime::watcher::Config::default(),
         Some(Duration::from_secs(30)),
     )
     .await?;

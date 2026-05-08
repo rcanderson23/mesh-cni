@@ -1,0 +1,25 @@
+[package]
+name = "mesh-cni-hostport-bpf-controller"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+ahash = { workspace = true }
+futures = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+mesh-cni-crds = { path = "../mesh-cni-crds" }
+mesh-cni-ebpf-common = { path = "../mesh-cni-ebpf-common", features = ["user"] }
+mesh-cni-k8s-utils = { path = "../mesh-cni-k8s-utils" }
+opentelemetry = { workspace = true }
+prometheus-client = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+
+[dev-dependencies]
+k8s-openapi = { workspace = true, features = ["v1_34"] }

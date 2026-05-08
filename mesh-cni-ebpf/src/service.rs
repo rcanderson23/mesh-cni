@@ -431,7 +431,11 @@ pub fn try_mesh_cni_nodeport_egress(mut ctx: TcContext) -> Result<i32, i32> {
 }
 
 #[inline]
-fn is_nodeport_conntrack_expired(value: NodePortConntrackV4Value, now: u64, proto: u8) -> bool {
+pub(crate) fn is_nodeport_conntrack_expired(
+    value: NodePortConntrackV4Value,
+    now: u64,
+    proto: u8,
+) -> bool {
     let timeout = match proto {
         x if x == IpProto::Tcp as u8 => match value.tcp_state() {
             TcpState::Syn => CT_TIMEOUT_TCP_SYN_NS,
@@ -447,11 +451,11 @@ fn is_nodeport_conntrack_expired(value: NodePortConntrackV4Value, now: u64, prot
 }
 
 #[inline]
-fn is_initial_tcp_syn(tcp_flags: Option<TcpFlags>) -> bool {
+pub(crate) fn is_initial_tcp_syn(tcp_flags: Option<TcpFlags>) -> bool {
     matches!(tcp_flags, Some(flags) if flags.syn() && !flags.ack())
 }
 
-trait ProtocolExt {
+pub(crate) trait ProtocolExt {
     fn l4_ip_flags(&self) -> u64;
     fn l4_port_flags(&self) -> u64;
 }

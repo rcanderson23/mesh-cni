@@ -38,26 +38,32 @@ where
         tokio::try_join!(
             create_store_and_touched_subscriber(
                 Api::all(client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
             create_store_and_touched_subscriber(
                 Api::all(client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
             create_store_and_touched_subscriber(
                 Api::all(client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
             create_store_and_touched_subscriber(
                 Api::all(client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
             create_store_and_touched_subscriber(
                 Api::all(client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
             create_store_and_touched_subscriber(
                 Api::all(client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
         )

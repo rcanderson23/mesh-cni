@@ -7,6 +7,7 @@ use aya_ebpf::{
 };
 use mesh_cni_ebpf::{
     egress::try_mesh_cni_egress,
+    hostport::try_mesh_cni_hostport_ingress,
     ingress::try_mesh_cni_ingress,
     service::{
         try_mesh_cni_cgroup_connect4, try_mesh_cni_nodeport_egress, try_mesh_cni_nodeport_ingress,
@@ -76,6 +77,14 @@ pub fn mesh_cni_vxlan_node_ingress(ctx: TcContext) -> i32 {
 #[classifier]
 pub fn mesh_cni_host_router_egress(ctx: TcContext) -> i32 {
     match try_mesh_cni_host_router_egress(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[classifier]
+pub fn mesh_cni_hostport_ingress(ctx: TcContext) -> i32 {
+    match try_mesh_cni_hostport_ingress(ctx) {
         Ok(ret) => ret,
         Err(ret) => ret,
     }

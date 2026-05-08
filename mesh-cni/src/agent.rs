@@ -11,6 +11,7 @@ use crate::{
     Result,
     bpf::{
         self,
+        hostport::HostPortState,
         ip::IpNetworkState,
         policy::{PolicyBpfState, PolicyState},
         service::{ServiceEndpoint, ServiceEndpointState},
@@ -109,10 +110,24 @@ pub async fn start(
         kube_client.clone(),
         state.clone(),
         args.proxy_settings.node_port_settings.clone(),
+        args.cni_settings.mode.clone(),
         cancel.clone(),
     )
     .await?;
     let service_server = http::grpc::service::server(state);
+
+    info!("loading hostport bpf maps");
+    let hostport_map_v4 = bpf::hostport::load_hostport_v4_map()?;
+    let hostport_state = HostPortState::try_new(hostport_map_v4)?;
+
+    info!("starting hostport controller");
+    bpf::hostport::run(
+        kube_client.clone(),
+        hostport_state,
+        args.node_name.clone(),
+        cancel.clone(),
+    )
+    .await?;
 
     info!("starting conntrack cleanup background process");
     let cleanup_handle = tokio::spawn(bpf::conntrack::run_cleanup(cancel.clone()));

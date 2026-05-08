@@ -272,6 +272,7 @@ async fn add_vxlan(
     })
 }
 
+// TODO: consider supporting hostport bpf program which would require host-side ifindex lookup
 async fn add_chained(iface: &str, container_id: &str, netns: &PathBuf) -> Result<(), Error> {
     let pod_ns = netns_rs::get_from_path(netns)?;
     let _host_netns_guard = NetnsRestore::current_thread()?;
