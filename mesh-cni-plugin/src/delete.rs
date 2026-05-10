@@ -10,7 +10,7 @@ use crate::{
     add::host_veth_name,
     client::new_cni_client,
     config::Args,
-    ebpf::{unpin_host_netkit_bpf, unpin_iface_paths},
+    ebpf::{delete_ifindex_v4_map, unpin_host_netkit_bpf, unpin_iface_paths},
     netns::NetnsRestore,
     response::{Response, Success},
     types::Input,
@@ -53,6 +53,7 @@ async fn _delete(args: &Args, input: Input) -> Result<Response, Error> {
         let mut ipv4_addrs = Vec::new();
         for ip in &prev.ips {
             if let IpAddr::V4(ipv4) = ip.address.ip() {
+                delete_ifindex_v4_map(ipv4)?;
                 ipv4_addrs.push(ipv4.octets().to_vec());
             }
         }
@@ -72,6 +73,7 @@ async fn _delete(args: &Args, input: Input) -> Result<Response, Error> {
 
                 for addr in nl.get_iface_addrs(&interface.name).await? {
                     if let IpAddr::V4(ipv4) = addr {
+                        delete_ifindex_v4_map(ipv4)?;
                         ipv4_addrs.push(ipv4.octets().to_vec());
                     }
                 }

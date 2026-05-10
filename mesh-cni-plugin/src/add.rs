@@ -16,7 +16,10 @@ use crate::{
     CNI_VERSION, Error,
     client::new_cni_client,
     config::Args,
-    ebpf::{attach_host_netkit_bpf, attach_pod_bpf, unpin_host_netkit_bpf, unpin_iface_paths},
+    ebpf::{
+        attach_host_netkit_bpf, attach_pod_bpf, unpin_host_netkit_bpf, unpin_iface_paths,
+        upsert_ifindex_v4_map,
+    },
     netns::NetnsRestore,
     response::{Response, Success},
     types::{Input, Interface, Ip},
@@ -144,6 +147,7 @@ async fn _add(args: &Args, input: Input) -> Result<Response, Error> {
     Ok(Response::Success(success))
 }
 
+// TODO: support ipv6
 async fn add_vxlan(
     pod_name: String,
     pod_namespace: String,
@@ -220,6 +224,11 @@ async fn add_vxlan(
 
         nl.add_default_route(pod_ifindex, host_addr).await?;
 
+        match pod_addr {
+            IpAddr::V4(ipv4_addr) => upsert_ifindex_v4_map(ipv4_addr, host_ifindex)?,
+            IpAddr::V6(_) => {} // TODO: implement ipv6
+        }
+
         Ok::<(), Error>(())
     }
     .await
@@ -237,7 +246,6 @@ async fn add_vxlan(
         let _ = nl.delete_link(host_ifindex).await;
         return Err(e);
     }
-    // TODO: support ipv6
 
     Ok(Success {
         interfaces: vec![

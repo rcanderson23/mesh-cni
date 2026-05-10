@@ -61,3 +61,4 @@ pub const BPF_MAP_POLICY_RULESET: BpfNamePath = BpfNamePath::Map("policy_ruleset
 pub const BPF_MAP_POLICY_CIDR_V4: BpfNamePath = BpfNamePath::Map("policy_cidr_v4");
 pub const BPF_MAP_POLICY_CIDR_V6: BpfNamePath = BpfNamePath::Map("policy_cidr_v6");
 pub const BPF_MAP_ROUTER_V4: BpfNamePath = BpfNamePath::Map("router_v4");
+pub const BPF_MAP_IFINDEX_V4: BpfNamePath = BpfNamePath::Map("ifindex_v4");

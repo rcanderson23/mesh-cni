@@ -14,7 +14,6 @@ use aya::{
 };
 use ipnetwork::IpNetwork;
 use mesh_cni_ebpf_common::IdentityId;
-use mesh_cni_ebpf_meta::BPF_PROGRAM_HOST_ROUTER_EGRESS_TC;
 pub use mesh_cni_ebpf_meta::{
     BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MAP_CONNTRACK_V4, BPF_MAP_ENDPOINTS_V4,
     BPF_MAP_ENDPOINTS_V6, BPF_MAP_FRAGMENT_V4, BPF_MAP_IDENTITY_V4, BPF_MAP_IDENTITY_V6,
@@ -26,6 +25,7 @@ pub use mesh_cni_ebpf_meta::{
     BPF_PROGRAM_NODEPORT_EGRESS_TC, BPF_PROGRAM_NODEPORT_INGRESS_TC,
     BPF_PROGRAM_VXLAN_NODE_INGRESS_TC, BPF_PROGRAM_VXLAN_VETH_EGRESS_TC, BpfNamePath,
 };
+use mesh_cni_ebpf_meta::{BPF_MAP_IFINDEX_V4, BPF_PROGRAM_HOST_ROUTER_EGRESS_TC};
 
 use crate::{Result, bpf::ip::LpmKeyNetwork};
 
@@ -54,6 +54,8 @@ pub(crate) const SERVICE_MAPS_LIST: [BpfNamePath; 10] = [
     BPF_MAP_FRAGMENT_V4,
     BPF_MAP_ROUTER_V4,
 ];
+
+pub(crate) const HOSTPORT_MAPS_LIST: [BpfNamePath; 1] = [BPF_MAP_IFINDEX_V4];
 
 pub(crate) const TC_PROG_LIST: [BpfNamePath; 4] = [
     BPF_PROGRAM_INGRESS_TC,

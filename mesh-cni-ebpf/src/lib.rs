@@ -85,6 +85,9 @@ static FRAGMENT_V4: LruHashMap<FragmentKeyV4, FragmentValue> =
 #[map(name = "router_v4")]
 static ROUTER_V4: LpmTrie<u32, RouteV4> = LpmTrie::with_max_entries(65535, 0);
 
+#[map(name = "ifindex_v4")]
+static IFINDEX_V4: HashMap<u32, u32> = HashMap::with_max_entries(65535, 0);
+
 #[inline]
 fn id_v4(ip: LpmKey<u32>) -> Option<IdentityId> {
     IDENTITY_V4.get(&ip).copied()

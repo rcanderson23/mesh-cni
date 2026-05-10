@@ -1,12 +1,18 @@
-use std::path::{Path, PathBuf};
+use std::{
+    net::Ipv4Addr,
+    path::{Path, PathBuf},
+};
 
-use aya::programs::{
-    LinkOrder, SchedClassifier, TcxAttachType,
-    links::{FdLink, LinkError, PinnedLink},
-    tc::{NetkitAttachType, SchedClassifierAttachment},
+use aya::{
+    maps::{HashMap, Map, MapData, MapError},
+    programs::{
+        LinkOrder, SchedClassifier, TcxAttachType,
+        links::{FdLink, LinkError, PinnedLink},
+        tc::{NetkitAttachType, SchedClassifierAttachment},
+    },
 };
 use mesh_cni_ebpf_meta::{
-    BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC,
+    BPF_MAP_IFINDEX_V4, BPF_MESH_LINKS_DIR, BPF_PROGRAM_EGRESS_TC, BPF_PROGRAM_INGRESS_TC,
     BPF_PROGRAM_VXLAN_VETH_EGRESS_TC,
 };
 use tracing::error;
@@ -242,4 +248,33 @@ fn attach_for_iface(iface: &str, container_id: &str) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+pub(crate) fn upsert_ifindex_v4_map(addr: Ipv4Addr, ifindex: u32) -> Result<(), Error> {
+    let mut ifindex_v4_map = load_ifindex_v4_map()?;
+    ifindex_v4_map
+        .insert(addr.to_bits(), ifindex, 0)
+        .map_err(|e| Error::Ebpf(e.to_string()))?;
+    Ok(())
+}
+
+pub(crate) fn delete_ifindex_v4_map(addr: Ipv4Addr) -> Result<(), Error> {
+    let mut ifindex_v4_map = load_ifindex_v4_map()?;
+    if let Err(e) = ifindex_v4_map.remove(&addr.to_bits())
+        && !matches!(e, aya::maps::MapError::KeyNotFound)
+    {
+        return Err(Error::Ebpf(e.to_string()));
+    }
+    Ok(())
+}
+
+fn load_ifindex_v4_map() -> Result<HashMap<MapData, u32, u32>, Error> {
+    let ifindex_v4_map = MapData::from_pin(BPF_MAP_IFINDEX_V4.path())
+        .map_err(|e| Error::Ebpf(format!("failed to load map data from pin: {}", e)))?;
+    let ifindex_v4_map = Map::HashMap(ifindex_v4_map);
+
+    let ifindex_v4_map: HashMap<MapData, u32, u32> = ifindex_v4_map
+        .try_into()
+        .map_err(|e: MapError| Error::Ebpf(format!("failed to convert in hashmap: {}", e)))?;
+    Ok(ifindex_v4_map)
 }

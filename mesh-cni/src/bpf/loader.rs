@@ -17,8 +17,8 @@ use crate::{
     Result,
     bpf::{
         BPF_LINK_CGROUP_CONNECT_V4_PATH, BPF_MESH_LINKS_DIR, BPF_MESH_MAPS_DIR, BPF_MESH_PROG_DIR,
-        BPF_PROGRAM_CGROUP_CONNECT_V4, BpfNamePath, POLICY_MAPS_LIST, SERVICE_MAPS_LIST,
-        TC_PROG_LIST, TC_VXLAN_PROG_LIST,
+        BPF_PROGRAM_CGROUP_CONNECT_V4, BpfNamePath, HOSTPORT_MAPS_LIST, POLICY_MAPS_LIST,
+        SERVICE_MAPS_LIST, TC_PROG_LIST, TC_VXLAN_PROG_LIST,
     },
     config::CniMode,
 };
@@ -51,7 +51,11 @@ pub fn init_bpf(mode: &CniMode) -> Result<()> {
 
 fn load_ebpf() -> Result<Ebpf> {
     let mut loader = EbpfLoader::new();
-    for map in SERVICE_MAPS_LIST.iter().chain(POLICY_MAPS_LIST.iter()) {
+    for map in SERVICE_MAPS_LIST
+        .iter()
+        .chain(POLICY_MAPS_LIST.iter())
+        .chain(HOSTPORT_MAPS_LIST.iter())
+    {
         loader.map_pin_path(map.name(), map.path());
     }
 
