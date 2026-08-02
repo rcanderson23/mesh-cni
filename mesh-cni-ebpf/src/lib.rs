@@ -2,6 +2,7 @@
 
 pub mod egress;
 pub mod fragment;
+pub mod hostport;
 pub mod ingress;
 pub mod l4;
 pub(crate) mod policy;
@@ -16,6 +17,7 @@ use mesh_cni_ebpf_common::{
     IdentityId,
     conntrack::{ConntrackKeyV4, ConntrackValue, NodePortConntrackV4Key, NodePortConntrackV4Value},
     fragment::{FragmentKeyV4, FragmentValue},
+    hostport::{HostPortKeyV4, HostPortValueV4},
     policy::{
         CidrPolicyMapDataV4, CidrPolicyMapDataV6, PolicyIndexKey, PolicyRuleKey, PolicyValue,
         RulesetId,
@@ -87,6 +89,9 @@ static ROUTER_V4: LpmTrie<u32, RouteV4> = LpmTrie::with_max_entries(65535, 0);
 
 #[map(name = "ifindex_v4")]
 static IFINDEX_V4: HashMap<u32, u32> = HashMap::with_max_entries(65535, 0);
+
+#[map(name = "hostport_v4")]
+static HOSTPORT_V4: HashMap<HostPortKeyV4, HostPortValueV4> = HashMap::with_max_entries(65535, 0);
 
 #[inline]
 fn id_v4(ip: LpmKey<u32>) -> Option<IdentityId> {

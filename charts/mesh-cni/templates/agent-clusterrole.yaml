@@ -33,6 +33,12 @@ rules:
   - list
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - patch
+- apiGroups:
   - mesh-cni.dev
   resources:
   - meshendpoints

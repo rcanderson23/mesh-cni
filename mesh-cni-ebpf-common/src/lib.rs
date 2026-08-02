@@ -2,6 +2,7 @@
 
 pub mod conntrack;
 pub mod fragment;
+pub mod hostport;
 pub mod policy;
 pub mod route;
 pub mod service;
@@ -81,6 +82,17 @@ impl TryFrom<&str> for KubeProtocol {
                 "Protocol provided is not a valid kube protocol. Only TCP, UDP, or SCTP allowed",
             ),
         }
+    }
+}
+
+impl TryFrom<Option<&str>> for KubeProtocol {
+    type Error = &'static str;
+
+    fn try_from(value: Option<&str>) -> Result<Self, Self::Error> {
+        let Some(proto) = value else {
+            return Ok(KubeProtocol::Tcp);
+        };
+        KubeProtocol::try_from(proto)
     }
 }
 

@@ -15,6 +15,7 @@ use aya::{
         tc::{self, TcxAttachType},
     },
 };
+use mesh_cni_ebpf_meta::BPF_PROGRAM_HOSTPORT_INGRESS_TC;
 use mesh_cni_netlink::Netlink;
 use regex::Regex;
 use tokio_util::sync::CancellationToken;
@@ -26,17 +27,19 @@ use crate::{
         BPF_MAP_NODEPORT_LOCAL_ADDRS_V4, BPF_MESH_LINKS_DIR, BPF_PROGRAM_NODEPORT_EGRESS_TC,
         BPF_PROGRAM_NODEPORT_INGRESS_TC, BpfNamePath,
     },
-    config::NodePortSettings,
+    config::{CniMode, NodePortSettings},
 };
 
 const HOST_NET_IFACE_DIR: &str = "/sys/class/net";
 const INGRESS_LINK_SUFFIX: &str = "_ingress";
 const EGRESS_LINK_SUFFIX: &str = "_egress";
 const NODEPORT_LINK_PREFIX: &str = "mesh_cni_nodeport_";
+const HOSTPORT_LINK_PREFIX: &str = "mesh_cni_hostport_";
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub async fn start_nodeport_iface_reconciler(
     node_port_settings: NodePortSettings,
+    cni_mode: CniMode,
     cancel: CancellationToken,
 ) -> Result<()> {
     let iface_regex = Regex::new(&node_port_settings.node_port_iface_regex).map_err(|e| {
@@ -53,7 +56,7 @@ pub async fn start_nodeport_iface_reconciler(
 
     let nl = Netlink::try_new()?;
 
-    reconcile(&iface_regex, &nl).await?;
+    reconcile(&iface_regex, &nl, &cni_mode).await?;
 
     let mut interval = tokio::time::interval(RECONCILE_INTERVAL);
     let nl = nl.clone();
@@ -62,7 +65,7 @@ pub async fn start_nodeport_iface_reconciler(
         interval.tick().await;
         // TODO: investigate if this can event driven using rtnetlink
         loop {
-            if let Err(err) = reconcile(&iface_regex, &nl).await {
+            if let Err(err) = reconcile(&iface_regex, &nl, &cni_mode).await {
                 warn!(%err, "nodeport interface reconciliation failed");
             }
             tokio::select! {
@@ -78,7 +81,7 @@ pub async fn start_nodeport_iface_reconciler(
     Ok(())
 }
 
-async fn reconcile(iface_regex: &Regex, nl: &Netlink) -> Result<()> {
+async fn reconcile(iface_regex: &Regex, nl: &Netlink, cni_mode: &CniMode) -> Result<()> {
     let desired_ifaces = get_matching_ifaces(iface_regex)?;
     reconcile_local_addrs_v4(&desired_ifaces, nl).await?;
     let current_links = get_pinned_iface_links()?;
@@ -98,6 +101,15 @@ async fn reconcile(iface_regex: &Regex, nl: &Netlink) -> Result<()> {
             NODEPORT_LINK_PREFIX,
             TcxAttachType::Egress,
         )?;
+        if matches!(cni_mode, CniMode::Vxlan) {
+            info!(%iface, "attaching hostport ingress hook to interface");
+            ensure_tc_attached(
+                iface,
+                BPF_PROGRAM_HOSTPORT_INGRESS_TC,
+                HOSTPORT_LINK_PREFIX,
+                TcxAttachType::Ingress,
+            )?;
+        }
     }
 
     for (iface, link_path) in current_links {
@@ -108,7 +120,7 @@ async fn reconcile(iface_regex: &Regex, nl: &Netlink) -> Result<()> {
         info!(
             %iface,
             path = %link_path.display(),
-            "removed stale nodeport tc link"
+            "removed stale tc link"
         );
     }
 
@@ -199,7 +211,9 @@ fn get_pinned_iface_links() -> Result<Vec<(String, PathBuf)>> {
 }
 
 fn iface_name_from_link_file(file_name: &str) -> Option<String> {
-    let name = file_name.strip_prefix(NODEPORT_LINK_PREFIX)?;
+    let name = file_name
+        .strip_prefix(NODEPORT_LINK_PREFIX)
+        .or_else(|| file_name.strip_prefix(HOSTPORT_LINK_PREFIX))?;
     let iface = name
         .strip_suffix(INGRESS_LINK_SUFFIX)
         .or_else(|| name.strip_suffix(EGRESS_LINK_SUFFIX))?;
@@ -276,6 +290,12 @@ mod tests {
     #[test]
     fn iface_name_from_link_file_parses_expected_name_egress() {
         let iface = iface_name_from_link_file("mesh_cni_nodeport_eth0_egress");
+        assert_eq!(iface.as_deref(), Some("eth0"));
+    }
+
+    #[test]
+    fn iface_name_from_link_file_parses_hostport_name() {
+        let iface = iface_name_from_link_file("mesh_cni_hostport_eth0_ingress");
         assert_eq!(iface.as_deref(), Some("eth0"));
     }
 

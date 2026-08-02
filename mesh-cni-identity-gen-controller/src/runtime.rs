@@ -42,6 +42,7 @@ pub async fn start_identity_gen_controller(
             ),
             create_store_and_touched_subscriber(
                 Api::<NetworkPolicy>::all(client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
             create_store_and_subscriber(

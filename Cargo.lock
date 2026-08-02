@@ -1780,6 +1780,7 @@ dependencies = [
  "mesh-cni-crds",
  "mesh-cni-ebpf-common",
  "mesh-cni-ebpf-meta",
+ "mesh-cni-hostport-bpf-controller",
  "mesh-cni-identity-controller",
  "mesh-cni-identity-gen-controller",
  "mesh-cni-k8s-utils",
@@ -1918,6 +1919,27 @@ dependencies = [
 [[package]]
 name = "mesh-cni-ebpf-meta"
 version = "0.1.0"
+
+[[package]]
+name = "mesh-cni-hostport-bpf-controller"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "mesh-cni-crds",
+ "mesh-cni-ebpf-common",
+ "mesh-cni-k8s-utils",
+ "opentelemetry",
+ "prometheus-client",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-opentelemetry",
+]
 
 [[package]]
 name = "mesh-cni-identity-controller"

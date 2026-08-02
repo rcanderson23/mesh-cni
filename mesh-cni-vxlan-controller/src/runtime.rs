@@ -28,8 +28,12 @@ where
     R: VxlanRemoteCidrsDataplane,
 {
     let node_api: Api<Node> = Api::all(kube_client);
-    let (node_store, node_subscriber) =
-        create_store_and_touched_subscriber(node_api, Some(Duration::from_secs(30))).await?;
+    let (node_store, node_subscriber) = create_store_and_touched_subscriber(
+        node_api,
+        kube::runtime::watcher::Config::default(),
+        Some(Duration::from_secs(30)),
+    )
+    .await?;
 
     let context = Arc::new(Context {
         node_name,

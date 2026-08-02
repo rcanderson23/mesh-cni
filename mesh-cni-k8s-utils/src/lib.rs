@@ -144,6 +144,7 @@ where
 // Builds a reflected Store and a touched-object trigger stream from the same watch pipeline.
 pub async fn create_store_and_touched_subscriber<K>(
     api: Api<K>,
+    watcher_config: watcher::Config,
     timeout: Option<Duration>,
 ) -> Result<(Store<K>, TouchedSubscriber<K>)>
 where
@@ -159,7 +160,7 @@ where
     delete_tx.set_await_active(false);
     let stream_delete_tx = delete_tx.clone();
 
-    let stream = watcher(api, watcher::Config::default())
+    let stream = watcher(api, watcher_config)
         .default_backoff()
         .reflect_shared(writer)
         .for_each(move |res| {

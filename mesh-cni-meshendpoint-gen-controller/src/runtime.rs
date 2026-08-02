@@ -30,11 +30,16 @@ pub async fn start_meshendpoint_gen_controller(
 
     let (endpoint_slice_state, endpoint_slice_subscriber) = create_store_and_touched_subscriber(
         endpoint_slice_api.clone(),
+        kube::runtime::watcher::Config::default(),
         Some(Duration::from_secs(30)),
     )
     .await?;
-    let (mesh_endpoint_state, mesh_endpoint_subscriber) =
-        create_store_and_touched_subscriber(mesh_ep_api, Some(Duration::from_secs(30))).await?;
+    let (mesh_endpoint_state, mesh_endpoint_subscriber) = create_store_and_touched_subscriber(
+        mesh_ep_api,
+        kube::runtime::watcher::Config::default(),
+        Some(Duration::from_secs(30)),
+    )
+    .await?;
     let context = Context {
         client: local_client,
         endpoint_slice_state,

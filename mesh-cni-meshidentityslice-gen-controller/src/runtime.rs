@@ -31,18 +31,22 @@ pub async fn start_meshidentityslice_gen_controller(
         tokio::try_join!(
             create_store_and_touched_subscriber(
                 Api::<Pod>::all(source_client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
             create_store_and_touched_subscriber(
                 Api::<Namespace>::all(source_client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
             create_store_and_touched_subscriber(
                 Api::<Namespace>::all(local_client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
             create_store_and_touched_subscriber(
                 Api::<MeshIdentitySlice>::all(local_client.clone()),
+                kube::runtime::watcher::Config::default(),
                 Some(Duration::from_secs(30))
             ),
         )
